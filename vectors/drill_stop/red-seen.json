@@ -5,7 +5,10 @@
  "input": {
   "elapsed_s": 60,
   "free_pct": 70.0,
+  "free_start_pct": 80.0,
+  "held_mb": 0,
   "interrupted": false,
+  "recent": [],
   "state": "RED",
   "step_mb": 512,
   "swap_start_mb": 500.0,

@@ -34,8 +34,10 @@ class FakeChild:
 class World:
     """A fake machine: free falls by step_mb*100/total per step; the supervisor turns AMBER below amber_at."""
 
-    def __init__(self, free=80.0, total=16384, amber_at=None, swap_per_step=0.0, step_mb=512):
+    def __init__(self, free=80.0, total=16384, amber_at=None, swap_per_step=0.0, step_mb=512, used=1.0):
+        """used: the share of held memory that free memory shows (1.0 = all; 0.13 = compressed about 7.5 to 1)."""
         self.free0, self.total, self.amber_at, self.swap_per_step, self.step = free, total, amber_at, swap_per_step, step_mb
+        self.used = used
         self.t = time.time()
         self.child = None
 
@@ -49,10 +51,10 @@ class World:
         return self.child.held if self.child else 0
 
     def reader(self, now):
-        free = self.free0 - self.held() * 100.0 / self.total
+        free = self.free0 - self.held() * self.used * 100.0 / self.total
         state = "AMBER" if self.amber_at is not None and free < self.amber_at else "GREEN"
         return {"free_pct": free, "swap_used_mb": 100 + self.swap_per_step * self.held() / self.step, "state": state,
-                "status_fresh": True}
+                "comp_mb": 900 + self.held() * (1 - self.used), "status_fresh": True}
 
     def factory(self, **kw):
         def make():
@@ -112,10 +114,10 @@ class Drill(TempData):
     def test_swap_growth_and_time_limit(self):
         w = World(swap_per_step=S["slots.amber_swap_growth_mb_30m"] / 2 + 1)
         self.assertTrue(self.run_drill(w)["stop_reason"].startswith("swap +"))
-        w = World(total=10 ** 7)
-        rec = self.run_drill(w, time_limit_s=100)
-        self.assertEqual(rec["stop_reason"], "time limit 100s")
-        self.assertEqual(len(rec["steps"]), 4)
+        w = World(total=10 ** 7)  # far from the floor; the time limit comes before a third-step judgement
+        rec = self.run_drill(w, time_limit_s=60)
+        self.assertEqual(rec["stop_reason"], "time limit 60s")
+        self.assertEqual(len(rec["steps"]), 3)
 
     def test_interrupt_and_error_release_at_once(self):
         released = []
@@ -154,6 +156,51 @@ class Drill(TempData):
         os.remove(os.path.join(self.data, "status.json"))
         r = self.mm("drill", "memory")
         self.assertEqual((r.returncode, r.stdout.strip()), (2, "E_DRILL supervisor status not fresh; fix: mm start, then retry"))
+
+    def test_compressed_memory_stops_as_not_used(self):
+        """The 2026-10-14 live failure on the fake reader: free falls 1/7.5 of the held memory per step. The drill
+        stops after 3 steps with the reason, far below the Mac's memory, and every step records comp_mb."""
+        w = World(free=76.0, used=0.13)
+        rec = self.run_drill(w)
+        self.assertTrue(rec["stop_reason"].startswith("memory not used (compressed?)"), rec["stop_reason"])
+        self.assertEqual(len(rec["steps"]), 3)
+        self.assertEqual(w.child.released, 1)
+        self.assertTrue(all("comp_mb" in x and x["comp_mb"] > 900 for x in rec["steps"]), rec["steps"])
+
+    def test_hard_cap_holds_whatever_free_says(self):
+        """A reader whose free value falls a little each step (never 3 steps under 1 point) and never turns AMBER:
+        only the cap stops it. held never passes (free at the start - floor) of the machine plus one step."""
+        w = World(free=80.0, used=0.4)
+        rec = self.run_drill(w, time_limit_s=10 ** 6)
+        self.assertTrue(rec["stop_reason"].startswith("cap: held"), rec["stop_reason"])
+        room = (80.0 - FLOOR) * w.total / 100.0
+        self.assertLessEqual(max(x["held_mb"] for x in rec["steps"]), room + w.step)
+        self.assertGreater(max(x["held_mb"] for x in rec["steps"]), room, "it stops at the first step past the room")
+        self.assertEqual(w.child.released, 1)
+
+    def test_start_free_unreadable_holds_nothing(self):
+        w = World()
+        first = {"n": 0}
+        real = w.reader
+
+        def reader(now):
+            first["n"] += 1
+            r = real(now)
+            return dict(r, free_pct=None) if first["n"] == 1 else r
+        rec = self.run_drill(w, reader=reader)
+        self.assertTrue(rec["stop_reason"].startswith("cap unknown"), rec["stop_reason"])
+        self.assertEqual(rec["steps"], [])
+
+    def test_fill_is_not_compressible(self):
+        """Every page holds random bytes: zlib cannot shrink a page, and no two pages are equal."""
+        import zlib
+        b = mmdrill.fill(2)
+        self.assertEqual(len(b), 2 << 20)
+        pages = [bytes(b[i:i + 4096]) for i in range(0, len(b), 4096)]
+        self.assertEqual(len(set(pages)), len(pages), "no repeated page")
+        for p in pages[::64]:
+            self.assertGreater(len(zlib.compress(p, 1)), 4000, "a page does not compress")
+        self.assertGreater(len(zlib.compress(bytes(b), 6)), len(b) * 0.99)
 
     def test_real_child_grows_and_releases(self):
         c = mmdrill.Child()

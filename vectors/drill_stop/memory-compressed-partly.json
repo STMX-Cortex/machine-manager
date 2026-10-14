@@ -1,0 +1,38 @@
+{
+ "case": "memory-compressed-partly",
+ "expected": "memory not used (compressed?): held +1536 MB over 3 steps, free fell 1.2 points (< 2.3)",
+ "function": "drill_stop",
+ "input": {
+  "elapsed_s": 60,
+  "free_pct": 70.0,
+  "free_start_pct": 80.0,
+  "held_mb": 1536,
+  "interrupted": false,
+  "recent": [
+   [
+    0,
+    76.0
+   ],
+   [
+    512,
+    75.6
+   ],
+   [
+    1024,
+    75.2
+   ],
+   [
+    1536,
+    74.8
+   ]
+  ],
+  "state": "GREEN",
+  "step_mb": 512,
+  "swap_start_mb": 500.0,
+  "swap_used_mb": 500.0,
+  "time_limit_s": 900,
+  "total_mb": 16384
+ },
+ "settings": "base",
+ "settings_over": {}
+}

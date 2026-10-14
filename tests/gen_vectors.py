@@ -185,7 +185,7 @@ case("expected_wait", "full", {"q": qfull, "medians": {"go-test": 15.0}, "defaul
 
 # ---- drill_stop
 d0 = {"elapsed_s": 60, "time_limit_s": 900, "state": "GREEN", "free_pct": 70.0, "swap_used_mb": 500.0, "swap_start_mb": 500.0,
-      "step_mb": 512, "total_mb": 16384, "interrupted": False}
+      "step_mb": 512, "total_mb": 16384, "interrupted": False, "held_mb": 0, "free_start_pct": 80.0, "recent": []}
 case("drill_stop", "go-on", d0)
 case("drill_stop", "amber-seen", dict(d0, state="AMBER"))
 case("drill_stop", "red-seen", dict(d0, state="RED"))
@@ -195,6 +195,19 @@ case("drill_stop", "swap-growth", dict(d0, swap_used_mb=650.0))
 case("drill_stop", "time-limit", dict(d0, elapsed_s=900))
 case("drill_stop", "interrupted", dict(d0, interrupted=True))
 case("drill_stop", "free-unreadable", dict(d0, free_pct=None))
+# free 80 at the start, floor 45: room 35% of 16384 MB = 5734 MB
+case("drill_stop", "cap-not-reached", dict(d0, free_start_pct=80.0, held_mb=5632))
+case("drill_stop", "cap-unknown", dict(d0, free_start_pct=None))
+case("drill_stop", "cap-reached", dict(d0, free_start_pct=80.0, held_mb=6144))
+case("drill_stop", "memory-not-used", dict(d0, free_start_pct=80.0, held_mb=1536,
+                                           recent=[[0, 76.0], [512, 76.0], [1024, 75.6], [1536, 75.5]]))
+case("drill_stop", "memory-used", dict(d0, free_start_pct=80.0, held_mb=1536,
+                                       recent=[[0, 76.0], [512, 73.0], [1024, 70.0], [1536, 67.0]]))
+# the 2026-10-14 live case: compressed about 7.5 to 1, free fell 1.2 of the 9.4 points the memory should take
+case("drill_stop", "memory-compressed-partly", dict(d0, free_start_pct=80.0, held_mb=1536,
+                                                    recent=[[0, 76.0], [512, 75.6], [1024, 75.2], [1536, 74.8]]))
+case("drill_stop", "two-steps-too-early-to-judge", dict(d0, free_start_pct=80.0, held_mb=1024,
+                                                        recent=[[0, 76.0], [512, 76.0], [1024, 76.0]]))
 
 # ---- parsers
 case("parse_load_line", "busy-minute", {"line": "10-14 09:14 load 347.39 97.03 38.93 free 69% swap 1001.69M comp 2023M sys "

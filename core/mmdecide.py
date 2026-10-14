@@ -393,8 +393,13 @@ def count_state(counts, inp):
 def drill_stop(inp, s):
     """Whether the memory drill must stop before (or after) its next step. It never aims at RED.
     inp: elapsed_s, time_limit_s, state (the supervisor's), free_pct, swap_used_mb, swap_start_mb, step_mb, total_mb
-    (the machine's memory), interrupted. Returns a stop reason or None.
-    The floor is the RED free line + 10 points; a step whose predicted free value would reach it is not taken."""
+    (the machine's memory), interrupted, held_mb (what the drill holds now), free_start_pct (free at the start),
+    recent ([held_mb, free_pct] pairs, oldest first: the start reading, then one per step). Returns a stop reason or None.
+    The floor is the RED free line + 10 points; a step whose predicted free value would reach it is not taken.
+    The cap: the drill never holds more than the room above the floor at the start plus one step, whatever the
+    readings say. And when 3 steps add memory but free falls by less than 1 point, or by less than a quarter of what
+    the added memory takes of the machine, the memory is not being used
+    (compressed or not resident), so the drill stops instead of holding more and more."""
     if inp.get("interrupted"):
         return "interrupted"
     if inp.get("state") in ("AMBER", "RED"):
@@ -409,6 +414,19 @@ def drill_stop(inp, s):
         return "floor: free %.0f%% <= %g%%" % (free, floor)
     if inp.get("total_mb") and free - inp["step_mb"] * 100.0 / inp["total_mb"] <= floor:
         return "floor next: free %.0f%% - one step would reach %g%%" % (free, floor)
+    f0, held = inp.get("free_start_pct"), inp.get("held_mb", 0)
+    if f0 is None or not inp.get("total_mb"):
+        return "cap unknown: free at the start or the machine's memory unreadable"
+    room = max(0.0, (f0 - floor) * inp["total_mb"] / 100.0)
+    if held > room:
+        return "cap: held %d MB > %.0f MB of room above the floor at the start" % (held, room)
+    rec = inp.get("recent") or []
+    if len(rec) >= 4:
+        (h0, fa), (h1, fb) = rec[-4], rec[-1]
+        need = max(1.0, 0.25 * (h1 - h0) * 100.0 / inp["total_mb"])
+        if h1 > h0 and fa is not None and fb is not None and fa - fb < need:
+            return "memory not used (compressed?): held +%d MB over 3 steps, free fell %.1f points (< %.1f)" % (
+                h1 - h0, fa - fb, need)
     sw0, sw = inp.get("swap_start_mb"), inp.get("swap_used_mb")
     if sw0 is not None and sw is not None and sw - sw0 > s["slots.amber_swap_growth_mb_30m"]:
         return "swap +%.0f MB > %g MB" % (sw - sw0, s["slots.amber_swap_growth_mb_30m"])

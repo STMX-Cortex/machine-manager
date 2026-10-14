@@ -2,9 +2,11 @@
 """`mm drill memory`: a controlled memory load that tests the AMBER response and the alert path. It never aims at RED.
 
 Preconditions (else one refusal line): the queue has 0 busy and 0 waiting; the memory guard is alive; the supervisor's
-status is fresh; no other drill runs (a lock). It fills memory in steps inside ONE child process (every page written),
+status is fresh; no other drill runs (a lock). It fills memory in steps inside ONE child process (random bytes in every page, so the compressor cannot shrink them),
 reads after each step, and stops at the first of: the supervisor reports AMBER (or RED), the floor (RED free line + 10
-points, also predicted one step ahead), swap growth over the AMBER line, the time limit, Ctrl-C or SIGTERM. Any stop or
+points, also predicted one step ahead), the cap (never more than the room above the floor at the start plus one step),
+memory not used (3 steps add memory but free falls under 1 point or under a quarter of the added share), swap growth over the AMBER line, the time limit,
+Ctrl-C or SIGTERM. Any stop or
 error kills the child at once, so all its memory goes back. One result file records each step and the outcome.
 Pass: the supervisor reached AMBER, a slot decision line (WOULD or SET) followed, and the alert reached the hook path.
 """
@@ -20,17 +22,28 @@ import mmcore
 import mmdecide
 import mmread
 
-CHILD = r"""
-import sys
-blocks = []
-for line in sys.stdin:
-    n = int(line) << 20
-    b = bytearray(n)
-    for i in range(0, n, 4096):
-        b[i] = 1
-    blocks.append(b)
-    print(sum(len(x) for x in blocks) >> 20, flush=True)
-"""
+MB = 1 << 20
+
+
+def fill(mb):
+    """mb MB that no compressor can shrink: fresh random bytes in every page. (2026-10-14: one written byte per page
+    left the pages almost all zero; the macOS compressor stored them about 7.5 to 1 and the drill held 18 GB of
+    a 16 GB Mac with free memory still at 76%.)"""
+    b = bytearray(mb * MB)
+    for i in range(mb):
+        b[i * MB:(i + 1) * MB] = os.urandom(MB)
+    return b
+
+
+def child_main():
+    """The child's loop: one line in (MB to add), one line out (MB held)."""
+    blocks = []
+    for line in sys.stdin:
+        blocks.append(fill(int(line)))
+        print(sum(len(x) for x in blocks) // MB, flush=True)
+
+
+CHILD = "import sys; sys.path.insert(0, %r); import mmdrill; mmdrill.child_main()" % os.path.dirname(os.path.abspath(__file__))
 
 
 class Child:
@@ -63,7 +76,7 @@ def live_reader(now):
     sample, _ = mmread.memory_sample(now)
     st = mmcore.read_json(mmcore.path("status.json"), {}) or {}
     fresh = now - float(st.get("time", 0)) < 30
-    return {"free_pct": sample.get("free_pct"), "swap_used_mb": sample.get("swap_used_mb"),
+    return {"free_pct": sample.get("free_pct"), "swap_used_mb": sample.get("swap_used_mb"), "comp_mb": sample.get("comp_mb"),
             "state": st.get("state") if fresh else None, "status_fresh": fresh}
 
 
@@ -121,19 +134,22 @@ def _run_locked(profile, s, queue, step_mb, settle_s, time_limit_s, reader, chil
     try:
         child = child_factory()
         held = 0
+        recent = [[0, r0.get("free_pct")]]
         while True:
             r = reader(clock())
             reason = mmdecide.drill_stop({"elapsed_s": clock() - start, "time_limit_s": time_limit_s, "state": r.get("state"),
                                           "free_pct": r.get("free_pct"), "swap_used_mb": r.get("swap_used_mb"),
                                           "swap_start_mb": r0.get("swap_used_mb"), "step_mb": step_mb, "total_mb": total,
-                                          "interrupted": interrupted["v"]}, s)
+                                          "interrupted": interrupted["v"], "held_mb": held,
+                                          "free_start_pct": r0.get("free_pct"), "recent": recent[-4:]}, s)
             if reason:
                 break
             held = child.grow(step_mb)
             sleep(settle_s)
             r = reader(clock())
+            recent.append([held, r.get("free_pct")])
             rec["steps"].append({"t": round(clock() - start, 1), "held_mb": held, "free_pct": r.get("free_pct"),
-                                 "swap_used_mb": r.get("swap_used_mb"), "state": r.get("state")})
+                                 "swap_used_mb": r.get("swap_used_mb"), "comp_mb": r.get("comp_mb"), "state": r.get("state")})
     except KeyboardInterrupt:
         reason = "interrupted"
     except Exception as e:  # any error: release at once, record it

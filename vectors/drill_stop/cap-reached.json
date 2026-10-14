@@ -1,0 +1,21 @@
+{
+ "case": "cap-reached",
+ "expected": "cap: held 6144 MB > 5734 MB of room above the floor at the start",
+ "function": "drill_stop",
+ "input": {
+  "elapsed_s": 60,
+  "free_pct": 70.0,
+  "free_start_pct": 80.0,
+  "held_mb": 6144,
+  "interrupted": false,
+  "recent": [],
+  "state": "GREEN",
+  "step_mb": 512,
+  "swap_start_mb": 500.0,
+  "swap_used_mb": 500.0,
+  "time_limit_s": 900,
+  "total_mb": 16384
+ },
+ "settings": "base",
+ "settings_over": {}
+}

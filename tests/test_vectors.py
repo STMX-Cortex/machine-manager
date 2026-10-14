@@ -83,6 +83,13 @@ class Vectors(unittest.TestCase):
         self.assertEqual(vec("slot_decide", "green-raise-one-step")["expected"]["slots"], 6)
         self.assertIsNone(vec("drill_stop", "go-on")["expected"])
         self.assertEqual(vec("drill_stop", "floor-next-step")["expected"][:10], "floor next")
+        self.assertIsNone(vec("drill_stop", "cap-not-reached")["expected"])
+        self.assertEqual(vec("drill_stop", "cap-reached")["expected"][:4], "cap:")
+        self.assertEqual(vec("drill_stop", "cap-unknown")["expected"][:11], "cap unknown")
+        self.assertEqual(vec("drill_stop", "memory-not-used")["expected"][:15], "memory not used")
+        self.assertIsNone(vec("drill_stop", "memory-used")["expected"])
+        self.assertEqual(vec("drill_stop", "memory-compressed-partly")["expected"][:15], "memory not used")
+        self.assertIsNone(vec("drill_stop", "two-steps-too-early-to-judge")["expected"])
         b = vec("parse_billing", "exponent-number")["expected"]
         self.assertEqual((b["minutes"], b["gross"]), ("1200", "4.800004987"))
         for c in ("env-token", "bearer", "flag", "url-password", "known-prefix", "random-word", "private-key"):

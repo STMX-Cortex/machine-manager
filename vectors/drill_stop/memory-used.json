@@ -1,0 +1,38 @@
+{
+ "case": "memory-used",
+ "expected": null,
+ "function": "drill_stop",
+ "input": {
+  "elapsed_s": 60,
+  "free_pct": 70.0,
+  "free_start_pct": 80.0,
+  "held_mb": 1536,
+  "interrupted": false,
+  "recent": [
+   [
+    0,
+    76.0
+   ],
+   [
+    512,
+    73.0
+   ],
+   [
+    1024,
+    70.0
+   ],
+   [
+    1536,
+    67.0
+   ]
+  ],
+  "state": "GREEN",
+  "step_mb": 512,
+  "swap_start_mb": 500.0,
+  "swap_used_mb": 500.0,
+  "time_limit_s": 900,
+  "total_mb": 16384
+ },
+ "settings": "base",
+ "settings_over": {}
+}
