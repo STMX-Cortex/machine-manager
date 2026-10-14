@@ -159,6 +159,21 @@ class Waiter(HookBase):
         self.assertIn("ATTENTION W1 wake up", out)
         self.assertIsNone(self.hook({"session_id": R1}), "the hook does not repeat what the waiter showed")
 
+    def test_a_clear_does_not_wake_the_waiter(self):
+        self.alert("W3", "ATTENTION", "was bad")
+        self.hook({"session_id": R1})  # seen
+        p = subprocess.Popen(MM + ["wait", "--session", R1, "--poll", "0.2", "--max-seconds", "20"], stdout=subprocess.PIPE,
+                             text=True)
+        time.sleep(0.8)
+        mmcore.AlertStore(mmcore.Settings().load()).clear("W3")
+        self.assertIn("cleared", json.dumps([r.get("why") for r in self.pushed()]), "the clear was pushed")
+        time.sleep(1.2)
+        self.assertIsNone(p.poll(), "the clear did not wake the waiter")
+        self.alert("W4", "ATTENTION", "new problem")
+        out, _ = p.communicate(timeout=10)
+        self.assertEqual(p.returncode, 0)
+        self.assertEqual(out.strip().splitlines(), ["ATTENTION W4 new problem"])
+
     def test_wait_action_only_timeout_and_stale(self):
         self.hook({"session_id": R1})
         self.alert("W2", "ATTENTION")

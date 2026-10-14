@@ -53,6 +53,7 @@ trend_hours = 6  # h
 cache_attention_gb = 30  # GB
 cache_action_gb = 45  # GB
 cache_action_disk_gb = 50  # GB
+sizes_interval_minutes = 30  # min between two size reads of the profile's [sizes] folders
 
 [usage]
 # Agent plan usage (read from a usage state file by the delivery adapter).
@@ -149,6 +150,7 @@ crash_loop_minutes = 15  # min
 watchdog_stale_s = 180  # s without a watchdog run; then an alert and a restart of the watchdog
 resume_paused_after_s = 120  # s of a stale supervisor; then the watchdog continues every paused process
 restart_wait_s = 30  # s that `mm restart` waits for a fresh heartbeat
+start_grace_s = 90  # s after a start or a load in which the watchdog neither restarts the supervisor nor alerts
 
 [safe_mode]
 # Safe mode: automatic actions off, the slot count once lowered to at most this value; readings and alerts go on.

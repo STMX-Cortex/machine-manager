@@ -174,8 +174,9 @@ class Setup(SetupBase):
     def test_example_profile_checks(self):
         r = self.mm("check", "--profile", os.path.join(mmtest.CODE, "profiles", "example.toml"))
         lines = r.stdout.strip().splitlines()
-        self.assertEqual([l for l in lines if not l.startswith("E_PROFILE queue.dir not found")], [],
-                         "the example is valid except its made-up queue folder")
+        self.assertEqual([l for l in lines if not l.startswith(("E_PROFILE queue.dir not found",
+                                                                 "E_COMMAND /opt/example/"))], [],
+                         "the example is valid except its made-up queue folder and tools")
 
 
 CELLAR_PY = "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/bin/python3.14"

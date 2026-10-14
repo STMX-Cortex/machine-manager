@@ -113,6 +113,29 @@ def note_start(now, s):
     return r, unclean, prev
 
 
+def starting_status(now, mid=None):
+    """status.json at the very start, before the first tick (heartbeat tick 0, note "starting"), so the watchdog and
+    the hook see a live start and `mm restart` waits for tick 1."""
+    rec = mmcore.stamp({"kind": "machine", "time": now, "state": "UNKNOWN", "reasons": ["starting"],
+                        "heartbeat": {"pid": os.getpid(), "tick": 0, "note": "starting"}}, mid=mid)
+    mmcore.write_atomic(mmcore.path("status.json"), json.dumps(rec, sort_keys=True))
+
+
+def note_loaded(now):
+    """`mm install` and `mm start` mark the time they load the LaunchAgents (the watchdog's start grace counts from it)."""
+    mmcore.write_atomic(mmcore.path("state", "loaded.json"), json.dumps({"time": now}))
+
+
+def start_ref(now):
+    """The latest of the supervisor's start (state/run.json) and the agents' load (state/loaded.json), or None."""
+    ts = []
+    for f, k in (("run.json", "started"), ("loaded.json", "time")):
+        rec = mmcore.read_json(mmcore.path("state", f), None)
+        if isinstance(rec, dict) and isinstance(rec.get(k), (int, float)) and rec[k] <= now + 5:
+            ts.append(rec[k])
+    return max(ts) if ts else None
+
+
 def note_clean_exit():
     f = mmcore.path("state", "run.json")
     rec = mmcore.read_json(f, None)

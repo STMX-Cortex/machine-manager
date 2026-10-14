@@ -45,6 +45,13 @@ class TempData(unittest.TestCase):
         os.environ.update(MM_DATA=self.data, MM_BASE=os.path.join(self.root, "base"), MM_PROFILE=PROFILE,
                           HOME=os.path.join(self.root, "home"))
         os.makedirs(os.environ["HOME"])
+        # a fake gh: `--version` works, every other call fails (no test reads GitHub)
+        self.fake_gh = os.path.join(self.root, "fake-gh")
+        with open(self.fake_gh, "w") as f:
+            f.write('#!/bin/sh\n[ "$1" = "--version" ] && { echo "gh version 0.0 (fake)"; exit 0; }\nexit 1\n')
+        os.chmod(self.fake_gh, 0o700)
+        self._env.setdefault("MM_GH", os.environ.get("MM_GH"))
+        os.environ["MM_GH"] = self.fake_gh
         self.write_settings(**dict({"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10}, **self.settings_over))
 
     def tearDown(self):

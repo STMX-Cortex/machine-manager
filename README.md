@@ -26,6 +26,9 @@ bin/mm selftest                                         # the quick test suite
 bin/mm install --profile ~/mm-profiles/lab1.toml [--settings my-settings.toml]
 ```
 
+`mm install` resolves each outside command the profile names (gh, the CI guard, the warm-up, the delete commands)
+on your PATH, records it in `install.json`, and gives the LaunchAgents a PATH of those folders plus the system folders.
+`mm check` proves each one resolves there (`E_COMMAND`); `mm check --online` also reads GitHub once with gh (`E_GH`).
 `mm install` writes two LaunchAgents (`<label_prefix>`: the supervisor, kept alive; `<label_prefix>-watchdog`: every
 60 s), adds hook entries to the Claude Code settings file named in the profile (a backup first), and records the
 install in `~/Library/Application Support/machine-manager/install.json`. It refuses unless `mode.observe = true`.
@@ -113,7 +116,7 @@ The data folder stays: its alerts and logs are the record. To return to the stat
 
 A TOML file the tool reads and never writes. Only `name` is required; a section left out turns its part off.
 `profiles/example.toml` shows every section with made-up paths. Sections: `names`, `service` (`label_prefix`, default
-`com.example.machine-manager`; `rollback_notes`), `sizes`, `live_tools` (process names of a live build), `memory_guard`
+`com.example.machine-manager`; `rollback_notes`; `path_extra`, folders for the service PATH), `sizes`, `live_tools` (process names of a live build), `memory_guard`
 (an external guard's heartbeat), `queue` (adapter `fifo-gates`), `kinds` (machine-only and pool job kinds), `ci`
 (adapter `github-gh`, read-only), `delivery` (adapter `claude-code-hook`), `trim` (the guarded cache trim), `deletes`
 (`rules`, `cleanup`, `forbidden_parts`, `protected_roots`), `recovery` (`expected_jobs`: `{name, match}` regular

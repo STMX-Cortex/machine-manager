@@ -16,10 +16,10 @@ import time
 _libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
 
 
-def run(argv, timeout=10):
+def run(argv, timeout=10, env=None):
     """(returncode, stdout) of a command with a time limit; (None, '') when it cannot run or times out."""
     try:
-        p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=timeout)
+        p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=timeout, env=env)
         return p.returncode, p.stdout
     except (OSError, subprocess.SubprocessError):
         return None, ""

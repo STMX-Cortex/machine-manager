@@ -43,6 +43,13 @@
      "items": {
       "type": "string"
      }
+    },
+    "path_extra": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "folders added to the service PATH (before the system folders), for tools the profile's scripts call"
     }
    },
    "additionalProperties": false

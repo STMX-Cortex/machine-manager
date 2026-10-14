@@ -46,7 +46,7 @@ a = sys.argv[1:]
 if a[:1] == ["bootstrap"] and a[-1].endswith("%s.plist") and os.environ.get("FAKE_HEARTBEAT_PID"):
     p = os.path.join(os.environ["MM_DATA"], "status.json")
     with open(p + ".tmp", "w") as f:
-        json.dump({"time": time.time(), "state": "GREEN", "heartbeat": {"pid": int(os.environ["FAKE_HEARTBEAT_PID"])}}, f)
+        json.dump({"time": time.time(), "state": "GREEN", "heartbeat": {"pid": int(os.environ["FAKE_HEARTBEAT_PID"]), "tick": 1}}, f)
     os.replace(p + ".tmp", p)
 '''
 
@@ -65,12 +65,8 @@ class Base(TempData):
         with open(self.fake, "w") as f:
             f.write(FAKE_LAUNCHCTL % (sys.executable, self.calls, SUP))
         os.chmod(self.fake, stat.S_IRWXU)
-        gh = os.path.join(self.root, "fake-gh.sh")
-        with open(gh, "w") as f:
-            f.write("#!/bin/sh\nexit 1\n")
-        os.chmod(gh, stat.S_IRWXU)
-        self._extra = {k: os.environ.get(k) for k in ("MM_GH", "FAKE_HEARTBEAT_PID")}
-        os.environ.update(MM_GH=gh, MM_LAUNCHCTL=self.fake)
+        self._extra = {k: os.environ.get(k) for k in ("FAKE_HEARTBEAT_PID",)}
+        os.environ.update(MM_LAUNCHCTL=self.fake)  # MM_GH: the fake gh of mmtest.TempData
 
     def tearDown(self):
         for p in self.kids:  # only the sleeps this test started
@@ -147,6 +143,35 @@ class R1Restart(Base):
         rc, out, _ = self.run_mm("restart")
         self.assertEqual((rc, out), (2, ["E_RESTART no fresh heartbeat in 5 s; fix: mm status; mm explain SELF_STALE"]))
         self.assertLess(time.monotonic() - t, 20)
+
+    def test_restart_retries_a_load_that_fails_right_after_the_unload(self):
+        """Seen live 2026-10-14 21:44: bootout ends a service in the background; the bootstrap right after it failed
+        and `mm restart` left nothing running."""
+        counter = os.path.join(self.root, "bootstrap-count")
+        with open(self.fake, "a") as f:  # the first two loads fail with rc 5, as launchctl does then
+            f.write('if a[:1] == ["bootstrap"]:\n'
+                    '    n = int(open(%r).read()) if os.path.exists(%r) else 0\n'
+                    '    open(%r, "w").write(str(n + 1))\n'
+                    '    if n < 2:\n'
+                    '        sys.exit(5)\n' % (counter, counter, counter))
+        with open(self.fake) as f:  # the heartbeat must come only from a load that worked: move it after the check
+            text = f.read()
+        hb = text[text.index('if a[:1] == ["bootstrap"] and a[-1].endswith'):text.index('if a[:1] == ["bootstrap"]:\n    n =')]
+        with open(self.fake, "w") as f:
+            f.write(text.replace(hb, "") + hb)
+        mmcore.write_atomic(os.path.join(self.data, "status.json"),
+                            json.dumps({"time": time.time() - 5, "heartbeat": {"pid": 1111, "tick": 9}}))
+        rc, out, err = self.run_mm("restart", FAKE_HEARTBEAT_PID="4646")
+        self.assertEqual((rc, out), (0, ["restart=ok pid=4646"]), err)
+        boots = [c for c in self.launchctl() if c[0] == "bootstrap"]
+        self.assertEqual(len(boots), 4, "the supervisor's load tried 3 times, then the watchdog's once")
+
+    def test_restart_says_so_when_a_load_keeps_failing(self):
+        with open(self.fake, "a") as f:
+            f.write('if a[:1] in (["bootstrap"], ["print"]):\n    sys.exit(5)\n')
+        rc, out, _ = self.run_mm("restart", timeout=120)  # 10 tries a second apart for each of the two agents
+        self.assertEqual(rc, 2)
+        self.assertTrue(out[0].startswith("E_RESTART load failed: %s=rc5 %s=rc5; fix: mm start; mm status" % (SUP, WD)), out)
 
     def test_restart_clear_safe_ends_safe_mode(self):
         mmrecover.enter_safe("test", time.time())
@@ -481,6 +506,148 @@ class R7Heartbeat(Base):
         st = mmcore.Settings()
         st.load()
         self.assertIn("heartbeat.url must be empty or an http(s) URL", st.problem)
+
+
+class C1StartGrace(Base):
+    """Install fault 1: the watchdog ran before the supervisor's first status.json and restarted it."""
+
+    def test_no_restart_and_no_alert_inside_the_start_grace(self):
+        now = time.time()
+        mmrecover.note_loaded(now - 10)  # mm install or mm start loaded the agents 10 s ago; no status.json yet
+        rc, out, _ = self.run_mm("watchdog", MM_NOW=str(now))
+        self.assertEqual(self.launchctl(), [], "no kickstart inside the grace")
+        self.assertNotIn("SELF_STALE", [n for n, _ in self.names()])
+        self.assertIn("supervisor starting", open(os.path.join(self.data, "state", "watchdog.log")).read())
+        rc, out, _ = self.run_mm("watchdog", MM_NOW=str(now + 100))  # past 90 s and still no status.json
+        self.assertEqual(self.launchctl()[0][:2], ["kickstart", "-k"])
+        self.assertIn(("SELF_STALE", "ACTION"), self.names())
+
+    def test_the_grace_counts_from_the_supervisors_own_start_too(self):
+        now = time.time()
+        mmrecover.note_loaded(now - 3600)
+        mmcore.write_atomic(os.path.join(self.data, "state", "run.json"), json.dumps({"pid": 1, "started": now - 20, "clean": False}))
+        mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps({"time": now - 3000, "state": "GREEN"}))
+        self.run_mm("watchdog", MM_NOW=str(now))
+        self.assertEqual(self.launchctl(), [])
+
+    def test_status_at_once_and_a_sigterm_during_the_start_ends_clean(self):
+        seen = {}
+        real, old = mmsuper.Supervisor, signal.getsignal(signal.SIGTERM)
+
+        class Slow:
+            kernel = None
+
+            def __init__(self, *a, **kw):
+                seen["status"] = json.load(open(os.path.join(self.data_dir, "status.json")))
+                os.kill(os.getpid(), signal.SIGTERM)  # launchd stops it while it starts
+        Slow.data_dir = self.data
+        mmsuper.Supervisor = Slow
+        try:
+            rc = mmsuper.run_loop(self.profile(), ticks=1, tick_seconds=0.1, kernel=False)
+        finally:
+            mmsuper.Supervisor = real
+            signal.signal(signal.SIGTERM, old)
+        self.assertEqual(rc, 0)
+        self.assertEqual((seen["status"]["heartbeat"]["tick"], seen["status"]["heartbeat"]["note"]), (0, "starting"))
+        import mmschema
+        self.assertEqual(mmschema.validate(seen["status"], mmschema.load("status")), [])
+        self.assertTrue(json.load(open(os.path.join(self.data, "state", "run.json")))["clean"], "a stop while starting is clean")
+
+    def test_a_start_that_fails_is_unclean(self):
+        real = mmsuper.Supervisor
+
+        def boom(*a, **kw):
+            raise RuntimeError("planted")
+        mmsuper.Supervisor = boom
+        try:
+            with self.assertRaises(RuntimeError):
+                mmsuper.run_loop(self.profile(), ticks=1, tick_seconds=0.1, kernel=False)
+        finally:
+            mmsuper.Supervisor = real
+        self.assertFalse(json.load(open(os.path.join(self.data, "state", "run.json")))["clean"])
+
+    def test_restart_waits_for_tick_1_not_the_starting_record(self):
+        self.write_settings(**{"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10, "self.restart_wait_s": 5})
+        with open(self.fake, "a") as f:  # the new supervisor only writes its starting record
+            f.write('if a[:1] == ["bootstrap"] and a[-1].endswith("%s.plist"):\n'
+                    '    p = os.path.join(os.environ["MM_DATA"], "status.json")\n'
+                    '    json.dump({"time": time.time() + 1, "heartbeat": {"pid": 5151, "tick": 0}}, open(p, "w"))\n' % SUP)
+        rc, out, _ = self.run_mm("restart")
+        self.assertEqual(rc, 2, out)
+
+
+class C2Commands(Base):
+    """Install fault 2: gh was not on the LaunchAgents' PATH (rc=None)."""
+
+    def profile_with(self, tool):
+        text = open(mmtest.PROFILE).read().replace('guard_argv = ["/usr/bin/false"]', 'guard_argv = ["%s"]' % tool)
+        p = os.path.join(self.root, "profile-cmd.toml")
+        with open(p, "w") as f:
+            f.write(text)
+        return p
+
+    def test_install_puts_each_commands_folder_on_the_service_path_and_check_proves_it(self):
+        tools = os.path.join(self.root, "tools bin")
+        os.makedirs(tools)
+        tool = os.path.join(tools, "mmfaketool")
+        with open(tool, "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(tool, 0o700)
+        prof = self.profile_with("mmfaketool")
+        env = {"MM_PROFILE": prof, "PATH": tools + ":/usr/bin:/bin"}
+        rc, out, err = self.run_mm("check", **env)
+        self.assertEqual((rc, out), (0, ["check=ok"]), err)
+        rc, out, err = self.run_mm("install", **env)
+        self.assertEqual(rc, 0, out + [err])
+        import plistlib
+        pl = os.path.join(self.root, "home", "Library", "LaunchAgents", SUP + ".plist")
+        path_ = plistlib.load(open(pl, "rb"))["EnvironmentVariables"]["PATH"].split(":")
+        self.assertEqual(path_[-4:], ["/usr/bin", "/bin", "/usr/sbin", "/sbin"])
+        self.assertIn(tools, path_[:-4])
+        self.assertIn(os.path.dirname(self.fake_gh), path_[:-4])
+        rec = json.load(open(os.path.join(self.root, "base", "install.json")))
+        self.assertEqual(rec["commands"]["mmfaketool"], tool)
+        self.assertEqual(self.run_mm("check", **env)[:2], (0, ["check=ok"]))
+        # an install from before this fix: the system folders only
+        d = plistlib.load(open(pl, "rb"))
+        d["EnvironmentVariables"]["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        with open(pl, "wb") as f:
+            plistlib.dump(d, f)
+        rc, out, _ = self.run_mm("check", **env)
+        self.assertEqual(rc, 1)
+        self.assertIn("E_COMMAND mmfaketool on the installed service PATH is missing, not %s; fix: mm install again" % tool, out)
+
+    def test_a_missing_command_and_a_gh_that_cannot_read_github(self):
+        prof = self.profile_with("no-such-tool-mm")
+        rc, out, _ = self.run_mm("check", MM_PROFILE=prof)
+        self.assertEqual(rc, 1)
+        self.assertIn("E_COMMAND no-such-tool-mm not found on PATH; fix: install it, or add its folder to "
+                      "service.path_extra", out)
+        rc, out, _ = self.run_mm("check", "--online")
+        self.assertIn("E_GH gh cannot read GitHub in the service environment (rc=1); fix: gh auth login", out)
+
+    def test_profile_path_extra_comes_first(self):
+        import mminstall
+        p = self.profile()
+        p["service"]["path_extra"] = ["/opt/extra/bin"]
+        path_, found = mminstall.service_path(p, "/usr/bin:/bin")
+        self.assertEqual(path_.split(":")[0], "/opt/extra/bin")
+        self.assertEqual(found["/usr/bin/false"], "/usr/bin/false")
+
+
+class C3SizesInterval(Base):
+    def test_sizes_interval_is_a_setting(self):
+        self.write_settings(**{"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10, "disk.sizes_interval_minutes": 5})
+        clock = {"t": time.time()}
+        sup = mmsuper.Supervisor(self.profile(), kernel=False, clock=lambda: clock["t"], sampler=CALM, sizes=True,
+                                 slow_jobs=False, check_readings=False,
+                                 boot=lambda: {"boot_time": 1000.0, "panics": [], "missing_jobs": []})
+        kicks = []
+        sup.bg.kick = lambda *a: kicks.append(clock["t"]) or True
+        for _ in range(31):  # 0 .. 300 s, every 10 s
+            sup.tick()
+            clock["t"] += 10
+        self.assertEqual(len(kicks), 2, "at the start and after 5 min")
 
 
 class R8Never(unittest.TestCase):

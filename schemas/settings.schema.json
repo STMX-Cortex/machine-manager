@@ -14,6 +14,7 @@
   "disk.cache_attention_gb",
   "disk.low_gb",
   "disk.recover_gb",
+  "disk.sizes_interval_minutes",
   "disk.trend_hours",
   "evidence.slots",
   "evidence.window_minutes",
@@ -72,6 +73,7 @@
   "self.restart_wait_s",
   "self.resume_paused_after_s",
   "self.slow_ticks",
+  "self.start_grace_s",
   "self.watchdog_stale_s",
   "slots.amber_comp_mb",
   "slots.amber_free_pct",
@@ -160,6 +162,11 @@
    "type": "number",
    "minimum": 1,
    "maximum": 10000
+  },
+  "disk.sizes_interval_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
   },
   "disk.trend_hours": {
    "type": "number",
@@ -440,6 +447,11 @@
    "type": "integer",
    "minimum": 1,
    "maximum": 100
+  },
+  "self.start_grace_s": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 3600
   },
   "self.watchdog_stale_s": {
    "type": "number",

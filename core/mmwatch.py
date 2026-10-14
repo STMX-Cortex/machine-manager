@@ -37,7 +37,12 @@ def check(now, s, profile, restart=True):
     if (age is None or age > s["self.resume_paused_after_s"] or stopped) and mmrecover.read_paused():
         got = mmrecover.resume_paused("watchdog: supervisor %s" % ("stopped" if stopped else "stale"), now)
         mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s resumed paused pids %s" % (mmcore.now_local(now), got))
-    if not stopped and (age is None or age > limit):
+    ref = mmrecover.start_ref(now)
+    in_grace = ref is not None and now - ref < s["self.start_grace_s"]
+    if not stopped and (age is None or age > limit) and in_grace:
+        mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s supervisor starting (%.0f s ago, grace %g s): no "
+                           "restart" % (mmcore.now_local(now), now - ref, s["self.start_grace_s"]))
+    if not stopped and (age is None or age > limit) and not in_grace:
         why = "no status.json" if age is None else "status.json %.0f s old (limit %g s)" % (age, limit)
         restarted = ""
         if restart:

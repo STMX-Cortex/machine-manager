@@ -86,6 +86,85 @@ def interpreter_problems(executable, version):
     return out
 
 
+SYSTEM_PATH = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+
+
+def external_commands(profile):
+    """The commands the service runs by name or path from the profile: gh (CI adapter github-gh), ci.guard_argv,
+    trim.warm_argv, and the deletes rules' argv and command."""
+    names = []
+    ci = profile.get("ci") or {}
+    if ci.get("adapter") == "github-gh":
+        names.append("gh")
+    for argv in (ci.get("guard_argv"), (profile.get("trim") or {}).get("warm_argv")):
+        if argv:
+            names.append(argv[0])
+    for r in (profile.get("deletes") or {}).get("rules", []):
+        for k in ("argv", "command"):
+            if r.get(k):
+                names.append(r[k][0])
+    return sorted(set(n for n in names if n and "{" not in n))
+
+
+def resolve_commands(names, search_path):
+    """{name: absolute path or None}. MM_GH replaces gh (tests)."""
+    out = {}
+    for n in names:
+        if n == "gh" and os.environ.get("MM_GH"):
+            out[n] = os.environ["MM_GH"]
+        elif os.path.isabs(n):
+            out[n] = n if os.access(n, os.X_OK) else None
+        else:
+            out[n] = shutil.which(n, path=search_path)
+    return out
+
+
+def service_path(profile, search_path=None):
+    """The PATH of the LaunchAgents: the profile's service.path_extra, the folder of each external command as the
+    owner's PATH finds it now, then the system folders. Returns (path, {command: absolute path or None})."""
+    found = resolve_commands(external_commands(profile), os.environ.get("PATH", "") if search_path is None else search_path)
+    dirs = []
+    for d in [mmcore.expand(x) for x in profile["service"].get("path_extra", [])] + \
+            [os.path.dirname(p) for _, p in sorted(found.items()) if p]:
+        if d and d not in dirs and d not in SYSTEM_PATH:
+            dirs.append(d)
+    return ":".join(dirs + SYSTEM_PATH), found
+
+
+def command_problems(profile, online=False):
+    """E_COMMAND / E_GH lines: each external command must resolve on the service PATH and on the installed plist's
+    PATH; gh must run there (--version), and with online=True read GitHub once (gh api rate_limit, read-only)."""
+    out = []
+    path_, found = service_path(profile)
+    env = {"PATH": path_, "HOME": os.path.expanduser("~")}
+    for n, p in sorted(found.items()):
+        if not p:
+            out.append("E_COMMAND %s not found on PATH; fix: install it, or add its folder to service.path_extra" % n)
+    gh = found.get("gh")
+    if gh:
+        rc, _ = mmread.run([gh, "--version"], timeout=20, env=env)
+        if rc != 0:
+            out.append("E_COMMAND gh does not run in the service environment (rc=%s); fix: reinstall gh" % rc)
+        elif online:
+            rc, o = mmread.run([gh, "api", "rate_limit", "--jq", ".rate.limit"], timeout=30, env=env)
+            if rc != 0 or not o.strip():
+                out.append("E_GH gh cannot read GitHub in the service environment (rc=%s); fix: gh auth login" % rc)
+    sup = os.path.join(agents_dir(), labels(profile)[0] + ".plist")
+    if os.path.exists(sup):
+        try:
+            with open(sup, "rb") as f:
+                ppath = (plistlib.load(f).get("EnvironmentVariables") or {}).get("PATH", "")
+        except (OSError, ValueError):
+            ppath = ""
+        for n, p in sorted(found.items()):
+            by_name = not os.path.isabs(n) and not (n == "gh" and os.environ.get("MM_GH"))  # MM_GH: tests only
+            got = shutil.which(n, path=ppath) if by_name else p
+            if p and (not got or os.path.realpath(got) != os.path.realpath(p)):
+                out.append("E_COMMAND %s on the installed service PATH is %s, not %s; fix: mm install again"
+                           % (n, got or "missing", p))
+    return out
+
+
 def mm_argv(*args):
     return [sys.executable, "-I", os.path.join(mmcore.BIN, "mm")] + list(args)
 
@@ -184,7 +263,7 @@ def init(name, folder=None):
     return f, data
 
 
-def check(profile_file=None):
+def check(profile_file=None, online=False):
     """One line per problem in the profile and the settings, plus the macOS readings check. [] = all fine."""
     import mmadapters
     import mmschema
@@ -203,6 +282,7 @@ def check(profile_file=None):
             out.append(str(e))
         except (KeyError, TypeError) as e:
             out.append("E_PROFILE [%s] lacks %s; fix: add it (README.md, Profile)" % (part, e))
+    out += command_problems(prof, online)
     q = prof.get("queue") or {}
     if q.get("dir") and not os.path.isdir(mmcore.expand(q["dir"])):
         out.append("E_PROFILE queue.dir not found: %s; fix: correct the path" % q["dir"])
@@ -240,7 +320,11 @@ def install(profile, settings_src=None, observe_only=True):
         raise mmcore.MMError("E_SETTINGS", "settings invalid: %s" % st.problem, "mm check")
     if observe_only and not s["mode.observe"]:
         raise mmcore.MMError("E_SETTINGS", "mode.observe is false", "install in observe mode first (mode.observe = true)")
-    env = {"MM_PROFILE": profile["_file"], "MM_DATA": data, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+    path_, found = service_path(profile)
+    rec["commands"] = found
+    rec["warnings"] += ["W_COMMAND %s not found on PATH; fix: install it, or add its folder to service.path_extra" % n
+                        for n, p in sorted(found.items()) if not p]
+    env = {"MM_PROFILE": profile["_file"], "MM_DATA": data, "PATH": path_}
     os.makedirs(agents_dir(), exist_ok=True)
     sup, wd = labels(profile)
     # The installed supervisor may write the queue's slot file; the settings decide whether it does
@@ -268,6 +352,8 @@ def install(profile, settings_src=None, observe_only=True):
         os.remove(os.path.join(data, "state", "stopped.json"))
     except OSError:
         pass
+    import mmrecover
+    mmrecover.note_loaded(time.time())
     for f, label in zip(rec["plists"], (sup, wd)):
         launchctl(["bootout", "gui/%d/%s" % (os.getuid(), label)])
         rc, out = launchctl(["bootstrap", "gui/%d" % os.getuid(), f])
@@ -303,15 +389,29 @@ def start(profile):
         os.remove(mmcore.path("state", "stopped.json"))
     except OSError:
         pass
-    out = []
-    for label in (sup, wd):
-        f = os.path.join(agents_dir(), label + ".plist")
-        rc, _ = launchctl(["bootstrap", "gui/%d" % os.getuid(), f])
-        out.append((label, rc))
+    import mmrecover
+    os.makedirs(mmcore.path("state"), exist_ok=True)
+    mmrecover.note_loaded(time.time())
+    out = [(label, bootstrap(label)) for label in (sup, wd)]
     st = mmcore.Settings().load()
     if st:
         mmcore.AlertStore(st, mid=mmcore.machine_id(profile)).clear("STOPPED")
     return out
+
+
+def bootstrap(label, tries=10, wait_s=1.0):
+    """Load one LaunchAgent. A bootout ends a service in the background, and a bootstrap right after it fails
+    (seen 2026-10-14: `mm restart` left nothing running), so a failed bootstrap is retried; at the end a service that
+    is loaded counts as done. Returns the last rc (0 = loaded)."""
+    f = os.path.join(agents_dir(), label + ".plist")
+    rc = None
+    for i in range(tries):
+        rc, _ = launchctl(["bootstrap", "gui/%d" % os.getuid(), f])
+        if rc == 0:
+            return 0
+        time.sleep(wait_s)
+    prc, _ = launchctl(["print", "gui/%d/%s" % (os.getuid(), label)])
+    return 0 if prc == 0 else rc
 
 
 def rollback(profile):

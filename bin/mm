@@ -40,7 +40,7 @@ Owner:
   mm snapshot ID            an evidence bundle for an alert now
   mm drill memory           a controlled memory load test (refuses unless the queue is empty)
 Setup:
-  mm init --profile NAME [--dir DIR] | mm check | mm install [--settings FILE]
+  mm init --profile NAME [--dir DIR] | mm check [--online] | mm install [--settings FILE]
   mm stop | mm start | mm restart [--clear-safe] | mm rollback
   mm selftest
 Internal (launchd and hooks): mm run [--dry-run] | mm watchdog | mm hook --event EVENT
@@ -231,7 +231,7 @@ def cmd_wait(args, as_json, profile):
             print(stale)
             return 3
         recs = d.take_unseen(session, min_level, now)
-        recs = [r for r in recs if r.get("why") != "cleared"] or recs
+        recs = [r for r in recs if r.get("why") != "cleared"]  # a clear needs no action: it never wakes the waiter
         if recs:
             for line in d.format_alerts(recs):
                 print(line)
@@ -363,7 +363,7 @@ def cmd_drill(args, as_json, profile):
 
 def cmd_check(args, as_json):
     import mminstall
-    lines = mminstall.check()
+    lines = mminstall.check(online=flag(args, "--online"))
     probs = [x for x in lines if not x.startswith("W_")]
     warns = [x for x in lines if x.startswith("W_")]
     emit(as_json, {"problems": probs, "warnings": warns}, probs + warns if probs else warns + ["check=ok"])
@@ -380,15 +380,18 @@ def cmd_restart(args, as_json, profile):
     old_pid = (before.get("heartbeat") or {}).get("pid") if isinstance(before, dict) else None
     t = time.time()
     mminstall.stop(profile, reason="mm restart", alert=False)
-    mminstall.start(profile)
+    bad = [(lb, rc) for lb, rc in mminstall.start(profile) if rc != 0]
+    if bad:
+        return err("E_RESTART", "load failed: %s" % " ".join("%s=rc%s" % x for x in bad), "mm start; mm status")
 
     def fresh():
         st = mmcore.read_json(mmcore.path("status.json"), None)
         if not isinstance(st, dict):
             return None
-        pid = (st.get("heartbeat") or {}).get("pid")
-        try:
-            new = float(st.get("time", 0)) > t
+        hb = st.get("heartbeat") or {}
+        pid = hb.get("pid")
+        try:  # a tick done by a new process (tick 0 is only "starting")
+            new = float(st.get("time", 0)) > t and int(hb.get("tick") or 0) >= 1
         except (TypeError, ValueError):
             new = False
         return pid if new and pid and pid != old_pid else None

@@ -537,7 +537,7 @@ class Supervisor:
         if self.delivery and (self.due("usage", 300, now) or "usage" not in self.cache):
             self.cache["usage"] = self.delivery.usage(now)
         snap["usage"] = self.cache.get("usage")
-        if self.sizes and self.p.get("sizes") and self.due("sizes", 1800, now):
+        if self.sizes and self.p.get("sizes") and self.due("sizes", s["disk.sizes_interval_minutes"] * 60, now):
             self.bg.kick(self.p["sizes"], self.delivery)
         got = self.bg.take()
         if got:
@@ -881,20 +881,22 @@ def run_loop(profile, dry_run=False, ticks=0, duration=0, tick_seconds=10, kerne
     """The supervisor's life. At start: the unclean-start count (mmrecover.note_start); at 3 in 15 min, safe mode.
     Each tick: the tick, then the self-check. Ends with 0 when stopped (SIGTERM) or done, and with EXIT_RESTART when the
     self-check asks for a restart (launchd starts it again; that start counts as unclean)."""
+    stop = {"now": False}
+    signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))  # first: a SIGTERM during the start still ends clean
     st0 = mmcore.Settings().load() or mmcore.resolve(mmcore.defaults())
+    mid = mmcore.machine_id(profile)
     loop, unclean, _ = mmrecover.note_start(time.time(), st0)
+    mmrecover.starting_status(time.time(), mid)  # a heartbeat at once: the watchdog sees a live start
     if loop["safe"]:
         mmrecover.enter_safe("%d unclean starts in %g min (crash loop)" % (len(loop["starts"]), st0["self.crash_loop_minutes"]),
-                             time.time(), mmcore.machine_id(profile))
-    sup = Supervisor(profile, dry_run=dry_run, kernel=kernel, allow_live_slots=allow_live_slots)
+                             time.time(), mid)
     if unclean:
         mmrecover.log("START after an unclean end (%d unclean starts inside %g min)"
                       % (len(loop["starts"]), st0["self.crash_loop_minutes"]))
-    stop = {"now": False}
-    signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
     t0, n, errors = time.monotonic(), 0, 0
-    code = 0
+    code, ended, sup = 0, False, None
     try:
+        sup = Supervisor(profile, dry_run=dry_run, kernel=kernel, allow_live_slots=allow_live_slots)
         while not stop["now"]:
             start = time.monotonic()
             try:
@@ -924,10 +926,12 @@ def run_loop(profile, dry_run=False, ticks=0, duration=0, tick_seconds=10, kerne
             if ticks and n >= ticks or duration and time.monotonic() - t0 >= duration:
                 break
             time.sleep(max(0.0, tick_seconds - (time.monotonic() - start)))
+        ended = True
     finally:
-        if sup.kernel is not None:
+        if sup is not None and sup.kernel is not None:
             sup.kernel.stop()
         if code == 0:
             mmrecover.resume_paused("exit")
+        if ended and code == 0:
             mmrecover.note_clean_exit()
     return code
