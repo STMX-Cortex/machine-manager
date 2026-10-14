@@ -141,6 +141,67 @@ class SlotWrites(Base):
         self.assertEqual(open(os.path.join(self.q, "slots")).read(), "3\n")
 
 
+class ActFromTheRealFile(Base):
+    """2026-10-14 23:50: after the drill's RED the observe controller held 3 while the file said 5. In act mode the
+    controller must start from, and step from, the real file at every tick; an observe value never carries over."""
+    ACT = {"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10, "mode.observe": False, "mode.slot_writes": "live"}
+
+    def slots(self):
+        return open(os.path.join(self.q, "slots")).read()
+
+    def observe_red_then_green(self, clock):
+        sup = self.sup(RED, clock=lambda: clock["t"], allow_live_slots=True)
+        self.ticks(sup, 1, clock)
+        sup.sampler = CALM
+        self.ticks(sup, 3, clock)
+        st = json.load(open(os.path.join(self.data, "status.json")))
+        self.assertEqual((st["mode"], st["slots"], st["slots_would"]), ("observe", 5, 3), "observe holds its own 3")
+        self.assertIn("WOULD slots 5 -> 3", self.decisions())
+        return sup
+
+    def test_the_switch_to_act_starts_from_the_file_in_the_same_run_and_after_a_start(self):
+        clock = {"t": time.time()}
+        sup = self.observe_red_then_green(clock)
+        self.write_settings(**self.ACT)  # the switch, read at the next tick of the running supervisor
+        self.ticks(sup, 3, clock)
+        st = json.load(open(os.path.join(self.data, "status.json")))
+        self.assertEqual((st["mode"], st["slots"], st["slots_would"]), ("act", 5, 5))
+        self.assertEqual(self.slots(), "5\n", "a GREEN Mac keeps the file's 5: no write of the observe 3")
+        self.assertNotIn(" SET slots ", self.decisions())
+        clock2 = {"t": clock["t"]}
+        fresh = self.sup(CALM, clock=lambda: clock2["t"], allow_live_slots=True)  # a supervisor start in act mode
+        self.ticks(fresh, 2, clock2)
+        self.assertEqual(self.slots(), "5\n")
+        self.assertEqual(json.load(open(os.path.join(self.data, "status.json")))["slots_would"], 5)
+        rc, out = self.mm("status").returncode, self.mm("status").stdout.splitlines()
+        self.assertIn(" mode=act slots=5 would=5 ", " %s " % out[0])
+
+    def test_a_hand_change_is_kept_and_decisions_step_from_it(self):
+        self.write_settings(**self.ACT)
+        clock = {"t": time.time()}
+        sup = self.sup(CALM, clock=lambda: clock["t"], allow_live_slots=True)
+        self.ticks(sup, 2, clock)
+        mmcore.write_slots(os.path.join(self.q, "slots"), 7)  # a person sets 7 (or a rollback sets 5)
+        self.ticks(sup, 3, clock)
+        self.assertEqual(self.slots(), "7\n", "GREEN: the hand value stays")
+        sup.sampler = sampler_of(free_pct=45)  # AMBER: one step down, from the file's 7
+        self.ticks(sup, 1, clock)
+        self.assertEqual(self.slots(), "6\n")
+        self.assertIn("SET slots 7 -> 6: AMBER", self.decisions())
+
+    def test_an_unreadable_file_gets_no_decision_and_no_write(self):
+        self.write_settings(**self.ACT)
+        clock = {"t": time.time()}
+        with open(os.path.join(self.q, "slots"), "w") as f:
+            f.write("garbage\n")
+        sup = self.sup(RED, clock=lambda: clock["t"], allow_live_slots=True)
+        sup.state["virtual_slots"] = 5
+        self.ticks(sup, 3, clock)
+        self.assertEqual(self.slots(), "garbage\n", "no guess written over a file it cannot read")
+        self.assertEqual(self.decisions().count(" SKIP slots: "), 1, "logged once per 10 min")
+        self.assertIsNone(json.load(open(os.path.join(self.data, "status.json")))["slots_would"])
+
+
 class Banner(Base):
     def run_red(self, dry):
         for f in ("alerts-state.json", "alerts.jsonl"):

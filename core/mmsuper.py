@@ -773,12 +773,19 @@ class Supervisor:
             target_file = self.queue.slots_path() if self.allow_live else None
         cur = None
         if target_file:
+            # Act mode: the file is the truth at every tick (a rollback or a hand `echo 5` is never undone), and every
+            # decision steps from it; a value from observe mode never carries over. Unreadable: no decision, no write.
             try:
                 with open(target_file) as f:
                     cur = int(f.read().split()[0])
-            except (OSError, ValueError, IndexError):
-                cur = None
-        if cur is None:
+            except (OSError, ValueError, IndexError) as e:
+                self.state["virtual_slots"] = None
+                if now - self.state.get("slots_unreadable_at", 0) >= 600:
+                    self.state["slots_unreadable_at"] = now
+                    self.log_decision("%s SKIP slots: %s unreadable (%s); no decision until it reads"
+                                      % (mmcore.now_local(now), target_file, e.__class__.__name__))
+                return
+        if cur is None:  # observe (or writes off): the controller's own count, which may differ from the file
             cur = self.state.get("virtual_slots") or (q or {}).get("slots") or s["slots.floor"]
         tickets = (q or {}).get("tickets", [])
         override = mmcore.read_json(mmcore.path("override.json"), None)
