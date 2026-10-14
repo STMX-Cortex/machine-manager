@@ -31,6 +31,7 @@ TICK_ERRORS_ALERT = 3
 FALLBACK_REPEAT = {"repeat.action_minutes": 30, "repeat.attention_hours": 3, "repeat.clear_after_minutes": 5}
 CHECK_EVERY_S = 86400
 EXIT_RESTART = 75  # a self-check restart: launchd starts the supervisor again (KeepAlive)
+STOP_DEADLINE_S = 8  # without settings: s from a SIGTERM to the forced end (under the plist's ExitTimeOut)
 HELD_REBOOT_S = 3600
 HELD_SELF_S = 1800
 
@@ -850,8 +851,8 @@ class Supervisor:
         rec = mmcore.stamp({
             "kind": "machine", "time": now, "state": mac_state, "reasons": reasons, "red_since": gate.get("red_since"),
             "mode": "dry" if self.dry else ("off" if off else ("safe" if safe else ("observe" if observe else "act"))),
-            "slots": self.state.get("virtual_slots"), "busy": len((q or {}).get("busy", [])),
-            "waiting": len((q or {}).get("tickets", [])),
+            "slots": (q or {}).get("slots"), "slots_would": self.state.get("virtual_slots"),
+            "busy": len((q or {}).get("busy", [])), "waiting": len((q or {}).get("tickets", [])),
             "readings": {k: (round(sample[k], 2) if isinstance(sample.get(k), float) else sample.get(k))
                          for k in ("free_pct", "swap_used_mb", "swap_total_mb", "comp_mb", "pressure", "load5", "sys_pct")},
             "disk_gb": None if self.cache.get("disk") is None else round(self.cache["disk"], 1),
@@ -888,13 +889,43 @@ class Supervisor:
                                for c in cols) + "\n")
 
 
+def _stop_deadline(stop):
+    """The tick did not end after a SIGTERM: end now (the run is already marked clean)."""
+    try:
+        mmrecover.log("STOP deadline: the tick did not end in %g s after SIGTERM; killed %d commands; exit"
+                      % (stop["deadline_s"], mmread.kill_children()))
+        sup = stop.get("sup")
+        if sup is not None and sup.kernel is not None:
+            sup.kernel.stop()
+        mmrecover.resume_paused("exit")
+    finally:
+        os._exit(0)
+
+
 def run_loop(profile, dry_run=False, ticks=0, duration=0, tick_seconds=10, kernel=True, allow_live_slots=False):
     """The supervisor's life. At start: the unclean-start count (mmrecover.note_start); at 3 in 15 min, safe mode.
     Each tick: the tick, then the self-check. Ends with 0 when stopped (SIGTERM) or done, and with EXIT_RESTART when the
-    self-check asks for a restart (launchd starts it again; that start counts as unclean)."""
-    stop = {"now": False}
-    signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))  # first: a SIGTERM during the start still ends clean
+    self-check asks for a restart (launchd starts it again; that start counts as unclean).
+    A SIGTERM is a planned stop, so it is clean whatever comes next: the handler marks the run clean at once, the wait
+    between ticks ends at once, and a tick that does not end in self.stop_deadline_s is cut: its commands are killed,
+    paused processes continued, and the process ends (2026-10-14: launchd's 5 s ExitTimeOut killed a stop mid-tick)."""
+    stop = {"now": False, "sup": None, "deadline_s": STOP_DEADLINE_S}
+
+    def on_term(*_):
+        if stop["now"]:
+            return
+        stop["now"] = True
+        try:
+            mmrecover.note_clean_exit()
+        except Exception:
+            pass
+        t = threading.Timer(stop["deadline_s"], _stop_deadline, args=(stop,))
+        t.daemon = True
+        stop["timer"] = t
+        t.start()
+    signal.signal(signal.SIGTERM, on_term)  # first: a SIGTERM during the start still ends clean
     st0 = mmcore.Settings().load() or mmcore.resolve(mmcore.defaults())
+    stop["deadline_s"] = st0.get("self.stop_deadline_s", STOP_DEADLINE_S)
     mid = mmcore.machine_id(profile)
     loop, unclean, _ = mmrecover.note_start(time.time(), st0)
     mmrecover.starting_status(time.time(), mid)  # a heartbeat at once: the watchdog sees a live start
@@ -908,6 +939,7 @@ def run_loop(profile, dry_run=False, ticks=0, duration=0, tick_seconds=10, kerne
     code, ended, sup = 0, False, None
     try:
         sup = Supervisor(profile, dry_run=dry_run, kernel=kernel, allow_live_slots=allow_live_slots)
+        stop["sup"] = sup
         while not stop["now"]:
             start = time.monotonic()
             try:
@@ -936,13 +968,19 @@ def run_loop(profile, dry_run=False, ticks=0, duration=0, tick_seconds=10, kerne
             n += 1
             if ticks and n >= ticks or duration and time.monotonic() - t0 >= duration:
                 break
-            time.sleep(max(0.0, tick_seconds - (time.monotonic() - start)))
+            end = start + tick_seconds
+            while not stop["now"] and time.monotonic() < end:  # a SIGTERM ends the wait at once
+                time.sleep(min(0.2, max(0.0, end - time.monotonic())))
         ended = True
     finally:
+        stop["now"] = True  # a SIGTERM from here on needs no deadline: the end is near
+        mmread.kill_children()
         if sup is not None and sup.kernel is not None:
             sup.kernel.stop()
         if code == 0:
             mmrecover.resume_paused("exit")
         if ended and code == 0:
             mmrecover.note_clean_exit()
+        if stop.get("timer") is not None:  # the end came in time: no forced exit after the return
+            stop["timer"].cancel()
     return code

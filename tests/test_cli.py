@@ -22,7 +22,7 @@ class Golden(TempData):
         now = time.time()
         mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps(mmcore.stamp({
             "kind": "machine", "time": now, "state": "AMBER", "reasons": ["free 45% < 50%"], "mode": "observe", "slots": 5,
-            "busy": 2, "waiting": 1, "disk_gb": 107.2,
+            "slots_would": 3, "busy": 2, "waiting": 1, "disk_gb": 107.2,
             "readings": {"free_pct": 45, "swap_used_mb": 499.4, "comp_mb": 2100, "pressure": 2, "load5": 4.5, "sys_pct": 12.3}},
             mid="test-machine")))
         clock = {"t": T}
@@ -45,7 +45,7 @@ class Golden(TempData):
         rc, out = self.run_mm("status")
         self.assertEqual(rc, 0)
         self.assertEqual(out, [
-            "state=AMBER mode=observe slots=5 busy=2 waiting=1 machine=test-machine",
+            "state=AMBER mode=observe slots=5 would=3 busy=2 waiting=1 machine=test-machine",
             "free_pct=45 swap_mb=499.4 comp_mb=2100 pressure=2 load5=4.5 sys_pct=12.3 disk_gb=107.2",
             "action=1 attention=2 info=1 top=DISK_LOW,LONG_CALL,MEM_AMBER",
             'why="free 45% < 50%"'])

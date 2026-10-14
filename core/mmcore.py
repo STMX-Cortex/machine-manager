@@ -299,7 +299,7 @@ SCHEMA = {
     "self.max_slot_changes_per_hour": ("int", 1, 1000), "self.crash_loop_starts": ("int", 2, 100),
     "self.crash_loop_minutes": ("num", 1, 1440), "self.watchdog_stale_s": ("num", 90, 86400),
     "self.resume_paused_after_s": ("num", 30, 86400), "self.restart_wait_s": ("num", 5, 600),
-    "self.start_grace_s": ("num", 0, 3600), "disk.sizes_interval_minutes": ("num", 1, 1440),
+    "self.start_grace_s": ("num", 0, 3600), "self.stop_deadline_s": ("num", 1, 15), "disk.sizes_interval_minutes": ("num", 1, 1440),
     "safe_mode.slots": ("int", 1, 16),
     "heartbeat.url": ("str", None, None), "heartbeat.every_min": ("num", 1, 1440), "heartbeat.timeout_s": ("num", 1, 60),
 }

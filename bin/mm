@@ -129,7 +129,7 @@ def cmd_status(args, as_json):
                top=[mmcore.display_id(a) for a in top[:3]], off=bool(mmcore.off_state()))
     lines = [
         kv({"state": st.get("state") if not stale else "UNKNOWN", "mode": st.get("mode"), "slots": st.get("slots"),
-            "busy": st.get("busy"), "waiting": st.get("waiting"), "machine": st.get("machine_id")}),
+            "would": st.get("slots_would"), "busy": st.get("busy"), "waiting": st.get("waiting"), "machine": st.get("machine_id")}),
         kv({"free_pct": r.get("free_pct"), "swap_mb": r.get("swap_used_mb"), "comp_mb": r.get("comp_mb"),
             "pressure": r.get("pressure"), "load5": r.get("load5"), "sys_pct": r.get("sys_pct"), "disk_gb": st.get("disk_gb")}),
         kv({"action": counts["ACTION"], "attention": counts["ATTENTION"], "info": counts["INFO"],

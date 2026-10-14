@@ -11,18 +11,49 @@ import os
 import re
 import struct
 import subprocess
+import threading
 import time
 
 _libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
 
 
+_LIVE, _LIVE_LOCK = set(), threading.Lock()
+
+
 def run(argv, timeout=10, env=None):
-    """(returncode, stdout) of a command with a time limit; (None, '') when it cannot run or times out."""
+    """(returncode, stdout) of a command with a time limit; (None, '') when it cannot run or times out.
+    Each running command is known to kill_children(), so a stop can end them (a du of 30 min, a gh call)."""
     try:
-        p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=timeout, env=env)
-        return p.returncode, p.stdout
+        p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env)
     except (OSError, subprocess.SubprocessError):
         return None, ""
+    with _LIVE_LOCK:
+        _LIVE.add(p)
+    try:
+        out, _ = p.communicate(timeout=timeout)
+        return p.returncode, out
+    except subprocess.SubprocessError:
+        p.kill()
+        try:
+            p.communicate(timeout=5)
+        except subprocess.SubprocessError:
+            pass
+        return None, ""
+    finally:
+        with _LIVE_LOCK:
+            _LIVE.discard(p)
+
+
+def kill_children():
+    """Kill every command run() has running now (any thread). Returns how many."""
+    with _LIVE_LOCK:
+        live = [p for p in _LIVE if p.poll() is None]
+    for p in live:
+        try:
+            p.kill()
+        except OSError:
+            pass
+    return len(live)
 
 
 # --------------------------------------------------------------------------------------------- sysctl by ctypes

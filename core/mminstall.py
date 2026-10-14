@@ -153,9 +153,13 @@ def command_problems(profile, online=False):
     if os.path.exists(sup):
         try:
             with open(sup, "rb") as f:
-                ppath = (plistlib.load(f).get("EnvironmentVariables") or {}).get("PATH", "")
+                pl = plistlib.load(f)
         except (OSError, ValueError):
-            ppath = ""
+            pl = {}
+        ppath = (pl.get("EnvironmentVariables") or {}).get("PATH", "")
+        if pl and pl.get("ExitTimeOut") != EXIT_TIMEOUT_S:
+            out.append("E_PLIST the installed supervisor has ExitTimeOut %s, not %d (a stop can be killed mid-tick); "
+                       "fix: mm install again" % (pl.get("ExitTimeOut", "unset"), EXIT_TIMEOUT_S))
         for n, p in sorted(found.items()):
             by_name = not os.path.isabs(n) and not (n == "gh" and os.environ.get("MM_GH"))  # MM_GH: tests only
             got = shutil.which(n, path=ppath) if by_name else p
@@ -169,8 +173,12 @@ def mm_argv(*args):
     return [sys.executable, "-I", os.path.join(mmcore.BIN, "mm")] + list(args)
 
 
+EXIT_TIMEOUT_S = 20  # launchd's wait from SIGTERM to its forced kill; over self.stop_deadline_s (at most 15)
+
+
 def plist(label, args, env, keepalive):
     d = {"Label": label, "ProgramArguments": mm_argv(*args), "EnvironmentVariables": env, "RunAtLoad": True,
+         "ExitTimeOut": EXIT_TIMEOUT_S,
          "ProcessType": "Interactive", "StandardOutPath": os.path.join(env["MM_DATA"], "state", label + ".out"),
          "StandardErrorPath": os.path.join(env["MM_DATA"], "state", label + ".out")}
     if keepalive:

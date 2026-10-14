@@ -553,6 +553,9 @@ class C1StartGrace(Base):
         import mmschema
         self.assertEqual(mmschema.validate(seen["status"], mmschema.load("status")), [])
         self.assertTrue(json.load(open(os.path.join(self.data, "state", "run.json")))["clean"], "a stop while starting is clean")
+        # the stop deadline is cancelled once run_loop returns in time (else its os._exit ends the caller later:
+        # 2026-10-14, the test runner itself ended at once with rc 0 and no output)
+        self.assertEqual([t for t in threading.enumerate() if isinstance(t, threading.Timer) and t.is_alive()], [])
 
     def test_a_start_that_fails_is_unclean(self):
         real = mmsuper.Supervisor
@@ -737,6 +740,131 @@ class C3SizesInterval(Base):
             sup.tick()
             clock["t"] += 10
         self.assertEqual(len(kicks), 2, "at the start and after 5 min")
+
+
+SUP_SCRIPT = r"""
+import os, sys, time
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+import mmcore, mmread, mmsuper
+if sys.argv[3] == "hang":  # tick 1 as usual; tick 2 runs a command that does not end
+    real, n = mmsuper.Supervisor.tick, {"i": 0}
+
+    def tick(self):
+        n["i"] += 1
+        if n["i"] == 1:
+            return real(self)
+        open(os.path.join(os.environ["MM_DATA"], "hanging"), "w").close()
+        mmread.run(["/bin/sleep", "300"], timeout=600)
+    mmsuper.Supervisor.tick = tick
+sys.exit(mmsuper.run_loop(mmcore.load_profile(), dry_run=True, tick_seconds=float(sys.argv[4]), kernel=False))
+"""
+
+
+class C5CleanStop(Base):
+    """Live fault 2026-10-14 22:28: `mm restart` logged an unclean start; launchd's ExitTimeOut (5 s) most likely
+    killed the supervisor in its wait or a tick. A SIGTERM must always give a clean, quick end."""
+
+    def spawn(self, mode, tick_s):
+        code = os.path.dirname(mmtest.HERE)
+        p = subprocess.Popen([sys.executable, "-I", "-c", SUP_SCRIPT, os.path.join(code, "core"), os.path.join(code, "adapters"),
+                              mode, str(tick_s)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                             text=True)
+        self.addCleanup(lambda: p.poll() is None and (p.kill(), p.wait(5)))
+        return p
+
+    def wait_for(self, fn, limit):
+        end = time.time() + limit
+        while time.time() < end:
+            v = fn()
+            if v:
+                return v
+            time.sleep(0.05)
+        self.fail("not reached in %g s" % limit)
+
+    def tick_n(self):
+        st = mmcore.read_json(os.path.join(self.data, "status.json"), None) or {}
+        return int((st.get("heartbeat") or {}).get("tick") or 0)
+
+    def run_json(self):
+        return json.load(open(os.path.join(self.data, "state", "run.json")))
+
+    def test_sigterm_in_the_wait_between_ticks_ends_clean_at_once(self):
+        p = self.spawn("wait", 30)
+        self.wait_for(lambda: self.tick_n() >= 1, 60)
+        time.sleep(0.5)  # now inside the 30 s wait
+        t = time.monotonic()
+        p.send_signal(signal.SIGTERM)
+        rc = p.wait(10)
+        took = time.monotonic() - t
+        self.assertEqual(rc, 0, p.stderr.read())
+        self.assertLess(took, 2.0, "the wait ends at once, far under launchd's ExitTimeOut")
+        self.assertTrue(self.run_json()["clean"])
+        loop, unclean, _ = mmrecover.note_start(time.time(), self.s())
+        self.assertFalse(unclean, "the next start is not unclean")
+        self.assertEqual(loop["starts"], [])
+
+    def test_sigterm_in_a_hung_tick_marks_clean_at_once_and_ends_by_the_deadline(self):
+        self.write_settings(**{"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10, "self.stop_deadline_s": 2})
+        p = self.spawn("hang", 0.5)
+        self.wait_for(lambda: os.path.exists(os.path.join(self.data, "hanging")), 60)
+        kid = self.wait_for(lambda: subprocess.run(["/usr/bin/pgrep", "-P", str(p.pid), "-x", "sleep"], capture_output=True,
+                                                   text=True).stdout.split(), 10)
+        kid = int(kid[0])
+        t = time.monotonic()
+        p.send_signal(signal.SIGTERM)
+        self.wait_for(lambda: self.run_json()["clean"], 1.0)  # marked at once: a SIGKILL now still leaves a clean run
+        self.assertIsNone(p.poll(), "still in the tick when it is marked")
+        rc = p.wait(10)
+        took = time.monotonic() - t
+        self.assertEqual(rc, 0, p.stderr.read())
+        self.assertGreater(took, 1.5)
+        self.assertLess(took, 4.0, "ends by the 2 s deadline, under ExitTimeOut")
+        with self.assertRaises(ProcessLookupError):  # its command is killed with it, not left behind
+            for _ in range(50):
+                os.kill(kid, 0)
+                time.sleep(0.05)
+        log = open(os.path.join(self.data, "state", "recovery.log")).read()
+        self.assertIn("STOP deadline: the tick did not end in 2 s after SIGTERM; killed 1 commands; exit", log)
+        self.assertFalse(mmrecover.note_start(time.time(), self.s())[1], "the next start is not unclean")
+
+    def test_the_plist_gives_launchd_time_and_check_finds_an_old_plist(self):
+        import mminstall
+        import plistlib
+        d = plistlib.loads(mminstall.plist(SUP, ["run"], {"MM_DATA": self.data, "PATH": "/usr/bin"}, True))
+        self.assertEqual(d["ExitTimeOut"], 20)
+        self.assertGreater(d["ExitTimeOut"], mmcore.SCHEMA["self.stop_deadline_s"][2],
+                           "every allowed deadline ends before launchd's SIGKILL")
+        rc, out, err = self.run_mm("install")
+        self.assertEqual(rc, 0, out + [err])
+        pl = os.path.join(self.root, "home", "Library", "LaunchAgents", SUP + ".plist")
+        self.assertEqual(plistlib.load(open(pl, "rb"))["ExitTimeOut"], 20)
+        self.assertEqual(self.run_mm("check")[:2], (0, ["check=ok"]))
+        d = plistlib.load(open(pl, "rb"))
+        del d["ExitTimeOut"]  # an install from before this fix (launchd then used 5 s)
+        with open(pl, "wb") as f:
+            plistlib.dump(d, f)
+        rc, out, _ = self.run_mm("check")
+        self.assertEqual(rc, 1)
+        self.assertIn("E_PLIST the installed supervisor has ExitTimeOut unset, not 20 (a stop can be killed mid-tick); "
+                      "fix: mm install again", out)
+
+
+class C6RealSlots(Base):
+    """Live fault 2026-10-14: in observe mode `mm status` printed slots=3 (the controller's count) while the slots
+    file said 5. status.json slots is the real file; slots_would is the controller's count."""
+
+    def test_observe_mode_shows_the_real_count_and_the_decision(self):
+        import mmschema
+        sup = mmsuper.Supervisor(self.profile(), dry_run=False, kernel=False)
+        sup.state["virtual_slots"] = 3
+        sup._control = lambda *a, **kw: None  # the controller's count stays 3 (observe: it writes nothing)
+        sup.tick()
+        st = json.load(open(os.path.join(self.data, "status.json")))
+        self.assertEqual((st["slots"], st["slots_would"]), (5, 3))
+        self.assertEqual(mmschema.validate(st, mmschema.load("status")), [])
+        self.assertEqual(open(os.path.join(self.q, "slots")).read().split()[0], "5", "observe mode writes no slots")
+        rc, out, _ = self.run_mm("status")
+        self.assertIn(" slots=5 would=3 ", out[0])
 
 
 class R8Never(unittest.TestCase):

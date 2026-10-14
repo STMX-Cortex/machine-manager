@@ -74,6 +74,7 @@
   "self.resume_paused_after_s",
   "self.slow_ticks",
   "self.start_grace_s",
+  "self.stop_deadline_s",
   "self.watchdog_stale_s",
   "slots.amber_comp_mb",
   "slots.amber_free_pct",
@@ -452,6 +453,11 @@
    "type": "number",
    "minimum": 0,
    "maximum": 3600
+  },
+  "self.stop_deadline_s": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 15
   },
   "self.watchdog_stale_s": {
    "type": "number",

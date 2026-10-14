@@ -60,7 +60,15 @@
    "type": [
     "integer",
     "null"
-   ]
+   ],
+   "description": "the queue's real slot count (its slots file), or null when the queue cannot be read"
+  },
+  "slots_would": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "description": "the slot controller's count: what it set, or in observe mode what it would set"
   },
   "busy": {
    "type": "integer"
