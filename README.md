@@ -158,6 +158,23 @@ Exit codes: 0 ok; 1 nothing found or problems listed; 2 error (one `E_` line); 3
 Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFILE`, `E_NO_PROFILE`, `E_SETTINGS`, `E_HOOKS`, `E_READINGS`,
 `E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`.
 
+## Roadmap
+
+Today the tool watches one machine and one CI pool (GitHub Actions). Three parts come next. The rule for each part:
+you add any resource with a profile entry, and a new kind of resource needs one adapter file at most.
+
+1. **A list of pools.** The profile takes `[[pools]]` entries (each with an `id` and an `adapter`) in place of the
+   one `[ci]` section. The supervisor reads each pool apart. Each pool has its own status file, alert keys and
+   reserve. `mm place` already takes a list of candidates. Estimate: 1.5 to 2 hours.
+2. **Any kind of pool.** One pool contract for every resource: the capacity left in its own unit (minutes, credits,
+   tasks or slots), a reserve, the cost of a job, the queued and running work, and the start command. Two general
+   adapters: `command` (a script prints the pool's state as JSON, checked against a schema, so a new resource needs
+   only the script and a profile entry) and `static` (a fixed capacity). Examples: a second CI system, a cloud
+   machine, a cloud agent service. Estimate: 1.5 to 2 hours.
+3. **Many machines.** Each machine runs its own `mm` and writes its `status.json`. A collector reads them over the
+   network, and placement chooses across machines and pools. Safety actions stay local on each machine and never
+   depend on the network. Estimate: 1 to 2 days.
+
 ## Tests
 
 ```sh
