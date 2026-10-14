@@ -44,15 +44,16 @@ class Watchdog(TempData):
         rc, line = self.wd()
         self.assertEqual(rc, 1)
         self.assertIn("status.json 200 s old", line)
-        self.assertEqual(open(self.calls).read().split(),
-                         ["kickstart", "-k", "gui/%d/com.example.machine-manager-test" % os.getuid()])
+        self.assertEqual(open(self.calls).read().split(),  # loaded? then the restart
+                         ["print", "gui/%d/com.example.machine-manager-test" % os.getuid(),
+                          "kickstart", "-k", "gui/%d/com.example.machine-manager-test" % os.getuid()])
         recs = self.pushed()
         self.assertEqual([(r["name"], r["level"]) for r in recs], [("SELF_STALE", "ACTION")])
         self.assertIn("kickstart rc=0", recs[0]["text"])
         self.now += 60
         self.fresh(st_age=260)
         self.wd()
-        self.assertEqual(len(open(self.calls).read().splitlines()), 2)
+        self.assertEqual([l.split()[0] for l in open(self.calls).read().splitlines()], ["print", "kickstart"] * 2)
         self.assertEqual(len(self.pushed()), 1, "dedupe")
         self.now += 120
         self.fresh()
@@ -76,7 +77,7 @@ class Watchdog(TempData):
 
     def test_failing_launchctl_is_reported(self):
         with open(self.fake, "w") as f:
-            f.write("#!/bin/sh\nexit 113\n")
+            f.write('#!/bin/sh\n[ "$1" = print ] && exit 0\nexit 113\n')  # loaded, but the kickstart fails
         self.fresh(st_age=500)
         self.wd()
         self.assertIn("kickstart rc=113", self.pushed()[0]["text"])

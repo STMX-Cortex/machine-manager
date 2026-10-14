@@ -354,12 +354,21 @@ def install(profile, settings_src=None, observe_only=True):
         pass
     import mmrecover
     mmrecover.note_loaded(time.time())
-    for f, label in zip(rec["plists"], (sup, wd)):
+    for label in (sup, wd):
         launchctl(["bootout", "gui/%d/%s" % (os.getuid(), label)])
-        rc, out = launchctl(["bootstrap", "gui/%d" % os.getuid(), f])
-        rec.setdefault("bootstrap", []).append([label, rc])
+        rec.setdefault("bootstrap", []).append([label, bootstrap(label)])
     mmcore.write_atomic(os.path.join(mmcore.base_dir(), "install.json"), json.dumps(rec, indent=1))
+    bad = [(lb, rc) for lb, rc in rec["bootstrap"] if rc != 0]
+    if bad:
+        raise mmcore.MMError("E_INSTALL", "load failed: %s" % " ".join("%s=rc%s" % x for x in bad),
+                             "mm start, then mm status; mm rollback undoes the install")
     return rec
+
+
+def is_loaded(label):
+    """launchctl print finds the service (rc 0); 113 = not loaded."""
+    rc, _ = launchctl(["print", "gui/%d/%s" % (os.getuid(), label)])
+    return rc == 0
 
 
 def stop(profile, reason="stopped by hand", alert=True):
@@ -410,8 +419,7 @@ def bootstrap(label, tries=10, wait_s=1.0):
         if rc == 0:
             return 0
         time.sleep(wait_s)
-    prc, _ = launchctl(["print", "gui/%d/%s" % (os.getuid(), label)])
-    return 0 if prc == 0 else rc
+    return 0 if is_loaded(label) else rc
 
 
 def rollback(profile):

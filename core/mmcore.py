@@ -589,18 +589,21 @@ class AlertStore:
             st["active"][key] = r["entry"]
             write_atomic(self.state_file, json.dumps(st, sort_keys=True))
 
-    def finish(self, scope_prefixes=None, exclude_prefixes=("SELF_STALE", "WD:")):
+    def finish(self, scope_prefixes=None, exclude_prefixes=("SELF_STALE", "SELF_UNLOADED", "WD:")):
         """Clear every active key not raised since begin(): only keys under scope_prefixes (if given), never keys under
-        exclude_prefixes (the watchdog's keys; the supervisor must not clear them, the watchdog passes its own scope)."""
+        exclude_prefixes (the watchdog's keys; the supervisor must not clear them, the watchdog passes its own scope).
+        A pattern ending in ':' is a prefix; any other pattern is one exact key."""
+        def under(key, pats):
+            return any(key.startswith(p) if p.endswith(":") else key == p for p in pats)
         now = self.clock()
         with Locked(self.lock_file):
             st = self._load()
             for key in list(st["active"]):
                 if key in self.seen:
                     continue
-                if scope_prefixes is not None and not any(key.startswith(p) for p in scope_prefixes):
+                if scope_prefixes is not None and not under(key, scope_prefixes):
                     continue
-                if scope_prefixes is None and any(key.startswith(p) for p in exclude_prefixes):
+                if scope_prefixes is None and under(key, exclude_prefixes):
                     continue
                 r = mmdecide.alert_absent(st["active"][key], now, self.s)
                 if not r["clear"]:

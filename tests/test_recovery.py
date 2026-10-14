@@ -399,11 +399,12 @@ class R5Watchdog(Base):
         clock["t"] += 10
         sup.tick()
         self.assertIn(("WATCHDOG_STALE", "ATTENTION"), self.names())
-        self.assertEqual(self.launchctl(), [["kickstart", "-k", "gui/%d/%s" % (os.getuid(), WD)]])
+        self.assertEqual(self.launchctl(), [["print", "gui/%d/%s" % (os.getuid(), WD)],
+                                            ["kickstart", "-k", "gui/%d/%s" % (os.getuid(), WD)]])
         mmrecover.stamp_watchdog(clock["t"])
         clock["t"] += 10
         sup.tick()
-        self.assertEqual(len(self.launchctl()), 1)
+        self.assertEqual(len(self.launchctl()), 2)
 
     def test_not_installed_or_fresh_is_quiet(self):
         mmrecover.stamp_watchdog(time.time() - 400)
@@ -519,7 +520,7 @@ class C1StartGrace(Base):
         self.assertNotIn("SELF_STALE", [n for n, _ in self.names()])
         self.assertIn("supervisor starting", open(os.path.join(self.data, "state", "watchdog.log")).read())
         rc, out, _ = self.run_mm("watchdog", MM_NOW=str(now + 100))  # past 90 s and still no status.json
-        self.assertEqual(self.launchctl()[0][:2], ["kickstart", "-k"])
+        self.assertEqual([c[0] for c in self.launchctl()], ["print", "kickstart"])
         self.assertIn(("SELF_STALE", "ACTION"), self.names())
 
     def test_the_grace_counts_from_the_supervisors_own_start_too(self):
@@ -633,6 +634,94 @@ class C2Commands(Base):
         path_, found = mminstall.service_path(p, "/usr/bin:/bin")
         self.assertEqual(path_.split(":")[0], "/opt/extra/bin")
         self.assertEqual(found["/usr/bin/false"], "/usr/bin/false")
+
+
+class C4Loads(Base):
+    """Reinstall faults (21:50): the supervisor was not loaded after `mm install`, which still said installed=yes;
+    a not-loaded supervisor or watchdog cannot be kickstarted; a good gh read left SOURCE_STALE active 5 min."""
+
+    def fail(self, verb_label_rc):
+        """Make the fake launchctl fail: {(verb, label suffix): rc}; `print` of a failing label says not found (113)."""
+        with open(self.fake, "a") as f:
+            for (verb, lab), rc in verb_label_rc.items():
+                f.write('if a[:1] == [%r] and a[-1].endswith(%r):\n    sys.exit(%d)\n' % (verb, lab, rc))
+
+    def test_install_says_so_when_the_supervisor_does_not_load(self):
+        self.fail({("bootstrap", SUP + ".plist"): 5, ("print", SUP): 113})
+        rc, out, err = self.run_mm("install", timeout=120)
+        self.assertEqual(rc, 2, out + [err])
+        self.assertEqual(len(out), 1, out)
+        self.assertTrue(out[0].startswith("E_INSTALL load failed: %s=rc5; fix: mm start, then mm status" % SUP), out)
+        self.assertNotIn("installed=yes", "\n".join(out))
+        rec = json.load(open(os.path.join(self.root, "base", "install.json")))
+        self.assertEqual(rec["bootstrap"], [[SUP, 5], [WD, 0]], "the record stays, so rollback works")
+
+    def test_install_retries_a_failed_load(self):
+        counter = os.path.join(self.root, "n")
+        with open(self.fake, "a") as f:
+            f.write('if a[:1] == ["bootstrap"] and a[-1].endswith("%s.plist"):\n'
+                    '    n = int(open(%r).read()) if os.path.exists(%r) else 0\n'
+                    '    open(%r, "w").write(str(n + 1))\n'
+                    '    sys.exit(5 if n < 2 else 0)\n' % (SUP, counter, counter, counter))
+        rc, out, err = self.run_mm("install", timeout=120)
+        self.assertEqual(rc, 0, out + [err])
+        self.assertTrue(out[0].startswith("installed=yes"))
+
+    def test_watchdog_loads_an_unloaded_supervisor_and_says_so(self):
+        self.fail({("print", SUP): 113})
+        now = time.time()
+        mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps({"time": now - 600, "state": "GREEN"}))
+        rc, out, _ = self.run_mm("watchdog", MM_NOW=str(now))
+        calls = self.launchctl()
+        self.assertIn(["bootstrap", "gui/%d" % os.getuid(), os.path.join(self.root, "home", "Library", "LaunchAgents",
+                                                                         SUP + ".plist")], calls)
+        self.assertNotIn("kickstart", [c[0] for c in calls], "kickstart cannot start a service that is not loaded")
+        self.assertIn(("SELF_UNLOADED", "ACTION"), self.names())
+        self.assertIn("not loaded, bootstrap rc=0", open(os.path.join(self.data, "state", "watchdog.log")).read())
+
+    def test_watchdog_kickstarts_a_loaded_stale_supervisor(self):
+        now = time.time()
+        mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps({"time": now - 600, "state": "GREEN"}))
+        self.run_mm("watchdog", MM_NOW=str(now))
+        self.assertEqual([c[0] for c in self.launchctl()], ["print", "kickstart"])
+        self.assertNotIn("SELF_UNLOADED", [n for n, _ in self.names()])
+
+    def test_supervisor_loads_an_unloaded_watchdog(self):
+        os.makedirs(os.path.join(self.root, "base"), exist_ok=True)
+        mmcore.write_atomic(os.path.join(self.root, "base", "install.json"), json.dumps({"data": self.data}))
+        self.fail({("print", WD): 113})
+        mmrecover.stamp_watchdog(time.time() - 400)
+        self.sup().tick()
+        self.assertEqual([c[0] for c in self.launchctl()], ["print", "bootstrap"])
+        self.assertIn(("SELF_UNLOADED", "ACTION"), self.names())
+        active = json.load(open(os.path.join(self.data, "alerts-state.json")))["active"]
+        self.assertIn("SELF_UNLOADED:watchdog", active)
+
+    def test_a_good_gh_read_clears_its_source_stale_at_once(self):
+        st = mmcore.AlertStore(self.s())
+        st.begin()
+        for part in ("billing", "runs"):
+            st.raise_("SOURCE_STALE:gh-" + part, "SOURCE_STALE", "ATTENTION", "GitHub %s read failed: rc=None" % part)
+        sup = self.sup(slow_jobs=True)
+        sup.deletes.kick = lambda *a: False
+
+        class OneRead:
+            def __init__(self, rec):
+                self.rec = rec
+
+            def take(self):
+                r, self.rec = self.rec, None
+                return r
+
+            def kick(self, *a):
+                return False
+        sup.gh = OneRead({"time": time.time(), "errors": {"runs": "rc=1"}, "pool_id": "ci:example/project"})
+        sup.tick()
+        active = json.load(open(os.path.join(self.data, "alerts-state.json")))["active"]
+        self.assertNotIn("SOURCE_STALE:gh-billing", active, "billing read fine: cleared at once")
+        self.assertIn("SOURCE_STALE:gh-runs", active, "runs still fails")
+        cleared = [r for r in self.pushed() if r.get("why") == "cleared"]
+        self.assertEqual([r["key"] for r in cleared], ["SOURCE_STALE:gh-billing"])
 
 
 class C3SizesInterval(Base):

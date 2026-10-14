@@ -216,6 +216,18 @@ def month_pace(minutes, now):
     return minutes / max(day, 0.5) * dim
 
 
+READ_PARTS = ("runs", "billing")
+
+
+def good_keys(gh):
+    """The SOURCE_STALE keys a fresh read proves good: gh itself, and each part read without an error. The caller clears
+    them at once (a good read is proof, so the usual clear delay does not apply)."""
+    if not gh:
+        return []
+    errs = gh.get("errors") or {}
+    return ["SOURCE_STALE:gh"] + ["SOURCE_STALE:gh-" + p for p in READ_PARTS if p not in errs]
+
+
 def conditions(gh, s, now, mk, owner="the owner"):
     """GH_FAIL, GH_STUCK, GH_DONE, GUARD_NEAR/STOP, GH_PACE and gh SOURCE_STALE from the last read (`mk` = mmalerts._c)."""
     out = []
@@ -293,6 +305,9 @@ class Pool:
 
     def conditions(self, gh, s, now, mk, owner):
         return conditions(gh, s, now, mk, owner)
+
+    def good_keys(self, gh):
+        return good_keys(gh)
 
     def job(self, s, now):
         """One full read in a worker thread: the watched runs too; writes state/github.json."""

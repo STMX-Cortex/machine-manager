@@ -46,10 +46,17 @@ def check(now, s, profile, restart=True):
         why = "no status.json" if age is None else "status.json %.0f s old (limit %g s)" % (age, limit)
         restarted = ""
         if restart:
-            argv = [os.environ.get("MM_LAUNCHCTL", "/bin/launchctl"), "kickstart", "-k",
-                    "gui/%d/%s" % (os.getuid(), label(profile))]
-            rc, _ = mmread.run(argv, timeout=20)
-            restarted = "; kickstart rc=%s" % rc
+            import mminstall
+            if not mminstall.is_loaded(label(profile)):  # kickstart needs a loaded service: load it again
+                rc = mminstall.bootstrap(label(profile))
+                restarted = "; not loaded, bootstrap rc=%s" % rc
+                store.raise_("SELF_UNLOADED", "SELF_UNLOADED", "ACTION", "the supervisor was not loaded; loaded it again "
+                             "(rc=%s)" % rc, command="mm status")
+            else:
+                argv = [os.environ.get("MM_LAUNCHCTL", "/bin/launchctl"), "kickstart", "-k",
+                        "gui/%d/%s" % (os.getuid(), label(profile))]
+                rc, _ = mmread.run(argv, timeout=20)
+                restarted = "; kickstart rc=%s" % rc
             mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s %s%s" % (mmcore.now_local(now), why, restarted))
         store.raise_("SELF_STALE", "SELF_STALE", "ACTION", "supervisor stale: %s%s; the launch gate is open" % (why, restarted),
                      command="mm status")
@@ -72,5 +79,5 @@ def check(now, s, profile, restart=True):
             why = "queue sampler " + ("missing" if la is None else "%.0f s old" % la)
             store.raise_("WD:queue-sampler", "SOURCE_STALE", "ATTENTION", why + ": the load sampler may be down")
             problems.append(why)
-    store.finish(scope_prefixes=("SELF_STALE", "WD:"))
+    store.finish(scope_prefixes=("SELF_STALE", "SELF_UNLOADED", "WD:"))
     return problems

@@ -552,6 +552,8 @@ class Supervisor:
             got = self.gh.take()
             if got is not None:
                 self.cache["github"] = got
+                for k in self.pool.good_keys(got):  # a good read clears its SOURCE_STALE now, not 5 min later
+                    store.clear(k)
             if self.due("gh", s["github.read_interval_s"], now) or self._watch_pending(now, s):
                 self.gh.kick(s, now)
         gh = self.cache.get("github")
@@ -650,13 +652,22 @@ class Supervisor:
             age = mmrecover.watchdog_age(now)
             if (age if age is not None else now - self.started) > s["self.watchdog_stale_s"]:
                 text = "watchdog %s" % ("never ran" if age is None else "last ran %.0f s ago" % age)
+                import mminstall
+                wd = mminstall.labels(self.p)[1]
                 if now - self.state.get("watchdog_kick", 0) >= 600:
                     self.state["watchdog_kick"] = now
-                    import mmwatch
-                    argv = [os.environ.get("MM_LAUNCHCTL", "/bin/launchctl"), "kickstart", "-k",
-                            "gui/%d/%s" % (os.getuid(), mmwatch.label(self.p, "-watchdog"))]
-                    rc, _ = mmread.run(argv, timeout=20)
-                    mmrecover.log("WATCHDOG_STALE %s; kickstart rc=%s" % (text, rc), now)
+                    self.state["watchdog_unloaded"] = None
+                    if not mminstall.is_loaded(wd):  # kickstart needs a loaded service: load it again
+                        rc = mminstall.bootstrap(wd)
+                        self.state["watchdog_unloaded"] = rc
+                        mmrecover.log("WATCHDOG_UNLOADED %s; bootstrap rc=%s" % (text, rc), now)
+                    else:
+                        rc, _ = mminstall.launchctl(["kickstart", "-k", "gui/%d/%s" % (os.getuid(), wd)])
+                        mmrecover.log("WATCHDOG_STALE %s; kickstart rc=%s" % (text, rc), now)
+                if self.state.get("watchdog_unloaded") is not None:
+                    out.append(mmalerts._c("SELF_UNLOADED:watchdog", "SELF_UNLOADED", "ACTION",
+                                           "the watchdog was not loaded; loaded it again (rc=%s)" % self.state["watchdog_unloaded"],
+                                           command="mm status"))
                 out.append(mmalerts._c("WATCHDOG_STALE", "WATCHDOG_STALE", "ATTENTION",
                                        text + "; restarted it; nothing restarts a stuck supervisor meanwhile",
                                        command="mm status"))
