@@ -1,0 +1,11 @@
+{
+ "case": "empty",
+ "expected": [],
+ "function": "resume_targets",
+ "input": {
+  "current": {},
+  "paused": {}
+ },
+ "settings": "base",
+ "settings_over": {}
+}

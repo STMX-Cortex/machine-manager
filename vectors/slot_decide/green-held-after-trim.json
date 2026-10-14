@@ -1,0 +1,33 @@
+{
+ "case": "green-held-after-trim",
+ "expected": {
+  "slots": null,
+  "state": {
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0,
+   "last_trim": 1800000000.0
+  },
+  "why": null
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 5,
+   "events": [
+    "trim"
+   ],
+   "mac_state": "GREEN",
+   "now": 1800000000.0,
+   "reasons": [],
+   "slots": 5,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": {
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

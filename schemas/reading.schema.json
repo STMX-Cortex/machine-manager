@@ -1,0 +1,74 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "One memory and CPU sample (the input of classify)",
+ "type": "object",
+ "required": [
+  "t"
+ ],
+ "properties": {
+  "t": {
+   "type": "number"
+  },
+  "free_pct": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "swap_used_mb": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "swap_total_mb": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "comp_mb": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "pressure": {
+   "type": [
+    "integer",
+    "null"
+   ]
+  },
+  "seg_pct": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "load1": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "load5": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "sys_pct": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "sys_pct_interval": {
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "additionalProperties": true
+}

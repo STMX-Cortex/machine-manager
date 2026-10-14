@@ -1,0 +1,10 @@
+{
+ "case": "keeps-hex",
+ "expected": "commit 4f1c2d3e4f1c2d3e4f1c2d3e4f1c2d3e4f1c2d3e",
+ "function": "mask",
+ "input": {
+  "text": "commit 4f1c2d3e4f1c2d3e4f1c2d3e4f1c2d3e4f1c2d3e"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,18 @@
+{
+ "case": "power",
+ "expected": [
+  [
+   "POWER",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "on_ac": false
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

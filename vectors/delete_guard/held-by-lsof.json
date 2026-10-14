@@ -1,0 +1,25 @@
+{
+ "case": "held-by-lsof",
+ "expected": {
+  "guard": "lsof=pids 4242",
+  "verb": "KEEP"
+ },
+ "function": "delete_guard",
+ "input": {
+  "age_minutes": 360,
+  "enabled": true,
+  "forbidden": false,
+  "held": "lsof=pids 4242",
+  "keep_file": false,
+  "live_tools": [],
+  "needs_no_live_tools": true,
+  "parent_ok": true,
+  "symlink": false,
+  "untouched": [
+   true,
+   null
+  ]
+ },
+ "settings": "base",
+ "settings_over": {}
+}

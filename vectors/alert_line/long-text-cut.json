@@ -1,0 +1,16 @@
+{
+ "case": "long-text-cut",
+ "expected": "ACTION MEM_RED x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x... | do: mm status",
+ "function": "alert_line",
+ "input": {
+  "rec": {
+   "command": "mm status",
+   "key": "MEM",
+   "level": "ACTION",
+   "name": "MEM_RED",
+   "text": "x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x "
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,10 @@
+{
+ "case": "flag",
+ "expected": "tool --token *** --x",
+ "function": "mask",
+ "input": {
+  "text": "tool --token s3cr3tvalue --x"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

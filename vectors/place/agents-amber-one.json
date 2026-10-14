@@ -1,0 +1,63 @@
+{
+ "case": "agents-amber-one",
+ "expected": {
+  "candidate": null,
+  "need_guard": null,
+  "place": "WAIT",
+  "reasons": [
+   "state AMBER: all readings in the green band",
+   "AMBER: launch one agent at a time"
+  ]
+ },
+ "function": "place",
+ "input": {
+  "ctx": {
+   "kinds": {
+    "machine_only": {
+     "merge-wide": "the wide run stays on the machine",
+     "other": "kind 'other' runs on the machine"
+    },
+    "pool": {
+     "go-test": 8,
+     "rust-mutants": 64
+    }
+   },
+   "machine": {
+    "free_pct": 80.0,
+    "id": "m1",
+    "medians": {
+     "go-test": 15.0
+    },
+    "queue": {
+     "busy": [],
+     "slots": 3,
+     "tickets": []
+    },
+    "reasons": [
+     "all readings in the green band"
+    ],
+    "state": "AMBER"
+   },
+   "now": 1800000000.0,
+   "pools": [
+    {
+     "guard": null,
+     "guard_why": null,
+     "id": "ci:example/project",
+     "job_minutes": 40,
+     "minutes_left": 20000,
+     "minutes_source": "read",
+     "plan_minutes": 2,
+     "stop_active": false
+    }
+   ],
+   "wide_kind": "merge-wide"
+  },
+  "req": {
+   "agents": 2,
+   "kind": "other"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,141 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "The status record of a machine or a pool, written every tick (status.json, pools/<id>.json)",
+ "type": "object",
+ "required": [
+  "kind",
+  "time",
+  "state",
+  "machine_id",
+  "schema_version"
+ ],
+ "properties": {
+  "machine_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "schema_version": {
+   "const": 1
+  },
+  "kind": {
+   "enum": [
+    "machine",
+    "pool"
+   ]
+  },
+  "time": {
+   "type": "number"
+  },
+  "state": {
+   "enum": [
+    "GREEN",
+    "STEADY",
+    "AMBER",
+    "RED",
+    "UNKNOWN"
+   ]
+  },
+  "reasons": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "red_since": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "mode": {
+   "enum": [
+    "act",
+    "observe",
+    "off",
+    "safe",
+    "dry"
+   ]
+  },
+  "slots": {
+   "type": [
+    "integer",
+    "null"
+   ]
+  },
+  "busy": {
+   "type": "integer"
+  },
+  "waiting": {
+   "type": "integer"
+  },
+  "readings": {
+   "type": "object",
+   "additionalProperties": {
+    "type": [
+     "number",
+     "null"
+    ]
+   }
+  },
+  "disk_gb": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "sampler": {
+   "enum": [
+    "fast",
+    "commands"
+   ]
+  },
+  "alerts": {
+   "anyOf": [
+    {
+     "type": "object",
+     "additionalProperties": {
+      "type": "integer"
+     }
+    },
+    {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   ]
+  },
+  "heartbeat": {
+   "type": "object",
+   "required": [
+    "pid",
+    "tick",
+    "note"
+   ],
+   "properties": {
+    "pid": {
+     "type": "integer"
+    },
+    "tick": {
+     "type": "integer"
+    },
+    "note": {
+     "type": "string"
+    }
+   }
+  },
+  "capacity": {
+   "type": "object"
+  },
+  "load": {
+   "type": "object"
+  },
+  "read_time": {
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "additionalProperties": false
+}

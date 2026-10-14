@@ -1,0 +1,19 @@
+{
+ "case": "entries-in-guard",
+ "expected": {
+  "bytes": 10,
+  "guard": "pass: live_tools=none before and after entries=2",
+  "machine_id": "m1",
+  "path": "/c",
+  "rule": "S5",
+  "schema_version": 1,
+  "time": "2026-01-02 03:04:05",
+  "verb": "WOULD-DELETE"
+ },
+ "function": "parse_delete_line",
+ "input": {
+  "line": "2026-01-02 03:04:05 WOULD-DELETE rule=S5 path=/c bytes=10 guard=pass: live_tools=none before and after entries=2 machine=m1 v=1"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

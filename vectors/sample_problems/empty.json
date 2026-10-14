@@ -1,0 +1,18 @@
+{
+ "case": "empty",
+ "expected": [
+  "free_pct missing",
+  "swap_total_mb missing",
+  "swap_used_mb missing",
+  "comp_mb missing",
+  "pressure missing",
+  "load1 missing",
+  "load5 missing"
+ ],
+ "function": "sample_problems",
+ "input": {
+  "sample": {}
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,20 @@
+{
+ "case": "row",
+ "expected": {
+  "cmd": "zsh -c python3 worker.py\t--limit 300",
+  "cwd": "/a\tb",
+  "mem": "steady",
+  "mode": "S",
+  "pid": 4807,
+  "rc": "0",
+  "run": 134.0,
+  "wait": 7.0,
+  "words": "zsh -c x"
+ },
+ "function": "parse_history_line",
+ "input": {
+  "line": "2026-10-14T11:42:01\t4807\tS\twait=7\trun=134\trc=0\tmem=steady\tcwd=/a\\tb\tzsh -c x\tzsh -c python3 worker.py\t--limit 300"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,18 @@
+{
+ "case": "time-limit",
+ "expected": "time limit 900s",
+ "function": "drill_stop",
+ "input": {
+  "elapsed_s": 900,
+  "free_pct": 70.0,
+  "interrupted": false,
+  "state": "GREEN",
+  "step_mb": 512,
+  "swap_start_mb": 500.0,
+  "swap_used_mb": 500.0,
+  "time_limit_s": 900,
+  "total_mb": 16384
+ },
+ "settings": "base",
+ "settings_over": {}
+}

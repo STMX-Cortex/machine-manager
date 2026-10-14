@@ -1,0 +1,30 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "A slot pin (override.json, written by mm slots pin)",
+ "type": "object",
+ "required": [
+  "slots",
+  "until",
+  "reason"
+ ],
+ "properties": {
+  "slots": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 16
+  },
+  "until": {
+   "type": "number"
+  },
+  "reason": {
+   "type": "string"
+  },
+  "machine_id": {
+   "type": "string"
+  },
+  "schema_version": {
+   "const": 1
+  }
+ },
+ "additionalProperties": false
+}

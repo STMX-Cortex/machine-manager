@@ -1,0 +1,30 @@
+{
+ "case": "red-at-floor",
+ "expected": {
+  "slots": null,
+  "state": {
+   "green_since": null,
+   "last_change": 1799996400.0,
+   "last_red": 1800000000.0
+  },
+  "why": null
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 5,
+   "mac_state": "RED",
+   "now": 1800000000.0,
+   "reasons": [],
+   "slots": 3,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": {
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

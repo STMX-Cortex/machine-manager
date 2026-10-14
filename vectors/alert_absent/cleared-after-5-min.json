@@ -1,0 +1,41 @@
+{
+ "case": "cleared-after-5-min",
+ "expected": {
+  "clear": true,
+  "entry": {
+   "absent_since": 1799999699.0,
+   "count": 5,
+   "first": 1799999400.0,
+   "key": "DISK_LOW",
+   "last": 1799999940.0,
+   "level": "ACTION",
+   "name": "DISK_LOW",
+   "pushed_at": 1799999400.0,
+   "pushed_level": "ACTION",
+   "pushed_value": 38.0,
+   "text": "disk 38 GB",
+   "value": 38.0
+  },
+  "push_cleared": true
+ },
+ "function": "alert_absent",
+ "input": {
+  "entry": {
+   "absent_since": 1799999699.0,
+   "count": 5,
+   "first": 1799999400.0,
+   "key": "DISK_LOW",
+   "last": 1799999940.0,
+   "level": "ACTION",
+   "name": "DISK_LOW",
+   "pushed_at": 1799999400.0,
+   "pushed_level": "ACTION",
+   "pushed_value": 38.0,
+   "text": "disk 38 GB",
+   "value": 38.0
+  },
+  "now": 1800000000.0
+ },
+ "settings": "base",
+ "settings_over": {}
+}

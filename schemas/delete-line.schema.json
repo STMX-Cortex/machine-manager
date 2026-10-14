@@ -1,0 +1,55 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "One deletes.log line, parsed by mmcore.parse_delete_line (pattern: <date> <time> VERB rule=ID path=P (JSON-quoted when it holds a space or a quote) [bytes=N] guard=G machine=M v=1)",
+ "type": "object",
+ "required": [
+  "time",
+  "verb",
+  "rule",
+  "path",
+  "guard",
+  "machine_id",
+  "schema_version"
+ ],
+ "properties": {
+  "machine_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "schema_version": {
+   "const": 1
+  },
+  "time": {
+   "type": "string"
+  },
+  "verb": {
+   "enum": [
+    "DELETE",
+    "WOULD-DELETE",
+    "KEEP",
+    "RAN",
+    "WOULD-RUN",
+    "NOTE",
+    "WOULD-TRIM"
+   ]
+  },
+  "rule": {
+   "type": "string",
+   "minLength": 1
+  },
+  "path": {
+   "type": "string"
+  },
+  "bytes": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "minimum": 0
+  },
+  "guard": {
+   "type": "string"
+  }
+ },
+ "additionalProperties": false
+}

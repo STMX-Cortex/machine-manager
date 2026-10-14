@@ -1,0 +1,85 @@
+# The test profile: every path is inside the test's data folder ({data}).
+name = "test"
+machine_id = "test-machine"
+
+[names]
+owner = "the owner"
+recipient = "the agent"
+trim_command = "trim-by-hand --age 360"
+jobs_file = "jobs.md"
+
+[service]
+label_prefix = "com.example.machine-manager-test"
+rollback_notes = ["restart the old guard by hand"]
+
+[sizes]
+cache = "{data}/cache"
+
+[live_tools]
+names = ["go", "testshard", "test2json"]
+suffixes = [".test"]
+path_regexes = ["/go-build[0-9]+/"]
+
+[memory_guard]
+state_file = "{data}/guard/state.json"
+kills_log = "{data}/guard/kills.log"
+max_age_s = 60
+
+[queue]
+adapter = "fifo-gates"
+dir = "{data}/queue"
+launcher = "launcher.py"
+exclusive_env = { QUEUE_EXCLUSIVE_OK = "1" }
+wide_mode_kind = "merge-wide"
+exclusive_mode_kind = "timing-rerun"
+kind_patterns = [["cargo[ -]mutants", "rust-mutants"], ["pytest", "py-suite"], ["\\bgo test\\b", "go-test"]]
+
+[kinds]
+wide = "merge-wide"
+[kinds.machine_only]
+merge-wide = "the wide merge run stays on the machine"
+timing-rerun = "a timing rerun is measured on the machine"
+other = "kind 'other' runs on the machine"
+[kinds.pool]
+go-test = 8
+rust-mutants = 64
+py-suite = 64
+
+[ci]
+adapter = "github-gh"
+pool_id = "ci:example/project"
+repo = "example/project"
+billing_path = "/organizations/example/settings/billing/usage"
+guard_argv = ["/usr/bin/false"]
+guard_args = { default = ["--kind", "go-test", "--shards", "{shards}", "--race", "{race}", "--packages", "{packages}"], rust-mutants = ["--kind", "rust-mutants", "--shards", "{shards}", "--crate", "{crate}", "--diff-base", "{diff_base}"] }
+guard_defaults = { packages = "./..." }
+job_minutes = 40
+plan_minutes = 2
+dispatch_kinds = ["go-test", "rust-mutants"]
+push_command = "git push origin {sha}:refs/heads/{branch}"
+dispatch_argv = ["ci-dispatch", "--branch", "{branch}"]
+scratch_command = "make-scratch-branch {branch}"
+noise = [{ workflow_regex = "^probe" }]
+
+[delivery]
+adapter = "claude-code-hook"
+recipient_file = "{data}/recipient.md"
+recipient_regex = "Session: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+jobs_file = "{data}/recipient.md"
+jobs_end_marker = "<!-- end -->"
+transcripts_dir = "{data}/transcripts"
+usage_state = "{data}/usage.json"
+investigator = "agents/investigator.md"
+launch_tools = ["Agent", "Task", "Workflow"]
+launch_bash_regex = "(^|[;&|(]\\s*)(\\S*/)?(agent-launch|codex|claude)(\\s|$)"
+settings_file = "{data}/claude-settings.json"
+
+[trim]
+cache = "{data}/cache"
+marker_file = "README"
+marker_text = "Go build"
+warm_argv = ["/bin/echo", "warm", "{cache}"]
+
+[deletes]
+forbidden_parts = [".records", ".ssh"]
+protected_roots = ["{data}/repo"]

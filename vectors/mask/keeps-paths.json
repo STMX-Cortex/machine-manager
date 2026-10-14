@@ -1,0 +1,10 @@
+{
+ "case": "keeps-paths",
+ "expected": "/w/go-build1234567890/b001/exe/main",
+ "function": "mask",
+ "input": {
+  "text": "/w/go-build1234567890/b001/exe/main"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

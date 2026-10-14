@@ -1,0 +1,20 @@
+{
+ "case": "codex-95",
+ "expected": [
+  [
+   "CODEX95",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "usage": {
+    "codex_week": 95
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

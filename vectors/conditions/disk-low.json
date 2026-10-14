@@ -1,0 +1,18 @@
+{
+ "case": "disk-low",
+ "expected": [
+  [
+   "DISK_LOW",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "disk_gb": 35.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

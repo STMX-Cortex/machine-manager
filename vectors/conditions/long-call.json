@@ -1,0 +1,30 @@
+{
+ "case": "long-call",
+ "expected": [
+  [
+   "LONG_CALL",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "queue": {
+    "busy": [
+     {
+      "label": "S 8 go test",
+      "mode": "S",
+      "pid": 8,
+      "since": 1799998500.0,
+      "slot": ".slot.2"
+     }
+    ],
+    "slots": 5,
+    "tickets": []
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

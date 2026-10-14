@@ -1,0 +1,26 @@
+{
+ "case": "kernel-suspend",
+ "expected": [
+  [
+   "KERNEL_SUSPEND",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "kernel_events": [
+    {
+     "kind": "suspending",
+     "pid": 1,
+     "process": "AppA",
+     "time": "2026-01-01 09:13:09",
+     "why": "swap exhaustion"
+    }
+   ]
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

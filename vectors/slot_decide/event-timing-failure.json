@@ -1,0 +1,33 @@
+{
+ "case": "event-timing-failure",
+ "expected": {
+  "slots": 4,
+  "state": {
+   "green_since": null,
+   "last_change": 1800000000.0,
+   "last_down": 1800000000.0
+  },
+  "why": "AMBER: timing-failure"
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 5,
+   "events": [
+    "timing-failure"
+   ],
+   "mac_state": "STEADY",
+   "now": 1800000000.0,
+   "reasons": [],
+   "slots": 5,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": {
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

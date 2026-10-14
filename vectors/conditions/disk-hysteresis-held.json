@@ -1,0 +1,21 @@
+{
+ "case": "disk-hysteresis-held",
+ "expected": [
+  [
+   "DISK_LOW",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "active": [
+   "DISK_LOW"
+  ],
+  "now": 1800000000.0,
+  "snap": {
+   "disk_gb": 42.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

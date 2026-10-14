@@ -1,0 +1,38 @@
+{
+ "case": "reboot-panic-and-jobs",
+ "expected": {
+  "down_s": 900.0,
+  "level": "ACTION",
+  "new_panics": [
+   "panic-full-2026-10-14.panic"
+  ],
+  "text": "Mac rebooted: up 5 min; tool down 15 min; before: AMBER slots 4; 1 new panic report; not running: load sampler, memory guard",
+  "uptime_s": 300.0
+ },
+ "function": "reboot_check",
+ "input": {
+  "cur": {
+   "boot_time": 1799999700.0,
+   "missing_jobs": [
+    "load sampler",
+    "memory guard"
+   ],
+   "now": 1800000000.0,
+   "panics": [
+    "panic-old.panic",
+    "panic-full-2026-10-14.panic"
+   ]
+  },
+  "prev": {
+   "boot_time": 1799913600.0,
+   "last_slots": 4,
+   "last_state": "AMBER",
+   "last_tick": 1799999100.0,
+   "panics": [
+    "panic-old.panic"
+   ]
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

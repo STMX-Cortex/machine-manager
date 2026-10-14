@@ -1,0 +1,10 @@
+{
+ "case": "known-prefix",
+ "expected": "key *** end",
+ "function": "mask",
+ "input": {
+  "text": "key ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123 end"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

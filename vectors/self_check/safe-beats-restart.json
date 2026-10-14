@@ -1,0 +1,31 @@
+{
+ "case": "safe-beats-restart",
+ "expected": {
+  "action": "safe",
+  "reasons": [
+   "the data folder is not writable",
+   "own memory 250 MB above 200 MB"
+  ],
+  "state": {
+   "bad": 0,
+   "slow": 0
+  }
+ },
+ "function": "self_check",
+ "input": {
+  "inp": {
+   "data_free_mb": 50000.0,
+   "data_writable": false,
+   "now": 1800000000.0,
+   "reading_problems": [],
+   "rss_mb": 250.0,
+   "safe": false,
+   "slot_changes": [],
+   "tick_errors": 0,
+   "tick_s": 0.4
+  },
+  "state": {}
+ },
+ "settings": "base",
+ "settings_over": {}
+}

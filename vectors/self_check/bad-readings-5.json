@@ -1,0 +1,32 @@
+{
+ "case": "bad-readings-5",
+ "expected": {
+  "action": "ok",
+  "reasons": [],
+  "state": {
+   "bad": 5,
+   "slow": 0
+  }
+ },
+ "function": "self_check",
+ "input": {
+  "inp": {
+   "data_free_mb": 50000.0,
+   "data_writable": true,
+   "now": 1800000000.0,
+   "reading_problems": [
+    "free_pct missing"
+   ],
+   "rss_mb": 40.0,
+   "safe": false,
+   "slot_changes": [],
+   "tick_errors": 0,
+   "tick_s": 0.4
+  },
+  "state": {
+   "bad": 4
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

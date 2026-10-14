@@ -1,0 +1,8 @@
+2026-10-14 09:13:09.826 Df kernel[0:1] memorystatus: triggering no paging space action
+2026-10-14 09:13:09.826 Df kernel[0:1] memorystatus: attempting pcontrol on [4242]
+2026-10-14 09:13:09.826 Df kernel[0:1] memorystatus: doing pcontrol on AppA [4242]
+2026-10-14 09:13:09.826 Df kernel[0:1] memorystatus: suspending AppA [4242] due to swap exhaustion
+2026-10-14 09:13:14.908 Df kernel[0:1] memorystatus: triggering no paging space action
+2026-10-14 09:13:14.908 Df kernel[0:1] memorystatus: attempting pcontrol on [5151]
+2026-10-14 09:13:14.908 Df kernel[0:1] memorystatus: doing pcontrol on App B [5151]
+2026-10-14 09:13:14.908 Df kernel[0:1] memorystatus: suspending App B [5151] due to swap exhaustion

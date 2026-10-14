@@ -1,0 +1,4 @@
+{"timestamp": "2026-10-14 09:13:09.826133+0300", "eventMessage": "memorystatus: triggering no paging space action", "processImagePath": "/kernel", "messageType": "Default"}
+{"timestamp": "2026-10-14 09:13:09.826372+0300", "eventMessage": "memorystatus: suspending AppA [4242] due to swap exhaustion", "processImagePath": "/kernel", "messageType": "Default"}
+{"timestamp": "2026-10-14 09:13:14.908414+0300", "eventMessage": "memorystatus: triggering no paging space action", "processImagePath": "/kernel", "messageType": "Default"}
+{"timestamp": "2026-10-14 09:13:14.908678+0300", "eventMessage": "memorystatus: suspending App B [5151] due to swap exhaustion", "processImagePath": "/kernel", "messageType": "Default"}

@@ -1,0 +1,25 @@
+{
+ "case": "outside-root",
+ "expected": {
+  "guard": "not directly inside an allowed root",
+  "verb": "KEEP"
+ },
+ "function": "delete_guard",
+ "input": {
+  "age_minutes": 360,
+  "enabled": true,
+  "forbidden": false,
+  "held": null,
+  "keep_file": false,
+  "live_tools": [],
+  "needs_no_live_tools": true,
+  "parent_ok": false,
+  "symlink": false,
+  "untouched": [
+   true,
+   null
+  ]
+ },
+ "settings": "base",
+ "settings_over": {}
+}

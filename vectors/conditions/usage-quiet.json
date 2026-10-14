@@ -1,0 +1,18 @@
+{
+ "case": "usage-quiet",
+ "expected": [],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "usage": {
+    "claude_5h": 84,
+    "claude_week": 97,
+    "codex_week": 94,
+    "proj": 95.0
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

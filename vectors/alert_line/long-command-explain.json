@@ -1,0 +1,16 @@
+{
+ "case": "long-command-explain",
+ "expected": "ACTION CACHE_BIG build cache 61 GB | do: mm explain CACHE_BIG",
+ "function": "alert_line",
+ "input": {
+  "rec": {
+   "command": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+   "key": "CACHE_BIG",
+   "level": "ACTION",
+   "name": "CACHE_BIG",
+   "text": "build cache 61 GB"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

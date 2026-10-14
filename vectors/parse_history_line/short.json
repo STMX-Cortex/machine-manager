@@ -1,0 +1,10 @@
+{
+ "case": "short",
+ "expected": null,
+ "function": "parse_history_line",
+ "input": {
+  "line": "short\tline"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

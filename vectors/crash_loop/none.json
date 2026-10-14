@@ -1,0 +1,14 @@
+{
+ "case": "none",
+ "expected": {
+  "safe": false,
+  "starts": []
+ },
+ "function": "crash_loop",
+ "input": {
+  "now": 1800000000.0,
+  "starts": []
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,20 @@
+{
+ "case": "slot-cpu",
+ "expected": [
+  [
+   "SLOT_CPU",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "slot_cpu": {
+    ".slot.3": 9.0
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

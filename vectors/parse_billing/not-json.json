@@ -1,0 +1,13 @@
+{
+ "case": "not-json",
+ "expected": {
+  "error": true
+ },
+ "function": "parse_billing",
+ "input": {
+  "month": "2026-10",
+  "text": "<html>"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

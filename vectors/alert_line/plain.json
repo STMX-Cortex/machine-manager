@@ -1,0 +1,15 @@
+{
+ "case": "plain",
+ "expected": "ATTENTION DISK_TREND disk 50 GB",
+ "function": "alert_line",
+ "input": {
+  "rec": {
+   "key": "DISK_TREND",
+   "level": "ATTENTION",
+   "name": "DISK_TREND",
+   "text": "disk 50 GB"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,17 @@
+{
+ "case": "free-slot",
+ "expected": 0.0,
+ "function": "expected_wait",
+ "input": {
+  "default": 10,
+  "medians": {},
+  "now": 1800000000.0,
+  "q": {
+   "busy": [],
+   "slots": 3,
+   "tickets": []
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

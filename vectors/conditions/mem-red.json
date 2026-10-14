@@ -1,0 +1,29 @@
+{
+ "case": "mem-red",
+ "expected": [
+  [
+   "MEM_RED",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "state": [
+    "RED",
+    [
+     "compressor +2000 MB in 60 s"
+    ]
+   ],
+   "top_outside": [
+    [
+     "AppC",
+     3100.0
+    ]
+   ]
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

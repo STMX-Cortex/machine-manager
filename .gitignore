@@ -1,0 +1,5 @@
+# test output and Python caches
+tests/results/
+__pycache__/
+*.pyc
+.DS_Store

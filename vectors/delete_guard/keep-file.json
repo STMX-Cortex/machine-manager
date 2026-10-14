@@ -1,0 +1,25 @@
+{
+ "case": "keep-file",
+ "expected": {
+  "guard": ".keep",
+  "verb": "KEEP"
+ },
+ "function": "delete_guard",
+ "input": {
+  "age_minutes": 360,
+  "enabled": true,
+  "forbidden": false,
+  "held": null,
+  "keep_file": true,
+  "live_tools": [],
+  "needs_no_live_tools": true,
+  "parent_ok": true,
+  "symlink": false,
+  "untouched": [
+   true,
+   null
+  ]
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,30 @@
+{
+ "case": "reboot-no-last-tick",
+ "expected": {
+  "down_s": null,
+  "level": "ATTENTION",
+  "new_panics": [],
+  "text": "Mac rebooted: up 5 min; tool down unknown; before: ? slots ?; 0 new panic reports",
+  "uptime_s": 300.0
+ },
+ "function": "reboot_check",
+ "input": {
+  "cur": {
+   "boot_time": 1799999700.0,
+   "missing_jobs": [],
+   "now": 1800000000.0,
+   "panics": []
+  },
+  "prev": {
+   "boot_time": 1799913600.0,
+   "last_slots": null,
+   "last_state": null,
+   "last_tick": null,
+   "panics": [
+    "panic-old.panic"
+   ]
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,15 @@
+{
+ "case": "unknown-start",
+ "expected": [],
+ "function": "resume_targets",
+ "input": {
+  "current": {
+   "101": null
+  },
+  "paused": {
+   "101": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

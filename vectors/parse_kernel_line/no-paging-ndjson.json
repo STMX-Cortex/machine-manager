@@ -1,0 +1,13 @@
+{
+ "case": "no-paging-ndjson",
+ "expected": {
+  "kind": "no-paging-space",
+  "time": "2026-10-14 09:13:09.826133+0300"
+ },
+ "function": "parse_kernel_line",
+ "input": {
+  "line": "{\"timestamp\": \"2026-10-14 09:13:09.826133+0300\", \"eventMessage\": \"memorystatus: triggering no paging space action\"}"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

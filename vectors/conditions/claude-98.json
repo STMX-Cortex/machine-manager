@@ -1,0 +1,21 @@
+{
+ "case": "claude-98",
+ "expected": [
+  [
+   "CLAUDE98",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "usage": {
+    "claude_5h": 10,
+    "claude_week": 98
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

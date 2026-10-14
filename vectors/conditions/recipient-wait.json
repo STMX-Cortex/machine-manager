@@ -1,0 +1,21 @@
+{
+ "case": "recipient-wait",
+ "expected": [
+  [
+   "RECIPIENT_WAIT",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "recipient_wait": [
+    "Read",
+    900
+   ]
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

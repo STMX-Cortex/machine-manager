@@ -1,0 +1,503 @@
+#!/usr/bin/env -S python3 -I
+# SPDX-License-Identifier: Apache-2.0
+"""mm: the machine-manager command. Run `mm help` for the verbs. Output: plain `key=value` lines; --json for programs.
+
+Exit codes: 0 ok; 1 nothing found or problems listed; 2 usage error or failure (one `E_<CODE> what; fix: how` line);
+3 the supervisor is stale (wait); 10 place=POOL; 20 place=WAIT.
+"""
+import json
+import os
+import sys
+import time
+
+if sys.version_info < (3, 11):  # tomllib; the hook stays silent and never blocks (exit 0)
+    if "hook" in sys.argv[1:2]:
+        sys.exit(0)
+    print("E_PYTHON python %d.%d is older than 3.11; fix: run mm with python3.11 or newer, then mm install again"
+          % sys.version_info[:2])
+    sys.exit(2)
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+CODE = os.path.dirname(HERE)
+sys.path[:0] = [os.path.join(CODE, "core"), os.path.join(CODE, "adapters")]
+import mmcore  # noqa: E402
+
+HELP = """mm - machine-manager. Global: --profile FILE|NAME, --data DIR, --json.
+Agents:
+  mm status                 state, slots, memory, disk, alerts (at most 5 lines)
+  mm alerts                 active alerts, one line each
+  mm explain ID             one alert in full: text, command, evidence folder
+  mm ack ID                 silence an alert until it gets worse
+  mm place --kind K [--shards N] [--wide] [--agents N]
+                            where a job should run: MACHINE, POOL or WAIT
+  mm wait [--min-level attention|action]   block until an unseen alert (run it under a monitor)
+Owner:
+  mm off [--reason TEXT] | mm on      every automatic action off or on; on also ends safe mode
+  mm slots pin N --minutes M [--reason TEXT] | mm slots unpin
+  mm cleanup                delete candidates for a person, with exact commands (nothing is deleted)
+  mm event timing-failure [--note TEXT]
+  mm watch RUN_ID [--note TEXT]       watch one pool run; an alert when it ends
+  mm snapshot ID            an evidence bundle for an alert now
+  mm drill memory           a controlled memory load test (refuses unless the queue is empty)
+Setup:
+  mm init --profile NAME [--dir DIR] | mm check | mm install [--settings FILE]
+  mm stop | mm start | mm restart [--clear-safe] | mm rollback
+  mm selftest
+Internal (launchd and hooks): mm run [--dry-run] | mm watchdog | mm hook --event EVENT
+Exit: 0 ok, 1 none or problems, 2 error, 3 stale, 10 POOL, 20 WAIT."""
+
+
+def err(code, what, fix, rc=2):
+    print("%s %s; fix: %s" % (code, what, fix))
+    return rc
+
+
+def kv(d):
+    """`key=value` words; values with spaces are quoted."""
+    out = []
+    for k, v in d.items():
+        if v is None:
+            v = "none"
+        elif isinstance(v, bool):
+            v = "yes" if v else "no"
+        elif isinstance(v, float):
+            v = ("%.1f" % v).rstrip("0").rstrip(".")
+        v = str(v)
+        out.append("%s=%s" % (k, json.dumps(v) if (" " in v or not v) else v))
+    return " ".join(out)
+
+
+def emit(as_json, obj, lines):
+    if as_json:
+        print(json.dumps(obj, sort_keys=True))
+    else:
+        for line in lines:
+            print(line)
+
+
+def opt(args, name, default=None, cast=str):
+    if name in args:
+        i = args.index(name)
+        if i + 1 >= len(args):
+            raise mmcore.MMError("E_USAGE", "%s needs a value" % name, "mm help")
+        v = args[i + 1]
+        del args[i:i + 2]
+        try:
+            return cast(v)
+        except ValueError:
+            raise mmcore.MMError("E_USAGE", "%s %r is not valid" % (name, v), "mm help")
+    return default
+
+
+def flag(args, name):
+    if name in args:
+        args.remove(name)
+        return True
+    return False
+
+
+def settings():
+    st = mmcore.Settings()
+    s = st.load()
+    if s is None:
+        raise mmcore.MMError("E_SETTINGS", "settings invalid: %s" % st.problem, "mm check")
+    return s
+
+
+# ------------------------------------------------------------------------------------------- agent verbs
+
+def status_obj(now):
+    st = mmcore.read_json(mmcore.path("status.json"), None)
+    act = (mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}).get("active") or {}
+    acks = (mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}).get("acks") or {}
+    top = sorted(act.values(), key=lambda a: (-mmcore.LEVELS.get(a.get("level"), 0), -a.get("last", 0), a.get("key", "")))
+    return st, act, acks, top
+
+
+def cmd_status(args, as_json):
+    now = time.time()
+    st, act, acks, top = status_obj(now)
+    if not isinstance(st, dict):
+        emit(as_json, {"state": "UNKNOWN", "error": "E_NO_STATUS"},
+             ["E_NO_STATUS no status.json in %s; fix: mm start (or mm install)" % mmcore.data_dir()])
+        return 3
+    age = now - float(st.get("time", 0))
+    stale = age > 90
+    r = st.get("readings") or {}
+    counts = {lv: sum(1 for a in act.values() if a.get("level") == lv) for lv in ("ACTION", "ATTENTION", "INFO")}
+    obj = dict(st, status_age_s=round(age), stale=stale, active=counts,
+               top=[mmcore.display_id(a) for a in top[:3]], off=bool(mmcore.off_state()))
+    lines = [
+        kv({"state": st.get("state") if not stale else "UNKNOWN", "mode": st.get("mode"), "slots": st.get("slots"),
+            "busy": st.get("busy"), "waiting": st.get("waiting"), "machine": st.get("machine_id")}),
+        kv({"free_pct": r.get("free_pct"), "swap_mb": r.get("swap_used_mb"), "comp_mb": r.get("comp_mb"),
+            "pressure": r.get("pressure"), "load5": r.get("load5"), "sys_pct": r.get("sys_pct"), "disk_gb": st.get("disk_gb")}),
+        kv({"action": counts["ACTION"], "attention": counts["ATTENTION"], "info": counts["INFO"],
+            "top": ",".join(obj["top"]) or "none"}),
+    ]
+    if st.get("reasons") and st.get("state") in ("RED", "AMBER", "STEADY"):
+        lines.append("why=" + json.dumps("; ".join(st["reasons"])[:160]))
+    if stale:
+        lines.append("E_STALE status.json %.0f s old; fix: mm start; launch gate open" % age)
+    emit(as_json, obj, lines[:5])
+    return 3 if stale else 0
+
+
+def alert_recs():
+    stt = mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}
+    act = stt.get("active") or {}
+    return sorted(act.values(), key=lambda a: (-mmcore.LEVELS.get(a.get("level"), 0), a.get("key", ""))), stt.get("acks") or {}
+
+
+def cmd_alerts(args, as_json):
+    recs, acks = alert_recs()
+    lines = [mmcore.alert_line(dict(a, text=(a.get("text") or "") + (" (acked)" if a["key"] in acks else "")))
+             for a in recs]
+    emit(as_json, {"alerts": [dict(a, id=mmcore.display_id(a), acked=a["key"] in acks) for a in recs]},
+         lines or ["alerts=none"])
+    return 0 if recs else 1
+
+
+def cmd_explain(args, as_json, profile):
+    if not args:
+        return err("E_USAGE", "explain needs an alert id", "mm alerts, then mm explain ID")
+    stt = mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}
+    a = mmcore.find_alert(stt.get("active") or {}, args[0])
+    if a is None:
+        print("alert=none id=%s" % args[0])
+        return 1
+    idx = mmcore.read_json(mmcore.path("state", "evidence-index.json"), {}) or {}
+    ev = next((mmcore.path("evidence", v["slot"]) for v in idx.values() if v.get("key") == a["key"]), None)
+    inv = (profile.get("delivery") or {}).get("investigator")
+    obj = {"id": mmcore.display_id(a), "key": a["key"], "level": a["level"], "text": a.get("text"),
+           "command": a.get("command"), "since": mmcore.now_local(a.get("first")), "count": a.get("count"),
+           "acked": a["key"] in (stt.get("acks") or {}), "evidence": ev, "investigator": inv if ev else None}
+    lines = [kv({"id": obj["id"], "level": a["level"], "since": obj["since"], "count": a.get("count"), "acked": obj["acked"]}),
+             "text=" + json.dumps(a.get("text") or "")]
+    if a.get("command"):
+        lines.append("command=" + json.dumps(a["command"]))
+    if ev:
+        lines.append(kv({"evidence": ev, "investigator": inv}))
+    emit(as_json, obj, lines)
+    return 0
+
+
+def cmd_ack(args, as_json):
+    if not args:
+        return err("E_USAGE", "ack needs an alert id", "mm alerts, then mm ack ID")
+    stt = mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}
+    a = mmcore.find_alert(stt.get("active") or {}, args[0])
+    if a is None:
+        print("acked=no id=%s reason=not_active" % args[0])
+        return 1
+    mmcore.AlertStore(settings()).ack(a["key"])
+    print("acked=yes id=%s" % mmcore.display_id(a))
+    return 0
+
+
+def cmd_place(args, as_json, profile):
+    import mmadapters
+    import mmdecide
+    import mmplace
+    req = {"kind": opt(args, "--kind", "other"), "shards": opt(args, "--shards", 1, int), "wide": flag(args, "--wide"),
+           "agents": opt(args, "--agents", 0, int), "crate": opt(args, "--crate"), "diff_base": opt(args, "--diff-base"),
+           "race": flag(args, "--race"), "packages": opt(args, "--packages"), "sha": opt(args, "--sha"),
+           "branch": opt(args, "--branch")}
+    if args:
+        return err("E_USAGE", "unknown words: %s" % " ".join(args), "mm help")
+    rec = mmplace.place(req, settings(), profile, mmadapters.queue(profile), mmadapters.pool(profile))
+    lines = [kv({"place": rec["place"], "candidate": rec["candidate"]})] + ["why=" + json.dumps(r) for r in rec["reasons"]] + \
+            ["do=" + json.dumps(c) for c in rec["commands"]]
+    emit(as_json, rec, lines)
+    return mmdecide.EXIT[rec["place"]]
+
+
+def cmd_wait(args, as_json, profile):
+    import ad_deliver_claude as d
+    min_level = 3 if opt(args, "--min-level", "attention") == "action" else 2
+    poll = opt(args, "--poll", 5.0, float)
+    max_s = opt(args, "--max-seconds", 0.0, float)
+    session = opt(args, "--session") or d.recipient(profile.get("delivery") or {})
+    if not session:
+        return err("E_RECIPIENT", "no session id", "pass --session ID, or correct the profile's recipient_file")
+    pidf = mmcore.path("state", "waiter-%s.pid" % "".join(c if c.isalnum() or c == "-" else "_" for c in session))
+    mmcore.write_atomic(pidf, "%d\n" % os.getpid())
+    deadline = time.monotonic() + max_s if max_s else None
+    while True:
+        s = mmcore.Settings().load()
+        now = time.time()
+        stale = d.stale_line(s, now)
+        if stale:
+            print(stale)
+            return 3
+        recs = d.take_unseen(session, min_level, now)
+        recs = [r for r in recs if r.get("why") != "cleared"] or recs
+        if recs:
+            for line in d.format_alerts(recs):
+                print(line)
+            return 0
+        if deadline and time.monotonic() > deadline:
+            print("alerts=none waited_s=%g" % max_s)
+            return 1
+        time.sleep(poll)
+
+
+# ------------------------------------------------------------------------------------------- owner verbs
+
+def cmd_off(args, as_json, on, profile):
+    f = mmcore.path("off.json")
+    if on:
+        import mmrecover
+        try:
+            os.remove(f)
+        except FileNotFoundError:
+            pass
+        was = mmrecover.clear_safe("mm on")
+        print("actions=on" + (" safe=cleared" if was else ""))
+        return 0
+    reason = opt(args, "--reason", "mm off")
+    rec = mmcore.stamp({"off": True, "since": mmcore.now_local(), "reason": reason[:200]}, profile)
+    mmcore.write_atomic(f, json.dumps(rec))
+    print("actions=off since=%s" % rec["since"].replace(" ", "T"))
+    return 0
+
+
+def cmd_slots(args, as_json, profile):
+    s = settings()
+    f = mmcore.path("override.json")
+    if args[:1] == ["unpin"]:
+        try:
+            os.remove(f)
+        except FileNotFoundError:
+            pass
+        print("pin=none")
+        return 0
+    if args[:1] != ["pin"] or len(args) < 2:
+        return err("E_USAGE", "slots pin N --minutes M | slots unpin", "mm help")
+    minutes = opt(args, "--minutes", None, float)
+    reason = opt(args, "--reason", "pinned by hand")
+    try:
+        n = int(args[1])
+    except ValueError:
+        return err("E_USAGE", "slots pin needs a number", "mm slots pin 4 --minutes 60")
+    if minutes is None or not 1 <= minutes <= 1440:
+        return err("E_USAGE", "--minutes 1..1440 is required", "mm slots pin %d --minutes 60" % n)
+    if not s["slots.floor"] <= n <= s["slots.ceiling"]:
+        return err("E_RANGE", "slots %d outside %d..%d" % (n, s["slots.floor"], s["slots.ceiling"]), "choose a value in range")
+    rec = mmcore.stamp({"slots": n, "until": time.time() + minutes * 60, "reason": reason[:200]}, profile)
+    mmcore.write_atomic(f, json.dumps(rec))
+    print("pin=%d until=%s" % (n, mmcore.now_local(rec["until"]).replace(" ", "T")))
+    return 0
+
+
+def cmd_cleanup(args, as_json):
+    d = mmcore.read_json(mmcore.path("state", "cleanup-list.json"), None)
+    if not isinstance(d, dict):
+        print("cleanup=none reason=no_list_yet")
+        return 1
+    items = d.get("items") or []
+    lines = [kv({"rule": i["rule"], "gb": None if i.get("bytes") is None else round(i["bytes"] / 1e9, 1),
+                 "path": i["path"]}) + " do=" + json.dumps(i["command"]) for i in items] or ["cleanup=none"]
+    emit(as_json, d, lines)
+    return 0 if items else 1
+
+
+def cmd_event(args, as_json):
+    if args[:1] != ["timing-failure"]:
+        return err("E_USAGE", "event timing-failure [--note TEXT]", "mm help")
+    note = opt(args, "--note", "")
+    mmcore.append_line(mmcore.path("state", "events.jsonl"),
+                       json.dumps({"event": "timing-failure", "note": mmcore.mask(note)[:200], "time": mmcore.now_local()}),
+                       max_bytes=1 << 20)
+    print("event=timing-failure recorded=yes")
+    return 0
+
+
+def cmd_watch(args, as_json):
+    import ad_ci_github
+    note = opt(args, "--note", "")
+    if not args:
+        return err("E_USAGE", "watch needs a run id", "mm watch 123456 --note why")
+    try:
+        ad_ci_github.watch_add(args[0], note, time.time())
+    except ValueError as e:
+        return err("E_USAGE", str(e), "pass the run's number")
+    print("watch=%s" % args[0])
+    return 0
+
+
+def cmd_snapshot(args, as_json, profile):
+    import mmadapters
+    import mmevidence
+    if not args:
+        return err("E_USAGE", "snapshot needs an alert id", "mm alerts")
+    stt = mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}
+    a = mmcore.find_alert(stt.get("active") or {}, args[0])
+    if a is None:
+        print("alert=none id=%s" % args[0])
+        return 1
+    dl = mmadapters.delivery(profile)
+    d = mmevidence.bundle(dict(a, seq=a["key"]), settings(), time.time(), mmadapters.queue(profile),
+                          extra={"profile": profile}, usage_file=dl.usage_file() if dl else None)
+    print("evidence=%s" % d)
+    return 0
+
+
+def cmd_drill(args, as_json, profile):
+    import mmadapters
+    import mmdrill
+    if args[:1] != ["memory"]:
+        return err("E_USAGE", "drill memory [--step-mb N] [--limit-s S]", "mm help")
+    rec = mmdrill.run(profile, settings(), mmadapters.queue(profile), step_mb=opt(args, "--step-mb", 512, int),
+                      time_limit_s=opt(args, "--limit-s", 900, float))
+    if rec.get("refused"):
+        print(rec["refused"])
+        return 2
+    lines = [kv({"passed": rec["passed"], "stop": rec["stop_reason"], "steps": len(rec["steps"]), "file": rec["file"]}),
+             kv(rec["checks"])]
+    emit(as_json, rec, lines)
+    return 0 if rec["passed"] else 1
+
+
+# ------------------------------------------------------------------------------------------- setup verbs
+
+def cmd_check(args, as_json):
+    import mminstall
+    lines = mminstall.check()
+    probs = [x for x in lines if not x.startswith("W_")]
+    warns = [x for x in lines if x.startswith("W_")]
+    emit(as_json, {"problems": probs, "warnings": warns}, probs + warns if probs else warns + ["check=ok"])
+    return 1 if probs else 0
+
+
+def cmd_restart(args, as_json, profile):
+    """Stop, start, and wait for a fresh heartbeat (a new supervisor pid in status.json) for self.restart_wait_s."""
+    import mminstall
+    import mmrecover
+    s = settings()
+    cleared = mmrecover.clear_safe("mm restart --clear-safe") if flag(args, "--clear-safe") else None
+    before = mmcore.read_json(mmcore.path("status.json"), None) or {}
+    old_pid = (before.get("heartbeat") or {}).get("pid") if isinstance(before, dict) else None
+    t = time.time()
+    mminstall.stop(profile, reason="mm restart", alert=False)
+    mminstall.start(profile)
+
+    def fresh():
+        st = mmcore.read_json(mmcore.path("status.json"), None)
+        if not isinstance(st, dict):
+            return None
+        pid = (st.get("heartbeat") or {}).get("pid")
+        try:
+            new = float(st.get("time", 0)) > t
+        except (TypeError, ValueError):
+            new = False
+        return pid if new and pid and pid != old_pid else None
+    pid = mmrecover.sleep_until(fresh, s["self.restart_wait_s"])
+    if not pid:
+        return err("E_RESTART", "no fresh heartbeat in %g s" % s["self.restart_wait_s"], "mm status; mm explain SELF_STALE")
+    print("restart=ok pid=%d%s" % (pid, " safe=cleared" if cleared else ""))
+    return 0
+
+
+def cmd_selftest(args, as_json):
+    import subprocess
+    p = subprocess.run([sys.executable, "-I", os.path.join(CODE, "tests", "run_tests.py"), "--quick"],
+                       capture_output=True, text=True, timeout=600)
+    last = (p.stdout.strip().splitlines() or ["no output"])[-1]
+    print("selftest=%s %s" % ("ok" if p.returncode == 0 else "failed", last))
+    return 0 if p.returncode == 0 else 1
+
+
+def main(argv):
+    argv = mmcore.take_data_arg(list(argv))
+    as_json = flag(argv, "--json")
+    if not argv or argv[0] in ("help", "-h", "--help"):
+        print(HELP)
+        return 0 if argv else 2
+    verb, args = argv[0], argv[1:]
+    if verb == "init":
+        import mminstall
+        name = opt(args, "--name") or os.environ.pop("MM_PROFILE", None)
+        f, data = mminstall.init(name, opt(args, "--dir"))
+        print(kv({"profile": f, "data": data}))
+        print("next=\"edit the profile, then mm check --profile %s, then mm install --profile %s\"" % (f, f))
+        return 0
+    if verb == "hook":
+        import ad_deliver_claude
+        sys.argv = [sys.argv[0]] + args
+        ad_deliver_claude.hook_process()
+    profile = mmcore.load_profile()
+    os.makedirs(mmcore.path("state"), exist_ok=True)
+    if verb == "status":
+        return cmd_status(args, as_json)
+    if verb == "alerts":
+        return cmd_alerts(args, as_json)
+    if verb == "explain":
+        return cmd_explain(args, as_json, profile)
+    if verb == "ack":
+        return cmd_ack(args, as_json)
+    if verb == "place":
+        return cmd_place(args, as_json, profile)
+    if verb == "wait":
+        return cmd_wait(args, as_json, profile)
+    if verb in ("off", "on"):
+        return cmd_off(args, as_json, verb == "on", profile)
+    if verb == "slots":
+        return cmd_slots(args, as_json, profile)
+    if verb == "cleanup":
+        return cmd_cleanup(args, as_json)
+    if verb == "event":
+        return cmd_event(args, as_json)
+    if verb == "watch":
+        return cmd_watch(args, as_json)
+    if verb == "snapshot":
+        return cmd_snapshot(args, as_json, profile)
+    if verb == "drill":
+        return cmd_drill(args, as_json, profile)
+    if verb == "check":
+        return cmd_check(args, as_json)
+    if verb == "selftest":
+        return cmd_selftest(args, as_json)
+    if verb == "restart":
+        return cmd_restart(args, as_json, profile)
+    if verb in ("install", "stop", "start", "rollback"):
+        import mminstall
+        if verb == "install":
+            rec = mminstall.install(profile, opt(args, "--settings"))
+            print(kv({"installed": "yes", "data": rec["data"], "hooks": rec["hooks_file"] or "none",
+                      "python": rec["python"], "plists": len(rec["plists"])}))
+            for w in rec["warnings"]:
+                print(w)
+            return 0
+        if verb == "stop":
+            out = mminstall.stop(profile, opt(args, "--reason", "mm stop"))
+        elif verb == "start":
+            out = mminstall.start(profile)
+        else:
+            for line in mminstall.rollback(profile):
+                print(line)
+            return 0
+        print(" ".join("%s=rc%s" % (lb, rc) for lb, rc in out))
+        return 0
+    if verb == "run":
+        import mmsuper
+        return mmsuper.run_loop(profile, dry_run=flag(args, "--dry-run"), ticks=opt(args, "--ticks", 0, int),
+                                duration=opt(args, "--duration", 0, float), tick_seconds=opt(args, "--tick-seconds", 10, float),
+                                kernel=not flag(args, "--no-kernel-stream"), allow_live_slots=flag(args, "--allow-live-slots"))
+    if verb == "watchdog":
+        import mmwatch
+        probs = mmwatch.check(float(os.environ.get("MM_NOW", time.time())), settings(), profile,
+                              restart=not flag(args, "--no-restart"))
+        print(kv({"problems": len(probs)}) + "".join(" problem=" + json.dumps(p) for p in probs))
+        return 1 if probs else 0
+    return err("E_USAGE", "unknown verb %r" % verb, "mm help")
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except mmcore.MMError as e:
+        print(str(e))
+        sys.exit(2)
+    except KeyboardInterrupt:
+        sys.exit(2)

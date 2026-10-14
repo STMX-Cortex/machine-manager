@@ -1,0 +1,25 @@
+{
+ "case": "young",
+ "expected": {
+  "guard": "changed 5 min ago",
+  "verb": "KEEP"
+ },
+ "function": "delete_guard",
+ "input": {
+  "age_minutes": 360,
+  "enabled": true,
+  "forbidden": false,
+  "held": null,
+  "keep_file": false,
+  "live_tools": [],
+  "needs_no_live_tools": true,
+  "parent_ok": true,
+  "symlink": false,
+  "untouched": [
+   false,
+   "changed 5 min ago"
+  ]
+ },
+ "settings": "base",
+ "settings_over": {}
+}

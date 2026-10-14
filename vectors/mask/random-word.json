@@ -1,0 +1,10 @@
+{
+ "case": "random-word",
+ "expected": "x *** y",
+ "function": "mask",
+ "input": {
+  "text": "x aZ9xY8wV7uT6sR5qP4oN3mL2kJ1iH0gFxx y"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

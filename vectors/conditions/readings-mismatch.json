@@ -1,0 +1,20 @@
+{
+ "case": "readings-mismatch",
+ "expected": [
+  [
+   "READINGS_MISMATCH",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "readings_mismatch": [
+    "free_pct fast=80.0 command=60.0"
+   ]
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

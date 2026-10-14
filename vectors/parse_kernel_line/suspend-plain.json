@@ -1,0 +1,16 @@
+{
+ "case": "suspend-plain",
+ "expected": {
+  "kind": "suspending",
+  "pid": 4242,
+  "process": "AppA",
+  "time": "2026-10-14 09:13:09.826",
+  "why": "swap exhaustion"
+ },
+ "function": "parse_kernel_line",
+ "input": {
+  "line": "2026-10-14 09:13:09.826 Df kernel[0:1] memorystatus: suspending AppA [4242] due to swap exhaustion"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

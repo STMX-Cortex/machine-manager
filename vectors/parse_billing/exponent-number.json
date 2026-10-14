@@ -1,0 +1,15 @@
+{
+ "case": "exponent-number",
+ "expected": {
+  "gross": "4.800004987",
+  "minutes": "1200",
+  "net": "0"
+ },
+ "function": "parse_billing",
+ "input": {
+  "month": "2026-10",
+  "text": "{\"usageItems\": [{\"date\": \"2026-10-01T00:00:00Z\", \"product\": \"actions\", \"sku\": \"Actions Linux\", \"quantity\": 1200, \"grossAmount\": 4.8, \"netAmount\": 0}, {\"date\": \"2026-10-02T00:00:00Z\", \"product\": \"actions\", \"sku\": \"Actions storage\", \"quantity\": 1.5, \"grossAmount\": 4.987e-06, \"netAmount\": 0}, {\"date\": \"2026-09-30T00:00:00Z\", \"product\": \"actions\", \"sku\": \"Actions Linux\", \"quantity\": 999, \"grossAmount\": 1, \"netAmount\": 1}]}"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,21 @@
+{
+ "case": "swap-used-above-total",
+ "expected": [
+  "swap used 4096 MB above its total 2048 MB"
+ ],
+ "function": "sample_problems",
+ "input": {
+  "sample": {
+   "comp_mb": 300,
+   "free_pct": 80,
+   "load1": 2.0,
+   "load5": 2.0,
+   "pressure": 1,
+   "seg_pct": 5.0,
+   "swap_total_mb": 2048,
+   "swap_used_mb": 4096
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

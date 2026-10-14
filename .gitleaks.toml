@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# gitleaks: the masking tests plant fake secrets on purpose (FAKE..., planted..., abcd1234...).
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "fake secrets planted by the masking tests"
+paths = [
+  '''^tests/test_core\.py$''',
+  '''^tests/test_cli\.py$''',
+  '''^tests/gen_vectors\.py$''',
+  '''^vectors/mask/''',
+  '''__pycache__/''',
+]

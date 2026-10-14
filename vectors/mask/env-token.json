@@ -1,0 +1,10 @@
+{
+ "case": "env-token",
+ "expected": "GH_TOKEN=*** go test ./...",
+ "function": "mask",
+ "input": {
+  "text": "GH_TOKEN=abcd1234efgh go test ./..."
+ },
+ "settings": "base",
+ "settings_over": {}
+}

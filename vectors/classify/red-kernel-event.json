@@ -1,0 +1,30 @@
+{
+ "case": "red-kernel-event",
+ "expected": [
+  "RED",
+  [
+   "kernel memorystatus event (no paging space or suspending)"
+  ],
+  true
+ ],
+ "function": "classify",
+ "input": {
+  "kernel_event": true,
+  "window": [
+   {
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2.0,
+    "load5": 2.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 500.0,
+    "sys_pct": 10.0,
+    "t": 1800000000.0
+   }
+  ]
+ },
+ "settings": "base",
+ "settings_over": {}
+}

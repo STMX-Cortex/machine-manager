@@ -1,0 +1,62 @@
+{
+ "case": "red-wait",
+ "expected": {
+  "candidate": null,
+  "need_guard": null,
+  "place": "WAIT",
+  "reasons": [
+   "state RED: free 30%",
+   "--wide waits: state RED"
+  ]
+ },
+ "function": "place",
+ "input": {
+  "ctx": {
+   "kinds": {
+    "machine_only": {
+     "merge-wide": "the wide run stays on the machine",
+     "other": "kind 'other' runs on the machine"
+    },
+    "pool": {
+     "go-test": 8,
+     "rust-mutants": 64
+    }
+   },
+   "machine": {
+    "free_pct": 80.0,
+    "id": "m1",
+    "medians": {
+     "go-test": 15.0
+    },
+    "queue": {
+     "busy": [],
+     "slots": 3,
+     "tickets": []
+    },
+    "reasons": [
+     "free 30%"
+    ],
+    "state": "RED"
+   },
+   "now": 1800000000.0,
+   "pools": [
+    {
+     "guard": null,
+     "guard_why": null,
+     "id": "ci:example/project",
+     "job_minutes": 40,
+     "minutes_left": 20000,
+     "minutes_source": "read",
+     "plan_minutes": 2,
+     "stop_active": false
+    }
+   ],
+   "wide_kind": "merge-wide"
+  },
+  "req": {
+   "kind": "merge-wide"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

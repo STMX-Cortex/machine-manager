@@ -1,0 +1,44 @@
+{
+ "case": "slot-changes-13-safe",
+ "expected": {
+  "action": "safe",
+  "reasons": [
+   "the slot count changed 13 times in the last hour (limit 12)"
+  ],
+  "state": {
+   "bad": 0,
+   "slow": 0
+  }
+ },
+ "function": "self_check",
+ "input": {
+  "inp": {
+   "data_free_mb": 50000.0,
+   "data_writable": true,
+   "now": 1800000000.0,
+   "reading_problems": [],
+   "rss_mb": 40.0,
+   "safe": false,
+   "slot_changes": [
+    1800000000.0,
+    1799999940.0,
+    1799999880.0,
+    1799999820.0,
+    1799999760.0,
+    1799999700.0,
+    1799999640.0,
+    1799999580.0,
+    1799999520.0,
+    1799999460.0,
+    1799999400.0,
+    1799999340.0,
+    1799999280.0
+   ],
+   "tick_errors": 0,
+   "tick_s": 0.4
+  },
+  "state": {}
+ },
+ "settings": "base",
+ "settings_over": {}
+}

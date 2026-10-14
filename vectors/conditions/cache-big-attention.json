@@ -1,0 +1,19 @@
+{
+ "case": "cache-big-attention",
+ "expected": [
+  [
+   "CACHE_BIG",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "cache_gb": 35.0,
+   "disk_gb": 100.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

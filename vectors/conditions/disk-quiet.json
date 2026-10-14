@@ -1,0 +1,13 @@
+{
+ "case": "disk-quiet",
+ "expected": [],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "disk_gb": 41.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

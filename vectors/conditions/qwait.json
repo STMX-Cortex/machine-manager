@@ -1,0 +1,29 @@
+{
+ "case": "qwait",
+ "expected": [
+  [
+   "QWAIT",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "queue": {
+    "busy": [],
+    "slots": 5,
+    "tickets": [
+     {
+      "age_s": 1500,
+      "label": "S x",
+      "mode": "S",
+      "name": "1-2"
+     }
+    ]
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,33 @@
+{
+ "case": "in-safe-mode-only-alert",
+ "expected": {
+  "action": "alert",
+  "reasons": [
+   "own memory 250 MB above 200 MB",
+   "6 ticks in a row took over 30 s"
+  ],
+  "state": {
+   "bad": 0,
+   "slow": 6
+  }
+ },
+ "function": "self_check",
+ "input": {
+  "inp": {
+   "data_free_mb": 50000.0,
+   "data_writable": true,
+   "now": 1800000000.0,
+   "reading_problems": [],
+   "rss_mb": 250.0,
+   "safe": true,
+   "slot_changes": [],
+   "tick_errors": 0,
+   "tick_s": 40.0
+  },
+  "state": {
+   "slow": 5
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

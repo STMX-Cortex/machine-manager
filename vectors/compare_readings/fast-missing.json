@@ -1,0 +1,17 @@
+{
+ "case": "fast-missing",
+ "expected": [
+  "free_pct fast=none command=70.0"
+ ],
+ "function": "compare_readings",
+ "input": {
+  "cmd": {
+   "free_pct": 70
+  },
+  "fast": {
+   "free_pct": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

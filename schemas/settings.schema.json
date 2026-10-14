@@ -1,0 +1,626 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "machine-manager settings (flat keys)",
+ "type": "object",
+ "required": [
+  "banner.enabled",
+  "deletes.cleanup_list_hours",
+  "deletes.enabled",
+  "deletes.evidence_keep_days",
+  "deletes.interval_minutes",
+  "deletes.lsof_timeout_s",
+  "disk.cache_action_disk_gb",
+  "disk.cache_action_gb",
+  "disk.cache_attention_gb",
+  "disk.low_gb",
+  "disk.recover_gb",
+  "disk.trend_hours",
+  "evidence.slots",
+  "evidence.window_minutes",
+  "github.allowed_gross_usd",
+  "github.done_alert_minutes",
+  "github.included_minutes",
+  "github.near_gross_pct",
+  "github.near_minutes",
+  "github.pace_minutes",
+  "github.read_interval_s",
+  "github.reserve_minutes",
+  "github.stale_minutes",
+  "github.stop_minutes",
+  "github.stuck_queued_minutes",
+  "github.stuck_running_minutes",
+  "github.watch_interval_s",
+  "heartbeat.every_min",
+  "heartbeat.timeout_s",
+  "heartbeat.url",
+  "hook.log_input_keys",
+  "hook.remind_waiter_minutes",
+  "launch_gate.enabled",
+  "launch_gate.max_minutes",
+  "mode.observe",
+  "mode.slot_writes",
+  "mode.slots_file",
+  "other.cache_5m_min_tokens_m",
+  "other.cache_5m_share_pct",
+  "other.fseventsd_mb",
+  "other.heartbeat_max_age_s",
+  "other.load_log_max_age_s",
+  "other.recipient_tool_wait_minutes",
+  "other.resume_gap_s",
+  "pause_newest_call.enabled",
+  "pause_newest_call.resume_after_green_s",
+  "queue.default_run_minutes",
+  "queue.head_block_minutes",
+  "queue.idle_room_minutes",
+  "queue.long_call_minutes",
+  "queue.placement_max_mac_wait_minutes",
+  "queue.slot_cpu_cores",
+  "queue.wait_minutes",
+  "queue.waits_over_20_per_hour",
+  "queue.wide_free_pct",
+  "repeat.action_minutes",
+  "repeat.attention_hours",
+  "repeat.clear_after_minutes",
+  "safe_mode.slots",
+  "self.bad_reading_ticks",
+  "self.crash_loop_minutes",
+  "self.crash_loop_starts",
+  "self.max_rss_mb",
+  "self.max_slot_changes_per_hour",
+  "self.max_tick_s",
+  "self.min_free_mb",
+  "self.restart_wait_s",
+  "self.resume_paused_after_s",
+  "self.slow_ticks",
+  "self.watchdog_stale_s",
+  "slots.amber_comp_mb",
+  "slots.amber_free_pct",
+  "slots.amber_load5",
+  "slots.amber_step_interval_s",
+  "slots.amber_swap_growth_mb_30m",
+  "slots.amber_sys_pct",
+  "slots.ceiling",
+  "slots.cores",
+  "slots.floor",
+  "slots.green_free_pct",
+  "slots.green_load5",
+  "slots.green_sys_pct",
+  "slots.hold_after_red_minutes",
+  "slots.hold_after_trim_minutes",
+  "slots.raise_green_minutes",
+  "slots.raise_requires_waiting",
+  "slots.red_comp_growth_mb_60s",
+  "slots.red_disk_gb",
+  "slots.red_free_pct",
+  "slots.red_load1_per_core",
+  "slots.red_segments_pct",
+  "slots.red_swap_growth_mb_60s",
+  "slots.red_swap_used_of_total_pct",
+  "slots.red_sys_pct",
+  "slots.sustain_samples",
+  "trim.age_minutes",
+  "trim.drained_minutes",
+  "trim.needed_after_minutes",
+  "trim.wait_s",
+  "usage.claude_5h_attention_pct",
+  "usage.claude_action_pct",
+  "usage.claude_projection_pct",
+  "usage.codex_action_pct",
+  "usage.codex_attention_pct",
+  "usage.watch_state_max_age_s"
+ ],
+ "properties": {
+  "banner.enabled": {
+   "type": "boolean"
+  },
+  "deletes.cleanup_list_hours": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 720
+  },
+  "deletes.enabled": {
+   "type": "boolean"
+  },
+  "deletes.evidence_keep_days": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 365
+  },
+  "deletes.interval_minutes": {
+   "type": "number",
+   "minimum": 10,
+   "maximum": 10080
+  },
+  "deletes.lsof_timeout_s": {
+   "type": "number",
+   "minimum": 5,
+   "maximum": 300
+  },
+  "disk.cache_action_disk_gb": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 10000
+  },
+  "disk.cache_action_gb": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 10000
+  },
+  "disk.cache_attention_gb": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 10000
+  },
+  "disk.low_gb": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 10000
+  },
+  "disk.recover_gb": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 10000
+  },
+  "disk.trend_hours": {
+   "type": "number",
+   "minimum": 0.5,
+   "maximum": 72
+  },
+  "evidence.slots": {
+   "type": "integer",
+   "minimum": 2,
+   "maximum": 200
+  },
+  "evidence.window_minutes": {
+   "type": "number",
+   "minimum": 5,
+   "maximum": 240
+  },
+  "github.allowed_gross_usd": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 1000000
+  },
+  "github.done_alert_minutes": {
+   "type": "number",
+   "minimum": 5,
+   "maximum": 1440
+  },
+  "github.included_minutes": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 10000000
+  },
+  "github.near_gross_pct": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 100
+  },
+  "github.near_minutes": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 10000000
+  },
+  "github.pace_minutes": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 10000000
+  },
+  "github.read_interval_s": {
+   "type": "number",
+   "minimum": 60,
+   "maximum": 86400
+  },
+  "github.reserve_minutes": {
+   "type": "integer",
+   "minimum": 0,
+   "maximum": 1000000
+  },
+  "github.stale_minutes": {
+   "type": "number",
+   "minimum": 5,
+   "maximum": 1440
+  },
+  "github.stop_minutes": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 10000000
+  },
+  "github.stuck_queued_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 10000
+  },
+  "github.stuck_running_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 10000
+  },
+  "github.watch_interval_s": {
+   "type": "number",
+   "minimum": 30,
+   "maximum": 3600
+  },
+  "heartbeat.every_min": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
+  },
+  "heartbeat.timeout_s": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 60
+  },
+  "heartbeat.url": {
+   "type": "string"
+  },
+  "hook.log_input_keys": {
+   "type": "boolean"
+  },
+  "hook.remind_waiter_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
+  },
+  "launch_gate.enabled": {
+   "type": "boolean"
+  },
+  "launch_gate.max_minutes": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 120
+  },
+  "mode.observe": {
+   "type": "boolean"
+  },
+  "mode.slot_writes": {
+   "enum": [
+    "off",
+    "test",
+    "live"
+   ]
+  },
+  "mode.slots_file": {
+   "type": "string"
+  },
+  "other.cache_5m_min_tokens_m": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 100000
+  },
+  "other.cache_5m_share_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 100
+  },
+  "other.fseventsd_mb": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1000000
+  },
+  "other.heartbeat_max_age_s": {
+   "type": "number",
+   "minimum": 20,
+   "maximum": 86400
+  },
+  "other.load_log_max_age_s": {
+   "type": "number",
+   "minimum": 30,
+   "maximum": 86400
+  },
+  "other.recipient_tool_wait_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
+  },
+  "other.resume_gap_s": {
+   "type": "number",
+   "minimum": 30,
+   "maximum": 86400
+  },
+  "pause_newest_call.enabled": {
+   "type": "boolean"
+  },
+  "pause_newest_call.resume_after_green_s": {
+   "type": "number",
+   "minimum": 10,
+   "maximum": 3600
+  },
+  "queue.default_run_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 600
+  },
+  "queue.head_block_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
+  },
+  "queue.idle_room_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
+  },
+  "queue.long_call_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
+  },
+  "queue.placement_max_mac_wait_minutes": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 1440
+  },
+  "queue.slot_cpu_cores": {
+   "type": "number",
+   "minimum": 0.5,
+   "maximum": 64
+  },
+  "queue.wait_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
+  },
+  "queue.waits_over_20_per_hour": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 1000
+  },
+  "queue.wide_free_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 100
+  },
+  "repeat.action_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
+  },
+  "repeat.attention_hours": {
+   "type": "number",
+   "minimum": 0.1,
+   "maximum": 168
+  },
+  "repeat.clear_after_minutes": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 1440
+  },
+  "safe_mode.slots": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 16
+  },
+  "self.bad_reading_ticks": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 1000
+  },
+  "self.crash_loop_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1440
+  },
+  "self.crash_loop_starts": {
+   "type": "integer",
+   "minimum": 2,
+   "maximum": 100
+  },
+  "self.max_rss_mb": {
+   "type": "number",
+   "minimum": 10,
+   "maximum": 100000
+  },
+  "self.max_slot_changes_per_hour": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 1000
+  },
+  "self.max_tick_s": {
+   "type": "number",
+   "minimum": 5,
+   "maximum": 3600
+  },
+  "self.min_free_mb": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1000000
+  },
+  "self.restart_wait_s": {
+   "type": "number",
+   "minimum": 5,
+   "maximum": 600
+  },
+  "self.resume_paused_after_s": {
+   "type": "number",
+   "minimum": 30,
+   "maximum": 86400
+  },
+  "self.slow_ticks": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 100
+  },
+  "self.watchdog_stale_s": {
+   "type": "number",
+   "minimum": 90,
+   "maximum": 86400
+  },
+  "slots.amber_comp_mb": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 100000
+  },
+  "slots.amber_free_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 100
+  },
+  "slots.amber_load5": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 500
+  },
+  "slots.amber_step_interval_s": {
+   "type": "number",
+   "minimum": 10,
+   "maximum": 3600
+  },
+  "slots.amber_swap_growth_mb_30m": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 100000
+  },
+  "slots.amber_sys_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 100
+  },
+  "slots.ceiling": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 16
+  },
+  "slots.cores": {
+   "type": "integer",
+   "minimum": 0,
+   "maximum": 512
+  },
+  "slots.floor": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 16
+  },
+  "slots.green_free_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 100
+  },
+  "slots.green_load5": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 200
+  },
+  "slots.green_sys_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 100
+  },
+  "slots.hold_after_red_minutes": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 600
+  },
+  "slots.hold_after_trim_minutes": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 600
+  },
+  "slots.raise_green_minutes": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 240
+  },
+  "slots.raise_requires_waiting": {
+   "type": "integer",
+   "minimum": 0,
+   "maximum": 100
+  },
+  "slots.red_comp_growth_mb_60s": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 100000
+  },
+  "slots.red_disk_gb": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 10000
+  },
+  "slots.red_free_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 100
+  },
+  "slots.red_load1_per_core": {
+   "type": "number",
+   "minimum": 0.1,
+   "maximum": 100
+  },
+  "slots.red_segments_pct": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 100
+  },
+  "slots.red_swap_growth_mb_60s": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 100000
+  },
+  "slots.red_swap_used_of_total_pct": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 100
+  },
+  "slots.red_sys_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 100
+  },
+  "slots.sustain_samples": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 10
+  },
+  "trim.age_minutes": {
+   "type": "number",
+   "minimum": 60,
+   "maximum": 100000
+  },
+  "trim.drained_minutes": {
+   "type": "number",
+   "minimum": 0.5,
+   "maximum": 60
+  },
+  "trim.needed_after_minutes": {
+   "type": "number",
+   "minimum": 5,
+   "maximum": 1440
+  },
+  "trim.wait_s": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 600
+  },
+  "usage.claude_5h_attention_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 200
+  },
+  "usage.claude_action_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 200
+  },
+  "usage.claude_projection_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 1000
+  },
+  "usage.codex_action_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 200
+  },
+  "usage.codex_attention_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 200
+  },
+  "usage.watch_state_max_age_s": {
+   "type": "number",
+   "minimum": 60,
+   "maximum": 86400
+  }
+ },
+ "additionalProperties": false
+}

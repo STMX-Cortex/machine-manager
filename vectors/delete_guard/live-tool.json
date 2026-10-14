@@ -1,0 +1,27 @@
+{
+ "case": "live-tool",
+ "expected": {
+  "guard": "live_tools=4242:go",
+  "verb": "KEEP"
+ },
+ "function": "delete_guard",
+ "input": {
+  "age_minutes": 360,
+  "enabled": true,
+  "forbidden": false,
+  "held": null,
+  "keep_file": false,
+  "live_tools": [
+   "4242:go"
+  ],
+  "needs_no_live_tools": true,
+  "parent_ok": true,
+  "symlink": false,
+  "untouched": [
+   true,
+   null
+  ]
+ },
+ "settings": "base",
+ "settings_over": {}
+}

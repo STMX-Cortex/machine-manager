@@ -1,0 +1,23 @@
+{
+ "case": "same",
+ "expected": [],
+ "function": "compare_readings",
+ "input": {
+  "cmd": {
+   "comp_mb": 302,
+   "free_pct": 80,
+   "load5": 2.5,
+   "swap_total_mb": 2048,
+   "swap_used_mb": 510
+  },
+  "fast": {
+   "comp_mb": 300,
+   "free_pct": 80,
+   "load5": 2,
+   "swap_total_mb": 2048,
+   "swap_used_mb": 500
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

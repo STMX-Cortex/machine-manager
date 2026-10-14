@@ -1,0 +1,59 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "A placement request (mm place)",
+ "type": "object",
+ "required": [
+  "kind"
+ ],
+ "properties": {
+  "kind": {
+   "type": "string",
+   "minLength": 1
+  },
+  "shards": {
+   "type": "integer",
+   "minimum": 1
+  },
+  "wide": {
+   "type": "boolean"
+  },
+  "agents": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "crate": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "diff_base": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "race": {
+   "type": "boolean"
+  },
+  "packages": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "sha": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "branch": {
+   "type": [
+    "string",
+    "null"
+   ]
+  }
+ },
+ "additionalProperties": false
+}

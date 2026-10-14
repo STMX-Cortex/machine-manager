@@ -1,0 +1,20 @@
+{
+ "case": "codex-98",
+ "expected": [
+  [
+   "CODEX98",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "usage": {
+    "codex_week": 98
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

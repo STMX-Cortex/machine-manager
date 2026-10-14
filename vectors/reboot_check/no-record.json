@@ -1,0 +1,16 @@
+{
+ "case": "no-record",
+ "expected": null,
+ "function": "reboot_check",
+ "input": {
+  "cur": {
+   "boot_time": 1799999700.0,
+   "missing_jobs": [],
+   "now": 1800000000.0,
+   "panics": []
+  },
+  "prev": null
+ },
+ "settings": "base",
+ "settings_over": {}
+}

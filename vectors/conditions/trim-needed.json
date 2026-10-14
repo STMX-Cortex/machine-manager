@@ -1,0 +1,21 @@
+{
+ "case": "trim-needed",
+ "expected": [
+  [
+   "TRIM_NEEDED",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "trim": {
+    "needed_min": 70
+   },
+   "trim_needed_ok": true
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

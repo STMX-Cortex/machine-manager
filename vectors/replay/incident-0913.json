@@ -1,0 +1,1339 @@
+{
+ "case": "incident-0913",
+ "expected": [
+  {
+   "i": 0,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 1,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 2,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 3,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 4,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 5,
+   "pushed": [],
+   "reasons": [
+    "system CPU not under 25%"
+   ],
+   "slots": 5,
+   "state": "STEADY"
+  },
+  {
+   "i": 6,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 7,
+   "pushed": [],
+   "reasons": [
+    "system CPU not under 25%"
+   ],
+   "slots": 5,
+   "state": "STEADY"
+  },
+  {
+   "i": 8,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 9,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 10,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 11,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 12,
+   "pushed": [],
+   "reasons": [
+    "system CPU not under 25%"
+   ],
+   "slots": 5,
+   "state": "STEADY"
+  },
+  {
+   "i": 13,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 14,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 15,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 16,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 17,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 18,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 19,
+   "pushed": [],
+   "reasons": [
+    "system CPU not under 25%"
+   ],
+   "slots": 5,
+   "state": "STEADY"
+  },
+  {
+   "i": 20,
+   "pushed": [
+    [
+     "MEM_AMBER",
+     "ATTENTION",
+     "new"
+    ]
+   ],
+   "reasons": [
+    "system CPU > 30% in 2 samples"
+   ],
+   "slots": 4,
+   "state": "AMBER"
+  },
+  {
+   "i": 21,
+   "pushed": [],
+   "reasons": [
+    "system CPU not under 25%"
+   ],
+   "slots": 4,
+   "state": "STEADY"
+  },
+  {
+   "i": 22,
+   "pushed": [
+    [
+     "MEM_RED",
+     "ACTION",
+     "level rose"
+    ]
+   ],
+   "reasons": [
+    "compressor +2242 MB in 60 s"
+   ],
+   "slots": 3,
+   "state": "RED"
+  },
+  {
+   "i": 23,
+   "pushed": [],
+   "reasons": [
+    "system CPU > 40% in 2 samples"
+   ],
+   "slots": 3,
+   "state": "RED"
+  },
+  {
+   "i": 24,
+   "pushed": [
+    [
+     "KERNEL_SUSPEND",
+     "ACTION",
+     "new"
+    ]
+   ],
+   "reasons": [
+    "kernel memorystatus event (no paging space or suspending)"
+   ],
+   "slots": 3,
+   "state": "RED"
+  },
+  {
+   "i": 25,
+   "pushed": [],
+   "reasons": [
+    "load1 > 20 in 2 samples",
+    "kernel memorystatus event (no paging space or suspending)"
+   ],
+   "slots": 3,
+   "state": "RED"
+  },
+  {
+   "i": 26,
+   "pushed": [],
+   "reasons": [
+    "load1 > 20 in 2 samples"
+   ],
+   "slots": 3,
+   "state": "RED"
+  },
+  {
+   "i": 27,
+   "pushed": [],
+   "reasons": [
+    "load1 > 20 in 2 samples"
+   ],
+   "slots": 3,
+   "state": "RED"
+  },
+  {
+   "i": 28,
+   "pushed": [],
+   "reasons": [
+    "load1 > 20 in 2 samples"
+   ],
+   "slots": 3,
+   "state": "RED"
+  },
+  {
+   "i": 29,
+   "pushed": [],
+   "reasons": [
+    "load1 > 20 in 2 samples"
+   ],
+   "slots": 3,
+   "state": "RED"
+  },
+  {
+   "i": 30,
+   "pushed": [],
+   "reasons": [
+    "load1 > 20 in 2 samples"
+   ],
+   "slots": 3,
+   "state": "RED"
+  },
+  {
+   "i": 31,
+   "pushed": [
+    [
+     "KERNEL_SUSPEND",
+     "INFO",
+     "cleared"
+    ]
+   ],
+   "reasons": [
+    "load5 132.7 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 32,
+   "pushed": [],
+   "reasons": [
+    "load5 109.3 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 33,
+   "pushed": [],
+   "reasons": [
+    "load5 90.2 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 34,
+   "pushed": [],
+   "reasons": [
+    "load5 74.6 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 35,
+   "pushed": [],
+   "reasons": [
+    "load5 61.6 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 36,
+   "pushed": [],
+   "reasons": [
+    "load5 51.2 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 37,
+   "pushed": [],
+   "reasons": [
+    "load5 43.2 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 38,
+   "pushed": [],
+   "reasons": [
+    "load5 36.8 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 39,
+   "pushed": [],
+   "reasons": [
+    "load5 30.5 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 40,
+   "pushed": [],
+   "reasons": [
+    "load5 26.3 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 41,
+   "pushed": [],
+   "reasons": [
+    "load5 22.3 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 42,
+   "pushed": [],
+   "reasons": [
+    "load5 19.0 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 43,
+   "pushed": [],
+   "reasons": [
+    "load5 16.5 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 44,
+   "pushed": [],
+   "reasons": [
+    "load5 14.3 > 14"
+   ],
+   "slots": 3,
+   "state": "AMBER"
+  },
+  {
+   "i": 45,
+   "pushed": [],
+   "reasons": [
+    "load5 not under 8"
+   ],
+   "slots": 3,
+   "state": "STEADY"
+  },
+  {
+   "i": 46,
+   "pushed": [],
+   "reasons": [
+    "load5 not under 8"
+   ],
+   "slots": 3,
+   "state": "STEADY"
+  },
+  {
+   "i": 47,
+   "pushed": [],
+   "reasons": [
+    "load5 not under 8"
+   ],
+   "slots": 3,
+   "state": "STEADY"
+  }
+ ],
+ "function": "replay",
+ "input": {
+  "kernel_times": [
+   1791958389.0
+  ],
+  "labels": [
+   "08:49",
+   "08:50",
+   "08:51",
+   "08:52",
+   "08:53",
+   "08:54",
+   "08:55",
+   "08:56",
+   "08:57",
+   "08:58",
+   "08:59",
+   "09:00",
+   "09:01",
+   "09:02",
+   "09:03",
+   "09:04",
+   "09:05",
+   "09:06",
+   "09:07",
+   "09:08",
+   "09:09",
+   "09:10",
+   "09:11",
+   "09:12",
+   "09:14",
+   "09:15",
+   "09:16",
+   "09:17",
+   "09:18",
+   "09:19",
+   "09:20",
+   "09:21",
+   "09:22",
+   "09:23",
+   "09:24",
+   "09:25",
+   "09:26",
+   "09:27",
+   "09:28",
+   "09:29",
+   "09:30",
+   "09:31",
+   "09:32",
+   "09:33",
+   "09:34",
+   "09:35",
+   "09:36",
+   "09:37"
+  ],
+  "samples": [
+   {
+    "busy": 5,
+    "comp_mb": 1206.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 4.84,
+    "load15": 3.8,
+    "load5": 3.95,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 24.1,
+    "t": 1791956940.0,
+    "waiting": 11
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1206.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 4.39,
+    "load15": 3.83,
+    "load5": 4.0,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 17.81,
+    "t": 1791957000.0,
+    "waiting": 11
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1206.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 3.42,
+    "load15": 3.78,
+    "load5": 3.83,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 18.11,
+    "t": 1791957060.0,
+    "waiting": 11
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1206.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 2.81,
+    "load15": 3.69,
+    "load5": 3.6,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 16.25,
+    "t": 1791957120.0,
+    "waiting": 11
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1205.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 3.48,
+    "load15": 3.66,
+    "load5": 3.55,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 21.0,
+    "t": 1791957180.0,
+    "waiting": 11
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1205.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 3.08,
+    "load15": 3.62,
+    "load5": 3.47,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 31.25,
+    "t": 1791957240.0,
+    "waiting": 11
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1204.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 2.8,
+    "load15": 3.56,
+    "load5": 3.32,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 21.9,
+    "t": 1791957300.0,
+    "waiting": 10
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1202.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 4.51,
+    "load15": 3.65,
+    "load5": 3.64,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 26.8,
+    "t": 1791957360.0,
+    "waiting": 9
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1202.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 4.83,
+    "load15": 3.74,
+    "load5": 3.87,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 24.3,
+    "t": 1791957420.0,
+    "waiting": 9
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1201.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 5.03,
+    "load15": 3.9,
+    "load5": 4.27,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 22.94,
+    "t": 1791957480.0,
+    "waiting": 8
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1201.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 5.43,
+    "load15": 3.98,
+    "load5": 4.42,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 24.77,
+    "t": 1791957540.0,
+    "waiting": 5
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1201.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 4.12,
+    "load15": 3.94,
+    "load5": 4.24,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 17.59,
+    "t": 1791957600.0,
+    "waiting": 7
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1196.0,
+    "free_pct": 74.0,
+    "fsev_mb": 11.0,
+    "load1": 4.44,
+    "load15": 3.97,
+    "load5": 4.29,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 26.19,
+    "t": 1791957660.0,
+    "waiting": 4
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1416.0,
+    "free_pct": 73.0,
+    "fsev_mb": 10.0,
+    "load1": 5.76,
+    "load15": 4.15,
+    "load5": 4.7,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 22.4,
+    "t": 1791957720.0,
+    "waiting": 2
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1403.0,
+    "free_pct": 73.0,
+    "fsev_mb": 10.0,
+    "load1": 5.22,
+    "load15": 4.19,
+    "load5": 4.72,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 20.77,
+    "t": 1791957780.0,
+    "waiting": 3
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1391.0,
+    "free_pct": 73.0,
+    "fsev_mb": 10.0,
+    "load1": 4.8,
+    "load15": 4.22,
+    "load5": 4.71,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 19.91,
+    "t": 1791957840.0,
+    "waiting": 2
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1545.0,
+    "free_pct": 72.0,
+    "fsev_mb": 9.0,
+    "load1": 6.71,
+    "load15": 4.48,
+    "load5": 5.3,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 22.84,
+    "t": 1791957900.0,
+    "waiting": 3
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1521.0,
+    "free_pct": 72.0,
+    "fsev_mb": 9.0,
+    "load1": 5.98,
+    "load15": 4.58,
+    "load5": 5.41,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 23.57,
+    "t": 1791957960.0,
+    "waiting": 3
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1499.0,
+    "free_pct": 72.0,
+    "fsev_mb": 7.0,
+    "load1": 6.41,
+    "load15": 4.73,
+    "load5": 5.65,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 24.89,
+    "t": 1791958020.0,
+    "waiting": 1
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1489.0,
+    "free_pct": 72.0,
+    "fsev_mb": 8.0,
+    "load1": 6.85,
+    "load15": 4.92,
+    "load5": 5.98,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 36.97,
+    "t": 1791958080.0,
+    "waiting": 1
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1468.0,
+    "free_pct": 72.0,
+    "fsev_mb": 9.0,
+    "load1": 6.82,
+    "load15": 5.06,
+    "load5": 6.17,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 31.79,
+    "t": 1791958140.0,
+    "waiting": 2
+   },
+   {
+    "busy": 7,
+    "comp_mb": 1460.0,
+    "free_pct": 72.0,
+    "fsev_mb": 10.0,
+    "load1": 7.51,
+    "load15": 5.24,
+    "load5": 6.46,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 27.75,
+    "t": 1791958200.0,
+    "waiting": 2
+   },
+   {
+    "busy": 7,
+    "comp_mb": 3702.0,
+    "free_pct": 60.0,
+    "fsev_mb": 4.0,
+    "load1": 10.89,
+    "load15": 5.75,
+    "load5": 7.6,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 45.82,
+    "t": 1791958260.0,
+    "waiting": 1
+   },
+   {
+    "busy": 7,
+    "comp_mb": 3795.0,
+    "free_pct": 57.0,
+    "fsev_mb": 6.0,
+    "load1": 12.21,
+    "load15": 6.25,
+    "load5": 8.6,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 7,
+    "swap_total_mb": null,
+    "swap_used_mb": 1033.69,
+    "sys_pct": 48.21,
+    "t": 1791958320.0,
+    "waiting": 4
+   },
+   {
+    "busy": 5,
+    "comp_mb": 2023.0,
+    "free_pct": 69.0,
+    "fsev_mb": 9.0,
+    "load1": 347.39,
+    "load15": 38.93,
+    "load5": 97.03,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1001.69,
+    "sys_pct": 24.97,
+    "t": 1791958440.0,
+    "waiting": 7
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1926.0,
+    "free_pct": 69.0,
+    "fsev_mb": 10.0,
+    "load1": 481.57,
+    "load15": 80.37,
+    "load5": 193.89,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 1001.69,
+    "sys_pct": 28.76,
+    "t": 1791958500.0,
+    "waiting": 11
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1919.0,
+    "free_pct": 69.0,
+    "fsev_mb": 11.0,
+    "load1": 520.9,
+    "load15": 111.99,
+    "load5": 257.72,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 985.69,
+    "sys_pct": 30.4,
+    "t": 1791958560.0,
+    "waiting": 11
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1858.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 454.07,
+    "load15": 134.81,
+    "load5": 291.4,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 28.57,
+    "t": 1791958620.0,
+    "waiting": 9
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1832.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 163.04,
+    "load15": 126.21,
+    "load5": 237.81,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 25.63,
+    "t": 1791958680.0,
+    "waiting": 8
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1830.0,
+    "free_pct": 70.0,
+    "fsev_mb": 12.0,
+    "load1": 63.36,
+    "load15": 117.98,
+    "load5": 195.51,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 15.13,
+    "t": 1791958740.0,
+    "waiting": 7
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1901.0,
+    "free_pct": 70.0,
+    "fsev_mb": 12.0,
+    "load1": 28.47,
+    "load15": 110.49,
+    "load5": 161.38,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 18.3,
+    "t": 1791958800.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1897.0,
+    "free_pct": 70.0,
+    "fsev_mb": 12.0,
+    "load1": 12.57,
+    "load15": 103.2,
+    "load5": 132.65,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 16.89,
+    "t": 1791958860.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1912.0,
+    "free_pct": 70.0,
+    "fsev_mb": 12.0,
+    "load1": 7.29,
+    "load15": 96.46,
+    "load5": 109.27,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 15.81,
+    "t": 1791958920.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1961.0,
+    "free_pct": 69.0,
+    "fsev_mb": 11.0,
+    "load1": 5.46,
+    "load15": 90.19,
+    "load5": 90.18,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 21.92,
+    "t": 1791958980.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1944.0,
+    "free_pct": 69.0,
+    "fsev_mb": 11.0,
+    "load1": 5.12,
+    "load15": 84.35,
+    "load5": 74.6,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 17.72,
+    "t": 1791959040.0,
+    "waiting": 7
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1943.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 3.88,
+    "load15": 78.81,
+    "load5": 61.59,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 22.2,
+    "t": 1791959100.0,
+    "waiting": 7
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1937.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 4.48,
+    "load15": 73.77,
+    "load5": 51.25,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 22.9,
+    "t": 1791959160.0,
+    "waiting": 6
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1935.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 5.85,
+    "load15": 69.23,
+    "load5": 43.21,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 18.85,
+    "t": 1791959220.0,
+    "waiting": 3
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1933.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 7.57,
+    "load15": 65.05,
+    "load5": 36.79,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 17.8,
+    "t": 1791959280.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1906.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 5.57,
+    "load15": 60.61,
+    "load5": 30.5,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 25.45,
+    "t": 1791959340.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1904.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 6.49,
+    "load15": 56.97,
+    "load5": 26.26,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 18.75,
+    "t": 1791959400.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1901.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 5.42,
+    "load15": 53.4,
+    "load5": 22.31,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 22.17,
+    "t": 1791959460.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1901.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 4.71,
+    "load15": 50.05,
+    "load5": 19.02,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 24.31,
+    "t": 1791959520.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1900.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 5.18,
+    "load15": 47.0,
+    "load5": 16.52,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 17.11,
+    "t": 1791959580.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1900.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 4.58,
+    "load15": 44.08,
+    "load5": 14.28,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 15.2,
+    "t": 1791959640.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1897.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 4.79,
+    "load15": 41.39,
+    "load5": 12.53,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 14.74,
+    "t": 1791959700.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1895.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 3.55,
+    "load15": 38.76,
+    "load5": 10.76,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 21.0,
+    "t": 1791959760.0,
+    "waiting": 2
+   },
+   {
+    "busy": 5,
+    "comp_mb": 1891.0,
+    "free_pct": 70.0,
+    "fsev_mb": 11.0,
+    "load1": 3.26,
+    "load15": 36.34,
+    "load5": 9.38,
+    "pressure": null,
+    "seg_pct": null,
+    "slots": 5,
+    "swap_total_mb": null,
+    "swap_used_mb": 977.69,
+    "sys_pct": 19.9,
+    "t": 1791959820.0,
+    "waiting": 2
+   }
+  ],
+  "start_slots": 5
+ },
+ "settings": "base",
+ "settings_over": {}
+}

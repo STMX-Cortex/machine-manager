@@ -1,0 +1,30 @@
+{
+ "case": "tick-errors-6-restart",
+ "expected": {
+  "action": "restart",
+  "reasons": [
+   "6 ticks in a row failed"
+  ],
+  "state": {
+   "bad": 0,
+   "slow": 0
+  }
+ },
+ "function": "self_check",
+ "input": {
+  "inp": {
+   "data_free_mb": 50000.0,
+   "data_writable": true,
+   "now": 1800000000.0,
+   "reading_problems": [],
+   "rss_mb": 40.0,
+   "safe": false,
+   "slot_changes": [],
+   "tick_errors": 6,
+   "tick_s": 0.4
+  },
+  "state": {}
+ },
+ "settings": "base",
+ "settings_over": {}
+}

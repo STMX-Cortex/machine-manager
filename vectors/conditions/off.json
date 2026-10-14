@@ -1,0 +1,22 @@
+{
+ "case": "off",
+ "expected": [
+  [
+   "OFF",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "off": {
+    "off": true,
+    "reason": "test",
+    "since": "2026-01-01 10:00:00"
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

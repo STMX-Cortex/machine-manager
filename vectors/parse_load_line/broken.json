@@ -1,0 +1,11 @@
+{
+ "case": "broken",
+ "expected": null,
+ "function": "parse_load_line",
+ "input": {
+  "line": "10-14 09:14 load broken",
+  "year": 2026
+ },
+ "settings": "base",
+ "settings_over": {}
+}

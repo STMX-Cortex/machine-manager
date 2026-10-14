@@ -1,0 +1,10 @@
+{
+ "case": "bearer",
+ "expected": "curl -H 'Authorization: Bearer ***'",
+ "function": "mask",
+ "input": {
+  "text": "curl -H 'Authorization: Bearer abcdefghijklmnop12'"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

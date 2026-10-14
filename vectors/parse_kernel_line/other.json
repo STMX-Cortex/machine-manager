@@ -1,0 +1,10 @@
+{
+ "case": "other",
+ "expected": null,
+ "function": "parse_kernel_line",
+ "input": {
+  "line": "{\"eventMessage\": \"arm_cpu_init(): cpu 9 online\"}"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,23 @@
+{
+ "case": "jobs-dead",
+ "expected": [
+  [
+   "JOB_DEAD",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "jobs_dead": [
+    [
+     4242,
+     "/tmp/x.rc"
+    ]
+   ]
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

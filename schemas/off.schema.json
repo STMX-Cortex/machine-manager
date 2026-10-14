@@ -1,0 +1,27 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "The off switch (off.json in the data folder, written by mm off)",
+ "type": "object",
+ "required": [
+  "off",
+  "since"
+ ],
+ "properties": {
+  "off": {
+   "const": true
+  },
+  "since": {
+   "type": "string"
+  },
+  "reason": {
+   "type": "string"
+  },
+  "machine_id": {
+   "type": "string"
+  },
+  "schema_version": {
+   "const": 1
+  }
+ },
+ "additionalProperties": false
+}

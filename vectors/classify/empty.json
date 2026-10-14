@@ -1,0 +1,16 @@
+{
+ "case": "empty",
+ "expected": [
+  "UNKNOWN",
+  [
+   "no readings"
+  ],
+  false
+ ],
+ "function": "classify",
+ "input": {
+  "window": []
+ },
+ "settings": "base",
+ "settings_over": {}
+}

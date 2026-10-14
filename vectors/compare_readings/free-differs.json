@@ -1,0 +1,25 @@
+{
+ "case": "free-differs",
+ "expected": [
+  "free_pct fast=80.0 command=60.0"
+ ],
+ "function": "compare_readings",
+ "input": {
+  "cmd": {
+   "comp_mb": 300,
+   "free_pct": 60,
+   "load5": 2,
+   "swap_total_mb": 2048,
+   "swap_used_mb": 500
+  },
+  "fast": {
+   "comp_mb": 300,
+   "free_pct": 80,
+   "load5": 2,
+   "swap_total_mb": 2048,
+   "swap_used_mb": 500
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,32 @@
+{
+ "case": "slow-3-restart",
+ "expected": {
+  "action": "restart",
+  "reasons": [
+   "3 ticks in a row took over 30 s"
+  ],
+  "state": {
+   "bad": 0,
+   "slow": 3
+  }
+ },
+ "function": "self_check",
+ "input": {
+  "inp": {
+   "data_free_mb": 50000.0,
+   "data_writable": true,
+   "now": 1800000000.0,
+   "reading_problems": [],
+   "rss_mb": 40.0,
+   "safe": false,
+   "slot_changes": [],
+   "tick_errors": 0,
+   "tick_s": 31.0
+  },
+  "state": {
+   "slow": 2
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

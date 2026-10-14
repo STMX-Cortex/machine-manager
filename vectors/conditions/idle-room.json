@@ -1,0 +1,18 @@
+{
+ "case": "idle-room",
+ "expected": [
+  [
+   "IDLE_ROOM",
+   "INFO"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "idle_minutes": 40
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

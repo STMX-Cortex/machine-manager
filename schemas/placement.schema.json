@@ -1,0 +1,122 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "A placement answer (mm place --json)",
+ "type": "object",
+ "required": [
+  "kind",
+  "time",
+  "request",
+  "place",
+  "candidate",
+  "reasons",
+  "commands",
+  "machine_id",
+  "schema_version"
+ ],
+ "properties": {
+  "machine_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "schema_version": {
+   "const": 1
+  },
+  "kind": {
+   "const": "placement"
+  },
+  "time": {
+   "type": "number"
+  },
+  "request": {
+   "$ref": "#/$defs/request"
+  },
+  "place": {
+   "enum": [
+    "MACHINE",
+    "GO",
+    "POOL",
+    "WAIT"
+   ]
+  },
+  "candidate": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "reasons": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "commands": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  }
+ },
+ "additionalProperties": false,
+ "$defs": {
+  "request": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "title": "A placement request (mm place)",
+   "type": "object",
+   "required": [
+    "kind"
+   ],
+   "properties": {
+    "kind": {
+     "type": "string",
+     "minLength": 1
+    },
+    "shards": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "wide": {
+     "type": "boolean"
+    },
+    "agents": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "crate": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "diff_base": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "race": {
+     "type": "boolean"
+    },
+    "packages": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "sha": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "branch": {
+     "type": [
+      "string",
+      "null"
+     ]
+    }
+   },
+   "additionalProperties": false
+  }
+ }
+}

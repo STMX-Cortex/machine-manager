@@ -1,0 +1,15 @@
+{
+ "case": "gone",
+ "expected": [],
+ "function": "resume_targets",
+ "input": {
+  "current": {
+   "101": null
+  },
+  "paused": {
+   "101": "Tue Oct 14 20:00:01 2026"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

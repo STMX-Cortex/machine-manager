@@ -1,0 +1,26 @@
+{
+ "case": "gigabytes",
+ "expected": {
+  "busy": 4,
+  "comp_mb": 7987.2,
+  "free_pct": 33.0,
+  "fsev_mb": 5.0,
+  "load1": 19.16,
+  "load15": 8.54,
+  "load5": 11.18,
+  "pressure": null,
+  "seg_pct": null,
+  "slots": 4,
+  "swap_total_mb": null,
+  "swap_used_mb": 17612.8,
+  "sys_pct": 23.64,
+  "waiting": 1
+ },
+ "function": "parse_load_line",
+ "input": {
+  "line": "10-10 20:21 load 19.16 11.18 8.54 free 33% swap 17.2G comp 7.8G sys 23.64% fsev 5M slots 4/4 waiting 1",
+  "year": 2026
+ },
+ "settings": "base",
+ "settings_over": {}
+}

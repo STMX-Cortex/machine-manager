@@ -1,0 +1,17 @@
+{
+ "case": "cleared",
+ "expected": "CLEARED MEM_RED cleared: MEM_RED",
+ "function": "alert_line",
+ "input": {
+  "rec": {
+   "command": "x",
+   "key": "MEM",
+   "level": "INFO",
+   "name": "MEM_RED",
+   "text": "cleared: MEM_RED",
+   "why": "cleared"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

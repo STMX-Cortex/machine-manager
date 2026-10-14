@@ -1,0 +1,20 @@
+{
+ "case": "source-stale",
+ "expected": [
+  [
+   "SOURCE_STALE",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "stale_sources": {
+    "queue-sampler": "last line 400 s old"
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

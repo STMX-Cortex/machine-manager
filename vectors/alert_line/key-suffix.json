@@ -1,0 +1,15 @@
+{
+ "case": "key-suffix",
+ "expected": "ATTENTION QWAIT:17-4 waits 25 min",
+ "function": "alert_line",
+ "input": {
+  "rec": {
+   "key": "QWAIT:17-4",
+   "level": "ATTENTION",
+   "name": "QWAIT",
+   "text": "waits 25 min"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

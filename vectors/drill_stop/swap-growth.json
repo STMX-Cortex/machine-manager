@@ -1,0 +1,18 @@
+{
+ "case": "swap-growth",
+ "expected": "swap +150 MB > 100 MB",
+ "function": "drill_stop",
+ "input": {
+  "elapsed_s": 60,
+  "free_pct": 70.0,
+  "interrupted": false,
+  "state": "GREEN",
+  "step_mb": 512,
+  "swap_start_mb": 500.0,
+  "swap_used_mb": 650.0,
+  "time_limit_s": 900,
+  "total_mb": 16384
+ },
+ "settings": "base",
+ "settings_over": {}
+}

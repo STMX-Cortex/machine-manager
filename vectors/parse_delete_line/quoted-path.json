@@ -1,0 +1,19 @@
+{
+ "case": "quoted-path",
+ "expected": {
+  "bytes": null,
+  "guard": "an entry changed 3 min ago",
+  "machine_id": "m1",
+  "path": "/x/iOS DeviceSupport/17.0",
+  "rule": "S6",
+  "schema_version": 1,
+  "time": "2026-01-02 03:04:05",
+  "verb": "KEEP"
+ },
+ "function": "parse_delete_line",
+ "input": {
+  "line": "2026-01-02 03:04:05 KEEP rule=S6 path=\"/x/iOS DeviceSupport/17.0\" guard=an entry changed 3 min ago machine=m1 v=1"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

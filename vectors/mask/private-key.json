@@ -1,0 +1,10 @@
+{
+ "case": "private-key",
+ "expected": "***PRIVATE KEY***",
+ "function": "mask",
+ "input": {
+  "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

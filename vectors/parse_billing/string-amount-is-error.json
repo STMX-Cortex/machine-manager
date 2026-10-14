@@ -1,0 +1,13 @@
+{
+ "case": "string-amount-is-error",
+ "expected": {
+  "error": true
+ },
+ "function": "parse_billing",
+ "input": {
+  "month": "2026-10",
+  "text": "{\"usageItems\": [{\"date\": \"2026-10-01T00:00:00Z\", \"product\": \"actions\", \"sku\": \"Actions Linux\", \"quantity\": 1200, \"grossAmount\": \"4.8\", \"netAmount\": 0}]}"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

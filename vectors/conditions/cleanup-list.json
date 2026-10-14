@@ -1,0 +1,29 @@
+{
+ "case": "cleanup-list",
+ "expected": [
+  [
+   "CLEANUP_LIST",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "cleanup": {
+    "bytes": 5000000000.0,
+    "count": 2,
+    "top": [
+     {
+      "bytes": 4000000000.0,
+      "path": "/w/a",
+      "rule": "R1"
+     }
+    ]
+   },
+   "disk_gb": 45.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

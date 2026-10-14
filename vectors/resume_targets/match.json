@@ -1,0 +1,20 @@
+{
+ "case": "match",
+ "expected": [
+  101,
+  102
+ ],
+ "function": "resume_targets",
+ "input": {
+  "current": {
+   "101": "Tue Oct 14 20:00:01 2026",
+   "102": "Tue Oct 14 20:00:02 2026"
+  },
+  "paused": {
+   "101": "Tue Oct 14 20:00:01 2026",
+   "102": "Tue Oct 14 20:00:02 2026"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

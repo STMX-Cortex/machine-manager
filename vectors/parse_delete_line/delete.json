@@ -1,0 +1,19 @@
+{
+ "case": "delete",
+ "expected": {
+  "bytes": 8192,
+  "guard": "pass: age>360min lsof=empty live_tools=none",
+  "machine_id": "m1",
+  "path": "/tmp/go-build123",
+  "rule": "S2",
+  "schema_version": 1,
+  "time": "2026-01-02 03:04:05",
+  "verb": "DELETE"
+ },
+ "function": "parse_delete_line",
+ "input": {
+  "line": "2026-01-02 03:04:05 DELETE rule=S2 path=/tmp/go-build123 bytes=8192 guard=pass: age>360min lsof=empty live_tools=none machine=m1 v=1"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

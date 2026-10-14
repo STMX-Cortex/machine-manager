@@ -1,0 +1,97 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "One pushed alert record (a line of alerts.jsonl)",
+ "type": "object",
+ "required": [
+  "seq",
+  "time",
+  "key",
+  "name",
+  "level",
+  "text",
+  "why",
+  "machine_id",
+  "schema_version"
+ ],
+ "properties": {
+  "machine_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "schema_version": {
+   "const": 1
+  },
+  "seq": {
+   "type": "integer",
+   "minimum": 1
+  },
+  "time": {
+   "type": "string",
+   "pattern": "^\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d$"
+  },
+  "key": {
+   "type": "string",
+   "minLength": 1
+  },
+  "name": {
+   "type": "string",
+   "pattern": "^[A-Z0-9_]+$"
+  },
+  "level": {
+   "enum": [
+    "INFO",
+    "ATTENTION",
+    "ACTION"
+   ]
+  },
+  "text": {
+   "type": "string"
+  },
+  "value": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "command": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "investigate": {
+   "anyOf": [
+    {
+     "type": "null"
+    },
+    {
+     "type": "object",
+     "required": [
+      "question"
+     ],
+     "properties": {
+      "question": {
+       "type": "string"
+      },
+      "hypotheses": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   ]
+  },
+  "why": {
+   "enum": [
+    "new",
+    "level rose",
+    "worse by a band",
+    "repeat",
+    "cleared"
+   ]
+  }
+ },
+ "additionalProperties": false
+}

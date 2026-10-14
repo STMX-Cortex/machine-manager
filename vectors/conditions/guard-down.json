@@ -1,0 +1,20 @@
+{
+ "case": "guard-down",
+ "expected": [
+  [
+   "GUARD_DOWN",
+   "ACTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "stale_sources": {
+    "memory-guard": "heartbeat 300 s old"
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

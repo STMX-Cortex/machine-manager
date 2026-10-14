@@ -1,0 +1,54 @@
+{
+ "case": "info-never-repeats",
+ "expected": {
+  "acked": false,
+  "entry": {
+   "command": null,
+   "count": 6,
+   "first": 1799999400.0,
+   "investigate": null,
+   "key": "DISK_LOW",
+   "last": 1800086400.0,
+   "level": "INFO",
+   "name": "DISK_LOW",
+   "pushed_at": 1799999400.0,
+   "pushed_level": "INFO",
+   "pushed_value": 38.0,
+   "text": "disk 38 GB",
+   "value": 38.0
+  },
+  "push": false,
+  "why": null
+ },
+ "function": "alert_raise",
+ "input": {
+  "acked": false,
+  "cond": {
+   "band": null,
+   "command": null,
+   "investigate": null,
+   "key": "DISK_LOW",
+   "level": "INFO",
+   "name": "DISK_LOW",
+   "text": "disk 38 GB",
+   "value": 38.0,
+   "worse": "down"
+  },
+  "entry": {
+   "count": 5,
+   "first": 1799999400.0,
+   "key": "DISK_LOW",
+   "last": 1799999940.0,
+   "level": "INFO",
+   "name": "DISK_LOW",
+   "pushed_at": 1799999400.0,
+   "pushed_level": "INFO",
+   "pushed_value": 38.0,
+   "text": "disk 38 GB",
+   "value": 38.0
+  },
+  "now": 1800086400.0
+ },
+ "settings": "base",
+ "settings_over": {}
+}

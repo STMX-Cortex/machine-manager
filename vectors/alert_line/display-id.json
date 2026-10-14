@@ -1,0 +1,15 @@
+{
+ "case": "display-id",
+ "expected": "ACTION MEM_RED machine RED: free 30%",
+ "function": "alert_line",
+ "input": {
+  "rec": {
+   "key": "MEM",
+   "level": "ACTION",
+   "name": "MEM_RED",
+   "text": "machine RED: free 30%"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

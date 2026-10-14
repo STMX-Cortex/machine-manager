@@ -1,0 +1,19 @@
+{
+ "case": "disk-trend",
+ "expected": [
+  [
+   "DISK_TREND",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "disk_gb": 50.0,
+   "disk_rate_gb_h": 5.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

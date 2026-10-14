@@ -1,0 +1,20 @@
+{
+ "case": "two-in-window",
+ "expected": {
+  "safe": false,
+  "starts": [
+   1799999700.0,
+   1799999940.0
+  ]
+ },
+ "function": "crash_loop",
+ "input": {
+  "now": 1800000000.0,
+  "starts": [
+   1799999700.0,
+   1799999940.0
+  ]
+ },
+ "settings": "base",
+ "settings_over": {}
+}

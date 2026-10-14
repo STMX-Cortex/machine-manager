@@ -1,0 +1,23 @@
+{
+ "case": "mem-amber",
+ "expected": [
+  [
+   "MEM_AMBER",
+   "ATTENTION"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "state": [
+    "AMBER",
+    [
+     "free 45% < 50%"
+    ]
+   ]
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

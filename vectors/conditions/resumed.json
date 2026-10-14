@@ -1,0 +1,18 @@
+{
+ "case": "resumed",
+ "expected": [
+  [
+   "RESUMED",
+   "INFO"
+  ]
+ ],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "resumed_gap_s": 2280
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

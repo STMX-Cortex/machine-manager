@@ -1,0 +1,10 @@
+{
+ "case": "not-a-line",
+ "expected": null,
+ "function": "parse_delete_line",
+ "input": {
+  "line": "garbage"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

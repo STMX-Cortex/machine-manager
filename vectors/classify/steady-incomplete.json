@@ -1,0 +1,22 @@
+{
+ "case": "steady-incomplete",
+ "expected": [
+  "STEADY",
+  [
+   "load5 not under 8"
+  ],
+  false
+ ],
+ "function": "classify",
+ "input": {
+  "disk_gb": 100.0,
+  "window": [
+   {
+    "free_pct": 80.0,
+    "t": 1800000000.0
+   }
+  ]
+ },
+ "settings": "base",
+ "settings_over": {}
+}
