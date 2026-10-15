@@ -36,7 +36,7 @@ def _read_usage(i, s):
         path = os.path.join(root, "usage.json")
         with open(path, "w") as f:
             f.write(i["text"] if "text" in i else json.dumps(i["state"]))
-        got = ad_deliver_claude.read_usage(path, i["now"])
+        got = ad_deliver_claude.read_usage(path, i["now"], s)
     if got is None:
         return None
     return {k: got.get(k) for k in ("claude_5h", "claude_week", "codex_week", "proj")}
