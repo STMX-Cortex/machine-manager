@@ -4,7 +4,7 @@
 the supervisor reads from Claude Code (usage-watch state, the recipient's open tool calls, its job lines, cache writes).
 
 Interface (PORTING.md, "Adapters"): recipient(); hook(argv, stdin) (the hook process); take_unseen(session, level, now);
-format_alerts(records); banner(text, enabled); usage(now); open_tool_call(now); jobs(); cache_5m(now).
+format_alerts(records); banner(text, enabled); usage(now, s); open_tool_call(now); jobs(); cache_5m(now).
 
 The hook prints unseen ATTENTION and ACTION alerts as additional context, only in the recipient's main session:
 - session_id must equal the id the profile's recipient_regex finds in recipient_file;
@@ -19,6 +19,7 @@ Test overrides: MM_DATA, MM_PROFILE, MM_RECIPIENT_FILE, MM_NOW.
 """
 import fcntl
 import json
+import math
 import os
 import re
 import select
@@ -313,20 +314,48 @@ def hook_process():
 
 # ------------------------------------------------------------------------------------------- session facts
 
-def read_usage(file, now):
-    """The usage-watch state: levels in percent and the state's age."""
+def read_usage(file, now, s=None):
+    """Current usage levels in percent; unknown rows retain their stale-source reasons."""
+    def number(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
     try:
+        s = mmcore.defaults() if s is None else s
         with open(file) as f:
             d = json.load(f)
         lv = d.get("levels", {})
-
-        def pct(k):
-            v = lv.get(k, {}).get("used_percent")
-            return v if isinstance(v, (int, float)) else None
-        return {"age_s": now - float(d.get("checked_at", 0)), "claude_5h": pct("claude_5h"), "claude_week": pct("claude_weekly"),
-                "codex_week": pct("codex_weekly"), "proj": d.get("claude_weekly_projection"),
-                "max_age_s": d.get("max_age_seconds", 1800)}
-    except (OSError, ValueError, TypeError, AttributeError):
+        checked = float(d.get("checked_at", 0))
+        max_age = d.get("max_age_seconds", s["usage.watch_state_max_age_s"])
+        if not isinstance(lv, dict) or not number(checked) or not number(max_age) or max_age < 0:
+            return None
+        out = {"age_s": now - checked, "max_age_s": max_age, "stale_levels": {}}
+        for level, key in (("claude_5h", "claude_5h"), ("claude_weekly", "claude_week"),
+                           ("codex_weekly", "codex_week"), ("codex_5h", "codex_5h")):
+            out[key] = None
+            row = lv.get(level)
+            if not isinstance(row, dict):
+                why = "row missing or invalid"
+            elif row.get("status") == "not_offered":
+                continue
+            elif row.get("status") not in ("ok", "cached"):
+                why = "status %s" % row.get("status", "missing")
+            elif not number(row.get("used_percent")):
+                why = "used_percent missing or invalid"
+            elif not number(row.get("read_at")):
+                why = "read_at missing or invalid"
+            elif row["read_at"] - now > s["usage.read_clock_allowance_s"]:
+                why = "read_at %.0f s in future" % (row["read_at"] - now)
+            elif now - row["read_at"] > max_age:
+                why = "reading %.0f s old" % (now - row["read_at"])
+            elif number(row.get("reset_at")) and row["reset_at"] <= now:
+                why = "window reset"
+            else:
+                out[key] = row["used_percent"]
+                continue
+            out["stale_levels"][level] = why
+        out["proj"] = d.get("claude_weekly_projection") if out["claude_week"] is not None else None
+        return out
+    except (OSError, ValueError, TypeError, AttributeError, OverflowError):
         return None
 
 
@@ -461,9 +490,9 @@ class Delivery:
     def recipient(self):
         return recipient(self.cfg)
 
-    def usage(self, now):
+    def usage(self, now, s=None):
         f = self.cfg.get("usage_state")
-        return read_usage(mmcore.expand(f), now) if f else None
+        return read_usage(mmcore.expand(f), now, s) if f else None
 
     def usage_file(self):
         f = self.cfg.get("usage_state")
