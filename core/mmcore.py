@@ -484,11 +484,17 @@ _SECRET_RES = [
     _re.compile(r"(?i)(://[^/\s:@]+:)([^@\s]+)(@)"),
 ]
 
+# A path, whose segments the long-random-word rule keeps (mask's doc: "Paths ... are kept"): a word that starts with
+# /, ~/, ./ or ../ at the start of the text or after white space, a quote, =, (, [ or ,; it runs to white space or a
+# quote. A word starting with :// (a URL) is no path: its parts stay masked as before.
+_PATH_RE = _re.compile(r"""(?:^|(?<=[\s"'=(\[,]))(?:~|\.\.?)?/[^\s"']*""")
+
 
 def mask(text):
     """Secret-shaped parts of a text replaced by ***: KEY=value pairs with secret names, --token style flags, bearer
     strings, known token prefixes, private key blocks, passwords in URLs and long random words (32+ chars, letters and
-    digits, high entropy). Paths, hex digests and UUIDs are kept."""
+    digits, high entropy). Paths (_PATH_RE: the long-random-word rule never cuts into one), hex digests and UUIDs are
+    kept."""
     if not isinstance(text, str) or not text:
         return text
     t = _SECRET_RES[4].sub("***PRIVATE KEY***", text)
@@ -497,7 +503,13 @@ def mask(text):
     t = _SECRET_RES[2].sub(lambda m: m.group(1) + m.group(2) + "***", t)
     t = _SECRET_RES[3].sub("***", t)
     t = _SECRET_RES[6].sub(lambda m: m.group(1) + "***" + m.group(3), t)
-    t = _SECRET_RES[5].sub(lambda m: "***" if _random(m.group(0)) else m.group(0), t)
+    paths = [m.span() for m in _PATH_RE.finditer(t)]
+
+    def word(m):
+        if any(a <= m.start() and m.end() <= b for a, b in paths):
+            return m.group(0)  # a segment of a path
+        return "***" if _random(m.group(0)) else m.group(0)
+    t = _SECRET_RES[5].sub(word, t)
     return t
 
 
@@ -646,12 +658,24 @@ class AlertStore:
 
 LINE_MAX = 200
 
+# Characters an alert line never shows (design C-17): C0 controls, DEL, C1 controls, LINE SEPARATOR and PARAGRAPH
+# SEPARATOR. Alert keys, texts and commands can hold text an agent chose (a ticket's file name, a call's label); one
+# of these would break the line in two (a forged alert line) or drive the terminal.
+_CONTROLS = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+CONTROL_STAND_IN = "?"  # what is shown in place of each of them (plain ASCII, safe on every terminal)
+
+
+def one_line(text):
+    """text with each control or line-break character (_CONTROLS) replaced by CONTROL_STAND_IN."""
+    return _CONTROLS.sub(CONTROL_STAND_IN, text)
+
 
 def display_id(rec):
     """The alert id people and agents see: the rule name, plus the key's ':' part when the key has one
-    (MEM with name MEM_RED -> MEM_RED; QWAIT:x -> QWAIT:x). `mm ack` and `mm explain` accept it or the key."""
+    (MEM with name MEM_RED -> MEM_RED; QWAIT:x -> QWAIT:x), with no control character (one_line). `mm ack` and
+    `mm explain` accept it or the key."""
     key, name = rec.get("key") or "", rec.get("name") or rec.get("key") or "?"
-    return name + key[key.index(":"):] if ":" in key else name
+    return one_line(name + key[key.index(":"):] if ":" in key else name)
 
 
 def find_alert(active, ident):
@@ -664,8 +688,11 @@ def find_alert(active, ident):
 
 def alert_line(rec, max_len=LINE_MAX):
     """One alert as one line of at most max_len characters: `LEVEL KEY what/why | do: command`.
-    The command is never cut: a command too long for the line becomes `mm explain KEY` (explain prints it whole)."""
-    level, key = rec.get("level") or "INFO", display_id(rec)
+    The command is never cut: a command too long for the line becomes `mm explain KEY` (explain prints it whole).
+    The line holds no control or line-break character (C-17): white space in the text folds to one space, any other
+    such character in the head, key or text shows as CONTROL_STAND_IN, and a command that holds one becomes
+    `mm explain KEY`."""
+    level, key = one_line(str(rec.get("level") or "INFO")), display_id(rec)
     if rec.get("why") == "cleared":
         level = "CLEARED"
     count = rec.get("_count", 1)
@@ -673,10 +700,10 @@ def alert_line(rec, max_len=LINE_MAX):
     cmd = rec.get("command") if rec.get("why") != "cleared" else None
     tail = ""
     if cmd:
-        tail = " | do: " + cmd
-        if len(tail) > max_len // 2 or len(head) + len(tail) + 40 > max_len:
+        tail = " | do: " + str(cmd)
+        if one_line(tail) != tail or len(tail) > max_len // 2 or len(head) + len(tail) + 40 > max_len:
             tail = " | do: mm explain " + key
-    text = " ".join(str(rec.get("text") or "").split())
+    text = one_line(" ".join(str(rec.get("text") or "").split()))
     room = max_len - len(head) - len(tail)
     if len(text) > room:
         text = text[:max(room - 3, 0)].rstrip() + "..."

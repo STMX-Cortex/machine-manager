@@ -169,13 +169,21 @@ def cmd_explain(args, as_json, profile):
     idx = mmcore.read_json(mmcore.path("state", "evidence-index.json"), {}) or {}
     ev = next((mmcore.path("evidence", v["slot"]) for v in idx.values() if v.get("key") == a["key"]), None)
     inv = (profile.get("delivery") or {}).get("investigator")
-    obj = {"id": mmcore.display_id(a), "key": a["key"], "level": a["level"], "text": a.get("text"),
-           "command": a.get("command"), "since": mmcore.now_local(a.get("first")), "count": a.get("count"),
+    # C-17: the key, text and command can hold text an agent chose; no control character is shown, and a command that
+    # holds one is withheld (never run as shown)
+    cmd = a.get("command")
+    withheld = bool(cmd) and mmcore.one_line(str(cmd)) != str(cmd)
+    obj = {"id": mmcore.display_id(a), "key": mmcore.one_line(a["key"]), "level": mmcore.one_line(str(a["level"])),
+           "text": mmcore.one_line(str(a.get("text") or "")), "command": None if withheld else cmd,
+           "command_withheld": withheld, "since": mmcore.now_local(a.get("first")), "count": a.get("count"),
            "acked": a["key"] in (stt.get("acks") or {}), "evidence": ev, "investigator": inv if ev else None}
-    lines = [kv({"id": obj["id"], "level": a["level"], "since": obj["since"], "count": a.get("count"), "acked": obj["acked"]}),
-             "text=" + json.dumps(a.get("text") or "")]
-    if a.get("command"):
-        lines.append("command=" + json.dumps(a["command"]))
+    lines = [kv({"id": obj["id"], "level": obj["level"], "since": obj["since"], "count": a.get("count"),
+                 "acked": obj["acked"]}),
+             "text=" + json.dumps(obj["text"])]
+    if withheld:
+        lines.append("command=withheld reason=control_characters")
+    elif cmd:
+        lines.append("command=" + json.dumps(cmd))
     if ev:
         lines.append(kv({"evidence": ev, "investigator": inv}))
     emit(as_json, obj, lines)

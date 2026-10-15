@@ -175,6 +175,10 @@ profile names:
    `DELETES_FAILED` names `deletes_job` and the error. The cleanup list's alerts (`CLEANUP_LIST`, its `LINK_SKIPPED`
    paths, `DELETES_FAILED` for `cleanup_list`) keep their state until the list runs again
    (`deletes.cleanup_list_hours`), not only until the next deletes pass.
+6. **Alert lines.** File names and call labels an agent chose reach alert keys, texts and commands. Every alert line
+   (the hook, `mm wait`, `mm alerts`, `mm status`) is one line with no control character: white space in a text folds
+   to one space, any other control character (C0, DEL, C1, U+2028, U+2029) shows as `?`, and a command that holds one
+   becomes `mm explain KEY`.
 
 ## Glossary
 

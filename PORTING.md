@@ -47,7 +47,8 @@ Several machines and pools are several status records; placement takes a list of
 ## Rules a port keeps
 
 1. Readings never block a tick for long: every outside command has a time limit.
-2. Mask secrets before anything reaches an alert, evidence, status or output (`mask` vectors).
+2. Mask secrets before anything reaches an alert, evidence, status or output (`mask` vectors). Paths are kept: the
+   long-random-word rule never cuts into a word that starts with `/`, `~/`, `./` or `../`.
 3. Observe mode and the off switch turn every action into a `WOULD` line.
 4. The launch gate fails open: no fresh status, no valid settings, or the off switch means no denial.
 5. Deletes re-check their guard right before the delete; a forbidden part of a path is never entered.
@@ -58,4 +59,6 @@ Several machines and pools are several status records; placement takes a list of
    Nothing an agent can write hangs or stops a tick: slot, ticket and marker files are opened without following a link
    and without waiting, only a regular file counts, and at most 4096 bytes are read; an error with one file costs only
    that file; one failing delete rule never stops the others. Waiting calls and unreadable queue files raise one alert
-   each (`QWAIT`, `QUEUE_FILE_UNREADABLE`), never one per file.
+   each (`QWAIT`, `QUEUE_FILE_UNREADABLE`), never one per file. Every alert line is one line with no control
+   character (C0, DEL, C1, U+2028, U+2029): such a character shows as `?`, and a command that holds one becomes
+   `mm explain KEY`.

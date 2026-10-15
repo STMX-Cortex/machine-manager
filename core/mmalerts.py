@@ -239,8 +239,8 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
                          else ""), command="ls -l " + " ".join(shlex.quote(x) for x in named)))
     for p in g("slot_not_a_file") or []:
         out.append(_c("SLOT_NOT_A_FILE:" + _h(p), "SLOT_NOT_A_FILE", "ATTENTION",
-                      "a queue slot or ticket path is not a regular file (a link or a FIFO); counted as not held, "
-                      "never paused through: %s" % p, command="ls -ld " + shlex.quote(p)))
+                      "a queue slot or ticket path is not a regular file; counted as not held, never paused "
+                      "through: %s" % p, command="ls -ld " + shlex.quote(p)))
     # --- the pause: a process that is not the queue launcher had the newest call's slot file open
     pr = g("pause_refused")
     if pr:
