@@ -3,6 +3,7 @@
 """Run the machine-manager tests: python3 -I tests/run_tests.py [GROUP ...] [--quick]
 One result file per group in tests/results/. --quick skips the slow and live groups (for `mm selftest`).
 Temporary folders go under MM_TEST_TMP (default: the system temp folder); each test removes its own."""
+import glob
 import io
 import os
 import sys
@@ -15,7 +16,10 @@ sys.path.insert(0, HERE)
 GROUPS = {
     "core": ["test_core"],            # T1 parsers, T6 alerts, T7 controller, T10 names, T12 settings, B1 masking
     "vectors": ["test_vectors"],      # every vector, the replays (T2-T4), the schemas
-    "supervisor": ["test_supervisor"],  # T5 tick errors and dry run, T7 slot writes and pause, T12, B2 off, B3 check
+    "supervisor": ["test_supervisor"] + [  # T5 tick errors and dry run, T7 slot writes and pause, T12, B2 off, B3 check
+        os.path.basename(path)[:-3]
+        for path in sorted(glob.glob(os.path.join(HERE, "test_slot_trial*review*.py")))
+    ],
     "watchdog": ["test_watchdog"],    # T5
     "hook": ["test_hook"],            # T9, the 3-line limit, fail-open
     "place": ["test_place"],          # T8
