@@ -28,6 +28,7 @@ GROUPS = {
     "hook": ["test_hook"],            # T9, the 3-line limit, fail-open
     "place": ["test_place"],          # T8
     "deletes": ["test_deletes"],      # T14a-h, T15
+    "sandbox_holds": ["test_sandbox_holds"],  # rules 46-48: git, the pause and deletes against agent-written files
     "install": ["test_install"],      # install, stop, start, rollback, init, check (temporary HOME)
     "cli": ["test_cli"],              # golden outputs and limits
     "drill": ["test_drill"],          # the drill's stop rules on a fake reader

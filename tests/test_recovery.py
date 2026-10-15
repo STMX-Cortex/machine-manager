@@ -2,7 +2,8 @@
 """Self-recovery: `mm restart` (R1), the self-check and its restart or safe mode (R2), the crash-loop guard and safe
 mode (R3), no process left stopped by a crash, a hang, a stop or a rollback (R4), the watchdog's stamp (R5), the Mac
 reboot report (R6), the outside dead-man ping (R7), and what the tool never does (R8).
-Every process signalled here is a `sleep` this test started; launchctl is a fake; nothing touches a real install."""
+Every process signalled here is a `sleep` or a fixture queue call this test started; launchctl is a fake; nothing
+touches a real install."""
 import ast
 import http.server
 import json
@@ -17,7 +18,7 @@ import time
 import unittest
 
 import mmtest
-from mmtest import TempData, mmcore
+from mmtest import TempData, mmcore, mmread
 import ad_deliver_claude
 import mmdecide
 import mmrecover
@@ -324,23 +325,49 @@ class R3SafeMode(Base):
 
 class R4Paused(Base):
     def test_the_record_is_written_before_the_sigstop(self):
-        p = self.sleeper()
+        """Changed for rule 47 (design part C, rule 47 and settlement C-5): the pause takes its pids from the process
+        that has the slot file open and runs the configured queue launcher, so the paused process is now a real call
+        of the fixture launcher (with its sleep), reached through a supervisor tick at a critical RED.
+        Still proved: each pid is in the record before its SIGSTOP."""
+        p = subprocess.Popen([sys.executable, "-I", os.path.join(self.q, "launcher.py"), "--", "/bin/sleep", "300"])
+        tree = []
+
+        def end_tree():
+            for pid in reversed(tree):
+                try:
+                    os.kill(pid, signal.SIGCONT)
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+            p.wait(10)
+        self.addCleanup(end_tree)
+        for _ in range(100):
+            kids = [x["pid"] for x in mmread.read_ps() or [] if x["ppid"] == p.pid]
+            if kids and mmread.flock_held(os.path.join(self.q, ".slot.1"))[0]:
+                break
+            time.sleep(0.1)
+        tree[:] = [p.pid] + kids
+        self.assertEqual(len(tree), 2, "the launcher runs its sleep")
+        self.write_settings(**{"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10, "mode.observe": False,
+                               "pause_newest_call.enabled": True})
         seen = []
         real = os.kill
 
         def spy(pid, sig):
             if sig == signal.SIGSTOP:
+                if pid not in tree:  # never stop a process this test did not start
+                    seen.append(("not ours", pid))
+                    return None
                 seen.append(str(pid) in mmrecover.read_paused())
             return real(pid, sig)
         mmsuper.os.kill = spy
         try:
-            got = mmsuper.Pauser().pause([{"pid": p.pid, "since": time.time(), "label": "x"}],
-                                         [{"pid": p.pid, "ppid": 1, "rss_mb": 1, "cpu": 0, "comm": "sleep"}])
+            self.sup(sampler=sampler_of(free_pct=70, pressure=4)).tick()
         finally:
             mmsuper.os.kill = real
-        self.assertEqual(got[1], [p.pid])
-        self.assertEqual(seen, [True])
-        self.assertTrue(proc_stat(p.pid).startswith("T"))
+        self.assertEqual(seen, [True, True], "one SIGSTOP per pid of the call, each after its record")
+        self.assertEqual(sorted(int(x) for x in mmrecover.read_paused()), sorted(tree))
+        self.assertTrue(all(proc_stat(pid).startswith("T") for pid in tree))
 
     def test_a_crash_during_a_pause_is_undone_by_the_next_start(self):
         p = self.sleeper()

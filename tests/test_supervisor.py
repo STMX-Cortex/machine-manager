@@ -445,19 +445,34 @@ class TickErrorsAndDryRun(Base):
 
 class Pause(Base):
     def test_pause_and_resume_fixture_tree_only(self):
-        p = self.holder("sleep fixture")
-        q = mmread.read_ps()
-        kids = [x["pid"] for x in q if x["ppid"] == p.pid]
-        busy = [{"slot": ".slot.1", "pid": p.pid, "since": time.time(), "label": "S fixture"}]
-        state = {}
-        got = mmsuper.Pauser(state).pause(busy, q)
-        self.assertEqual(got[1], sorted([p.pid] + kids))
+        """Changed for rule 47 (design part C, rule 47 and settlement C-5): only a process that has the slot file open
+        and runs the configured queue launcher is paused, so the holder is now a real call of the fixture launcher
+        (a `python -c` holder is no longer paused). Still proved: its tree is paused, nothing else, and resume continues it."""
+        import mmrecover
+        p = subprocess.Popen([sys.executable, "-I", os.path.join(self.q, "launcher.py"), "--", "/bin/sleep", "300"])
+        self.addCleanup(self.kill_tree, p)
+        other = subprocess.Popen(["/bin/sleep", "300"])  # not in the queue: never paused
+        self.addCleanup(self.kill_tree, other)
+        kids = []
+        for _ in range(100):
+            kids = [x["pid"] for x in mmread.read_ps() or [] if x["ppid"] == p.pid]
+            if kids and mmread.flock_held(os.path.join(self.q, ".slot.1"))[0]:
+                break
+            time.sleep(0.1)
+        self.assertTrue(kids, "the launcher runs its command")
+        self.write_settings(**{"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10, "mode.observe": False,
+                               "pause_newest_call.enabled": True})
+        clock = {"t": time.time()}
+        sup = self.sup(sampler_of(free_pct=70, pressure=4), clock=lambda: clock["t"])
+        self.ticks(sup, 2, clock)
+        self.assertEqual(sorted(int(x) for x in mmrecover.read_paused()), sorted([p.pid] + kids))
 
         def stat_(pid):
             return subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
                                   timeout=5).stdout.strip()
         self.assertTrue(stat_(p.pid).startswith("T") and stat_(kids[0]).startswith("T"))
-        self.assertEqual(sorted(mmsuper.Pauser(state).resume()), sorted([p.pid] + kids))
+        self.assertFalse(stat_(other.pid).startswith("T"), "a process outside the call's tree is never paused")
+        self.assertEqual(sorted(mmsuper.Pauser({}).resume()), sorted([p.pid] + kids))
         self.assertFalse(stat_(p.pid).startswith("T"))
 
     def test_observe_mode_logs_would_pause_masked(self):
