@@ -476,7 +476,10 @@ def cache_5m(project_dir, now, window=3600):
                             d = _usage_json(raw)
                             if not isinstance(d, dict):
                                 raise ValueError("transcript line is not an object")
-                            t = _utc_epoch(d.get("timestamp", ""))
+                            ts = d.get("timestamp", "")
+                            if not isinstance(ts, str):
+                                raise ValueError("transcript timestamp is not a string")
+                            t = _utc_epoch(ts)
                             msg = d.get("message")
                             if not isinstance(msg, dict):
                                 raise ValueError("transcript message is not an object")

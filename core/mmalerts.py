@@ -146,9 +146,7 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
     if c5m:
         m5, h1 = c5m.get("m5", 0), c5m.get("h1", 0)
         if m5 is not None and h1 is not None and m5 > s["other.cache_5m_min_tokens_m"] * 1e6:
-            # Scale before adding or multiplying: even finite counts can overflow those operations.
-            scale = max(1, abs(m5), abs(h1))
-            share = (m5 / scale) / max(1 / scale, m5 / scale + h1 / scale) * 100.0
+            share = m5 * 100.0 / max(1, m5 + h1)
         else:
             share = None
         if share is not None and share > s["other.cache_5m_share_pct"]:
