@@ -314,6 +314,20 @@ def hook_process():
 
 # ------------------------------------------------------------------------------------------- session facts
 
+def _usage_json(text):
+    """Keep unconvertible JSON numbers local to their usage value."""
+    def number(text):
+        try:
+            value = float(text) if any(c in text for c in ".eE") else int(text)
+            if math.isfinite(value):
+                return value
+        except (ValueError, OverflowError):
+            pass
+        return math.nan
+
+    return json.loads(text, parse_int=number, parse_float=number, parse_constant=number)
+
+
 def read_usage(file, now, s=None):
     """Current usage levels in percent; unknown rows retain their stale-source reasons."""
     def number(v):
@@ -325,7 +339,7 @@ def read_usage(file, now, s=None):
     try:
         s = mmcore.defaults() if s is None else s
         with open(file) as f:
-            d = json.load(f)
+            d = _usage_json(f.read())
         lv = d.get("levels", {})
         checked = float(d.get("checked_at", 0))
         max_age = d.get("max_age_seconds", s["usage.watch_state_max_age_s"])
@@ -358,7 +372,8 @@ def read_usage(file, now, s=None):
                 out[key] = row["used_percent"]
                 continue
             out["stale_levels"][level] = why
-        out["proj"] = d.get("claude_weekly_projection") if out["claude_week"] is not None else None
+        proj = d.get("claude_weekly_projection")
+        out["proj"] = proj if out["claude_week"] is not None and number(proj) else None
         return out
     except (OSError, ValueError, TypeError, AttributeError, OverflowError):
         return None
@@ -456,8 +471,8 @@ def cache_5m(project_dir, now, window=3600):
                         if b"ephemeral_5m" not in raw:
                             continue
                         try:
-                            d = json.loads(raw)
-                            t = mmread._utc_epoch(d.get("timestamp", ""))
+                            d = _usage_json(raw)
+                            t = _utc_epoch(d.get("timestamp", ""))
                         except (ValueError, TypeError):
                             continue
                         msg = d.get("message") or {}
@@ -466,8 +481,12 @@ def cache_5m(project_dir, now, window=3600):
                             continue
                         seen.add(mid)
                         cc = (msg.get("usage") or {}).get("cache_creation") or {}
-                        m5 += cc.get("ephemeral_5m_input_tokens", 0) or 0
-                        h1 += cc.get("ephemeral_1h_input_tokens", 0) or 0
+                        m = cc.get("ephemeral_5m_input_tokens")
+                        h = cc.get("ephemeral_1h_input_tokens")
+                        if type(m) in (int, float) and math.isfinite(m):
+                            m5 += m
+                        if type(h) in (int, float) and math.isfinite(h):
+                            h1 += h
             except OSError:
                 continue
     return {"m5": m5, "h1": h1}
