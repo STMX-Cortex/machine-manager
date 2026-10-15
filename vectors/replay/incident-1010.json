@@ -93,6 +93,7 @@
    "pushed": [],
    "reasons": [
     "free below 55%",
+    "load1 not under 8",
     "system CPU not under 25%"
    ],
    "slots": 3,
@@ -288,7 +289,8 @@
    "i": 28,
    "pushed": [],
    "reasons": [
-    "load5 not under 8"
+    "load5 not under 8",
+    "load1 not under 8"
    ],
    "slots": 3,
    "state": "STEADY"
@@ -297,7 +299,8 @@
    "i": 29,
    "pushed": [],
    "reasons": [
-    "load5 not under 8"
+    "load5 not under 8",
+    "load1 not under 8"
    ],
    "slots": 3,
    "state": "STEADY"

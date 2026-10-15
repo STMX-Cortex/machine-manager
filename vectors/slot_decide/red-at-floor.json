@@ -3,6 +3,7 @@
  "expected": {
   "slots": null,
   "state": {
+   "demand_since": 1800000000.0,
    "green_since": null,
    "last_change": 1799996400.0,
    "last_red": 1800000000.0

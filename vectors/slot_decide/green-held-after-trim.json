@@ -3,6 +3,7 @@
  "expected": {
   "slots": null,
   "state": {
+   "demand_since": 1799996400.0,
    "green_since": 1799996400.0,
    "last_change": 1799996400.0,
    "last_trim": 1800000000.0
@@ -24,6 +25,7 @@
    "wx_waiting": false
   },
   "state": {
+   "demand_since": 1799996400.0,
    "green_since": 1799996400.0,
    "last_change": 1799996400.0
   }
