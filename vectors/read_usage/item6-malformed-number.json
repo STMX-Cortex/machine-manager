@@ -1,0 +1,11 @@
+{
+ "case": "item6-malformed-number",
+ "expected": null,
+ "function": "read_usage",
+ "input": {
+  "now": 1800000000.0,
+  "text": "98"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

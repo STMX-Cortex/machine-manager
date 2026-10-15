@@ -1,0 +1,53 @@
+{
+ "case": "item1-claude_5h-status-missing",
+ "expected": {
+  "claude_5h": null,
+  "claude_week": 10,
+  "codex_week": 10,
+  "proj": 50
+ },
+ "function": "read_usage",
+ "input": {
+  "now": 1800000000.0,
+  "state": {
+   "checked_at": 1800000000.0,
+   "claude_weekly_projection": 50,
+   "levels": {
+    "claude_5h": {
+     "age_seconds": 60,
+     "read_at": 1799999940.0,
+     "reset_at": 1800003600.0,
+     "used_percent": 98,
+     "window_minutes": 300
+    },
+    "claude_weekly": {
+     "age_seconds": 60,
+     "read_at": 1799999940.0,
+     "reset_at": 1800003600.0,
+     "status": "ok",
+     "used_percent": 10,
+     "window_minutes": 300
+    },
+    "codex_5h": {
+     "age_seconds": 60,
+     "read_at": 1799999940.0,
+     "reset_at": 1800003600.0,
+     "status": "ok",
+     "used_percent": 10,
+     "window_minutes": 300
+    },
+    "codex_weekly": {
+     "age_seconds": 60,
+     "read_at": 1799999940.0,
+     "reset_at": 1800003600.0,
+     "status": "ok",
+     "used_percent": 10,
+     "window_minutes": 300
+    }
+   },
+   "max_age_seconds": 1800
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

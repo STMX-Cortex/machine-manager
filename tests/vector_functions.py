@@ -2,9 +2,13 @@
 """The table the vector runner uses: function name -> how to call it with a vector's input and settings.
 A port implements the same functions; its runner reads the same files (PORTING.md)."""
 from decimal import Decimal
+import json
+import os
+import tempfile
 
 import mmtest  # noqa: F401  (paths)
 import ad_ci_github
+import ad_deliver_claude
 import ad_queue_fifo
 import mmalerts
 import mmcore
@@ -25,7 +29,21 @@ def _billing(i, s):
         return {"error": True}
 
 
+def _read_usage(i, s):
+    """Exercise the file parser in a disposable fixture folder; compare its public readings only."""
+    os.makedirs(mmtest.TMP_BASE, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="usage-vector-", dir=mmtest.TMP_BASE) as root:
+        path = os.path.join(root, "usage.json")
+        with open(path, "w") as f:
+            f.write(i["text"] if "text" in i else json.dumps(i["state"]))
+        got = ad_deliver_claude.read_usage(path, i["now"])
+    if got is None:
+        return None
+    return {k: got.get(k) for k in ("claude_5h", "claude_week", "codex_week", "proj")}
+
+
 FUNCTIONS = {
+    "read_usage": _read_usage,
     "classify": lambda i, s: mmdecide.classify(i["window"], s, i.get("disk_gb"), i.get("kernel_event", False)),
     "slot_decide": lambda i, s: mmdecide.slot_decide(i["state"], i["inp"], s),
     "alert_raise": lambda i, s: mmdecide.alert_raise(i["entry"], i["acked"], i["cond"], i["now"], s),
