@@ -254,6 +254,7 @@ SCHEMA = {
     "slots.hold_after_red_minutes": ("num", 0, 600), "slots.hold_after_trim_minutes": ("num", 0, 600),
     "slots.amber_step_interval_s": ("num", 10, 3600),
     "slots.green_free_pct": ("num", 0, 100), "slots.green_load5": ("num", 0, 200), "slots.green_sys_pct": ("num", 0, 100),
+    "slots.green_load1_per_core": ("num", 0.1, 4),
     "slots.amber_free_pct": ("num", 0, 100), "slots.amber_swap_growth_mb_30m": ("num", 1, 100000),
     "slots.amber_comp_mb": ("num", 1, 100000), "slots.amber_load5": ("num", 0, 500), "slots.amber_sys_pct": ("num", 0, 100),
     "slots.red_free_pct": ("num", 0, 100), "slots.red_swap_growth_mb_60s": ("num", 1, 100000),

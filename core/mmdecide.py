@@ -86,7 +86,7 @@ def classify(window, s, disk_gb=None, kernel_event=False):
     if sustained("sys_pct", s["slots.amber_sys_pct"]):
         amber.append("system CPU > %g%% in %d samples" % (s["slots.amber_sys_pct"], n))
 
-    complete = all(get(cur, k) is not None for k in ("free_pct", "swap_used_mb", "comp_mb", "load5"))
+    complete = all(get(cur, k) is not None for k in ("free_pct", "swap_used_mb", "comp_mb", "load1", "load5"))
     if red:
         return ["RED", red, complete]
     if amber:
@@ -99,6 +99,9 @@ def classify(window, s, disk_gb=None, kernel_event=False):
         green_fail.append("swap grew")
     if l5 is None or l5 >= s["slots.green_load5"]:
         green_fail.append("load5 not under %g" % s["slots.green_load5"])
+    l1, green_load1 = get(cur, "load1"), s.get("slots.green_load1_per_core", 0.8) * s["slots.cores"]
+    if l1 is None or l1 >= green_load1:
+        green_fail.append("load1 not under %g" % green_load1)
     sp = get(cur, "sys_pct")
     if sp is not None and sp >= s["slots.green_sys_pct"]:
         green_fail.append("system CPU not under %g%%" % s["slots.green_sys_pct"])
@@ -129,6 +132,11 @@ def slot_decide(state, inp, s):
     if mac_state == "RED":
         st["last_red"] = now
     st["green_since"] = (st["green_since"] or now) if mac_state == "GREEN" else None
+    demand = inp["waiting"] >= s["slots.raise_requires_waiting"] and inp["busy"] >= slots
+    if not demand:
+        st["demand_since"] = None
+    elif st.get("demand_since") is None:
+        st["demand_since"] = now
     pin = None
     if override and override.get("until", 0) > now:
         pin = max(1, min(16, int(override["slots"])))
@@ -145,14 +153,14 @@ def slot_decide(state, inp, s):
         if slots != pin:
             target, why = pin, "pin: " + str(override.get("reason", ""))
     elif mac_state == "GREEN":
-        held = now - st["green_since"] >= s["slots.raise_green_minutes"] * 60
+        since = max(st["green_since"], st["demand_since"]) if demand else now
+        held = now - since >= s["slots.raise_green_minutes"] * 60
         calm = now - st["last_change"] >= s["slots.raise_green_minutes"] * 60
         no_red = now - st.get("last_red", FAR_PAST) >= s["slots.hold_after_red_minutes"] * 60
         no_trim = now - st.get("last_trim", FAR_PAST) >= s["slots.hold_after_trim_minutes"] * 60
-        demand = inp["waiting"] >= s["slots.raise_requires_waiting"] and inp["busy"] >= slots
         if held and calm and no_red and no_trim and demand and not inp.get("wx_waiting") and slots < ceiling:
             target, why = slots + 1, "GREEN %.0f min, %d waiting, all %d slots busy" % (
-                (now - st["green_since"]) / 60, inp["waiting"], slots)
+                (now - since) / 60, inp["waiting"], slots)
     if target is not None and pin is not None and target > pin:
         target = pin
     if target is None or target == slots:

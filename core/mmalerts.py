@@ -129,10 +129,15 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
                                                                else "admitted without memory rules (mem=na)")
         out.append(_c("REFUSED:%s:%d" % (c["pid"], int(c["end"])), "REFUSED", "ATTENTION",
                       "queue call %s: %s" % (why, (c.get("cmd") or "")[:120])))
+    owners = {b["slot"]: str(b["pid"]) for b in (g("queue") or {}).get("busy", []) if b.get("pid")}
+    calls = {}
     for slot, cores in (g("slot_cpu") or {}).items():
-        if cores > s["queue.slot_cpu_cores"]:
-            out.append(_c("SLOT_CPU:" + slot, "SLOT_CPU", "ATTENTION", "slot %s process tree uses about %.1f cores" % (slot, cores),
-                          investigate={"question": "Which process in this slot runs wider than its cap?",
+        calls.setdefault(owners.get(slot, slot), {})[slot] = cores
+    for call, held in calls.items():
+        cores = max(held.values())
+        if cores > s["queue.slot_cpu_cores"] * len(held):
+            out.append(_c("SLOT_CPU:" + call, "SLOT_CPU", "ATTENTION", "call %s process tree uses about %.1f cores over %d slots" % (call, cores, len(held)),
+                          investigate={"question": "Which process in this call runs wider than its cap?",
                                        "hypotheses": ["go test -p unbounded", "cargo jobs", "pytest -n"]}))
     idle = g("idle_minutes")
     if idle is not None and idle >= s["queue.idle_room_minutes"]:

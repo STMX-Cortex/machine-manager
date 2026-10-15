@@ -692,14 +692,19 @@ class Supervisor:
         procs, q = self.cache.get("procs"), self.cache.get("queue")
         if not procs:
             return
-        in_slots, slot_cpu = set(), {}
+        in_slots, slot_cpu, calls, current = set(), {}, {}, {}
         for b in (q or {}).get("busy", []):
-            pids = mmread.descendants(procs, b.get("pid")) if b.get("pid") else []
+            if b.get("pid"):
+                calls.setdefault(str(b["pid"]), set()).add(b["slot"])
+        for call, slots in calls.items():
+            pids = set(mmread.descendants(procs, int(call)))
             in_slots.update(pids)
-            cpu = sum(p["cpu"] for p in procs if p["pid"] in set(pids)) / 100.0
-            prev = self.state.get("slot_cpu_prev", {}).get(b["slot"])
-            slot_cpu[b["slot"]] = min(cpu, prev) if prev is not None else 0.0  # sustained over 2 reads
-            self.state.setdefault("slot_cpu_prev", {})[b["slot"]] = cpu
+            cpu = sum(p["cpu"] for p in procs if p["pid"] in pids) / 100.0
+            prev = self.state.get("call_cpu_prev", {}).get(call)
+            for slot in slots:
+                slot_cpu[slot] = min(cpu, prev) if prev is not None else 0.0  # sustained over 2 reads
+            current[call] = cpu
+        self.state["call_cpu_prev"] = current
         outside = sorted((p for p in procs if p["pid"] not in in_slots), key=lambda p: -p["rss_mb"])[:3]
         self.cache["top_outside"] = [(os.path.basename(p["comm"]), p["rss_mb"]) for p in outside]
         self.cache["slot_cpu"] = slot_cpu
