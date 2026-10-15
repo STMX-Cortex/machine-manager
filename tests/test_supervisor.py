@@ -92,6 +92,119 @@ class Base(TempData):
         p.wait(5)
 
 
+class SlotTrialCallCPU(unittest.TestCase):
+    """Item 3 through _proc_facts and the actual alert evaluator, without ps or live data."""
+
+    def sup(self, cores=5.8, holders=None):
+        from slot_trial_helpers import busy
+        sup = object.__new__(mmsuper.Supervisor)
+        sup.state = {}
+        # The wrapper, child and grandchild together use `cores`. The outsider must not count.
+        sup.cache = {"queue": {"slots": 5, "busy": busy() if holders is None else holders, "tickets": []},
+                     "procs": [{"pid": 4100, "ppid": 1, "cpu": 20.0, "rss_mb": 10, "comm": "wrapper"},
+                               {"pid": 4101, "ppid": 4100, "cpu": 30.0, "rss_mb": 20, "comm": "child"},
+                               {"pid": 4102, "ppid": 4101, "cpu": cores * 100 - 50, "rss_mb": 30, "comm": "worker"},
+                               {"pid": 9000, "ppid": 1, "cpu": 900.0, "rss_mb": 1000, "comm": "outsider"}]}
+        return sup
+
+    def read(self, sup, now, **over):
+        import mmalerts
+        from slot_trial_helpers import settings
+        sup._proc_facts(now)
+        return [c for c in mmalerts.evaluate(dict(sup.cache), settings(**over), now) if c["name"] == "SLOT_CPU"]
+
+    def sustained(self, sup, **over):
+        from slot_trial_helpers import NOW
+        self.read(sup, NOW, **over)
+        return self.read(sup, NOW + 60, **over)
+
+    def test_item3_trial_wide_5_8_cores_over_two_slots_is_quiet(self):
+        self.assertEqual(self.sustained(self.sup(5.8)), [])
+
+    def test_item3_wide_8_5_cores_gives_exactly_one_attention(self):
+        alerts = self.sustained(self.sup(8.5))
+        self.assertEqual(len(alerts), 1, alerts)
+        self.assertEqual(alerts[0]["level"], "ATTENTION")
+        self.assertIn("8.5", alerts[0]["text"])
+
+    def test_item3_shared_4_5_cores_still_alerts(self):
+        from slot_trial_helpers import busy
+        alerts = self.sustained(self.sup(4.5, busy(slots=(".slot.1",), mode="S")))
+        self.assertEqual(len(alerts), 1, alerts)
+        self.assertEqual(alerts[0]["level"], "ATTENTION")
+
+    def test_item3_cap_is_strict_and_scales_with_actual_held_slots(self):
+        from slot_trial_helpers import busy
+        for slots, mode, cores, count in (((".slot.1",), "S", 4, 0),
+                                           ((".slot.1", ".slot.2"), "W", 8, 0),
+                                           ((".slot.1", ".slot.2"), "W", 8.01, 1),
+                                           ((".slot.1", ".slot.2", ".slot.3"), "W", 12, 0),
+                                           ((".slot.1", ".slot.2", ".slot.3"), "W", 12.01, 1),
+                                           ((".slot.1",), "W", 4.5, 1)):
+            with self.subTest(slots=slots, mode=mode, cores=cores):
+                self.assertEqual(len(self.sustained(self.sup(cores, busy(slots=slots, mode=mode)))), count)
+
+    def test_item3_configured_per_slot_cpu_cap_applies_to_call_width(self):
+        self.assertEqual(self.sustained(self.sup(5.8), **{"queue.slot_cpu_cores": 3}), [])
+        self.assertEqual(len(self.sustained(self.sup(6.1), **{"queue.slot_cpu_cores": 3})), 1)
+
+    def test_item3_call_alert_key_survives_slot_rename_and_order(self):
+        from slot_trial_helpers import NOW, busy
+        sup = self.sup(8.5)
+        before = self.sustained(sup)
+        sup.cache["queue"]["busy"] = busy(slots=(".slot.4", ".slot.3"))
+        self.read(sup, NOW + 120)
+        after = self.read(sup, NOW + 180)
+        self.assertEqual(len(before), 1, before)
+        self.assertEqual(len(after), 1, after)
+        self.assertEqual(before[0]["key"], after[0]["key"], "identity belongs to the call, not its slot names")
+        self.assertNotIn(".slot.", after[0]["key"])
+        self.assertNotIn(".gate.lock", after[0]["key"])
+
+    def test_item3_distinct_calls_get_distinct_alerts_even_with_same_command(self):
+        from slot_trial_helpers import busy
+        holders = busy(slots=(".slot.1",), mode="S") + busy(pid=4200, slots=(".slot.2",), mode="S")
+        for holder in holders:
+            holder["label"] = "S %d identical command" % holder["pid"]
+        sup = self.sup(4.5, holders)
+        sup.cache["procs"].append({"pid": 4200, "ppid": 1, "cpu": 450, "rss_mb": 10, "comm": "second"})
+        alerts = self.sustained(sup)
+        self.assertEqual(len(alerts), 2, alerts)
+        self.assertEqual(len({a["key"] for a in alerts}), 2)
+        self.assertTrue(all(".slot." not in a["key"] for a in alerts), alerts)
+
+    def test_item3_replacement_call_cannot_inherit_previous_call_cpu_history(self):
+        from slot_trial_helpers import NOW, busy
+        sup = self.sup(4.5, busy(slots=(".slot.1",), mode="S"))
+        self.sustained(sup)
+        sup.cache["queue"]["busy"] = busy(pid=4200, slots=(".slot.1",), mode="S")
+        sup.cache["procs"] = [{"pid": 4200, "ppid": 1, "cpu": 450, "rss_mb": 10, "comm": "replacement"}]
+        self.assertEqual(self.read(sup, NOW + 120), [], "a new call needs its own two readings")
+        self.assertEqual(len(self.read(sup, NOW + 180)), 1)
+
+    def test_item3_duplicate_holder_row_does_not_inflate_width(self):
+        from slot_trial_helpers import busy
+        holders = busy(slots=(".slot.1",), mode="S")
+        holders.append(dict(holders[0]))
+        self.assertEqual(len(self.sustained(self.sup(4.5, holders))), 1)
+
+    def test_item4_cpu_alert_still_needs_two_above_cap_readings(self):
+        from slot_trial_helpers import NOW, busy
+        sup = self.sup(4.5, busy(slots=(".slot.1",), mode="S"))
+        self.assertEqual(self.read(sup, NOW), [])
+        self.assertEqual(len(self.read(sup, NOW + 60)), 1)
+        sup.cache["procs"][2]["cpu"] = 300  # The whole call drops to 3.5 cores.
+        self.assertEqual(self.read(sup, NOW + 120), [])
+        sup.cache["procs"][2]["cpu"] = 400
+        self.assertEqual(self.read(sup, NOW + 180), [])
+        self.assertEqual(len(self.read(sup, NOW + 240)), 1)
+
+    def test_item4_process_tree_outsider_accounting_stays(self):
+        sup = self.sup(5.8)
+        self.sustained(sup)
+        self.assertEqual(sup.cache["top_outside"], [("outsider", 1000)])
+
+
 class SlotWrites(Base):
     def run_mode(self, mode, observe=False, n=2):
         test_slots = os.path.join(self.root, "test-slots")
