@@ -281,6 +281,7 @@ SCHEMA = {
     "other.resume_gap_s": ("num", 30, 86400),
     "repeat.action_minutes": ("num", 1, 1440), "repeat.clear_after_minutes": ("num", 0, 1440), "repeat.attention_hours": ("num", 0.1, 168),
     "hook.log_input_keys": ("bool", None, None), "hook.remind_waiter_minutes": ("num", 1, 1440),
+    "hook.subagent_model_replies": ("int", 1, 1000), "hook.subagent_model_scan_mb": ("num", 1, 1024),
     "deletes.enabled": ("bool", None, None), "deletes.interval_minutes": ("num", 10, 10080),
     "deletes.lsof_timeout_s": ("num", 5, 300), "deletes.evidence_keep_days": ("num", 1, 365),
     "deletes.cleanup_list_hours": ("num", 1, 720),

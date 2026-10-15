@@ -32,6 +32,8 @@
  "heartbeat.url": "",
  "hook.log_input_keys": false,
  "hook.remind_waiter_minutes": 60,
+ "hook.subagent_model_replies": 20,
+ "hook.subagent_model_scan_mb": 16,
  "launch_gate.enabled": false,
  "launch_gate.max_minutes": 5,
  "mode.observe": true,

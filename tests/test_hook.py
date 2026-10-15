@@ -84,6 +84,54 @@ class Hook(HookBase):
         self.assertIsNone(self.hook({}))
         self.assertIn("A1", self.hook({"session_id": R1})["additionalContext"], "a subagent's call did not move the cursor")
 
+    def transcript(self, *models):
+        """The recipient's own transcript: its newest reply records name the recipient's model."""
+        path = os.path.join(self.data, "recipient-transcript.jsonl")
+        with open(path, "w") as f:
+            f.write(json.dumps({"type": "user", "message": {"role": "user", "content": "go"}}) + "\n")
+            for m in models:
+                f.write(json.dumps({"type": "assistant", "message": {"model": m, "content": []}}) + "\n")
+            f.write(json.dumps({"type": "assistant", "message": {"model": "<synthetic>", "content": []}}) + "\n")
+        return path
+
+    def compact(self, model, transcript, **extra):
+        return self.hook(dict({"session_id": R1, "source": "compact", "model": model, "transcript_path": transcript},
+                              **extra), event="SessionStart")
+
+    def test_subagent_compaction_gets_nothing_and_keeps_the_cursor(self):
+        # Claude Code 2.1.299 (probes, 2026-10-15): a subagent's compaction calls SessionStart with no agent_id, the
+        # PARENT's session_id and transcript_path, and the subagent's own model.
+        path = self.transcript("claude-opus-5-5", "claude-opus-5-5")
+        self.alert("A1", "ACTION")
+        self.assertIsNone(self.compact("claude-haiku-5-5", path))
+        out = self.compact("claude-opus-5-5", path)
+        self.assertIn("A1", out["additionalContext"], "the subagent's compaction did not move the cursor")
+        self.assertEqual(out["hookEventName"], "SessionStart")
+
+    def test_recipient_compaction_sees_alerts_whatever_the_model_suffix(self):
+        path = self.transcript("claude-sonnet-5-5", "claude-opus-5-5")
+        for i, model in enumerate(("claude-opus-5-5[1m]", "claude-sonnet-5-5-20261001", "CLAUDE-OPUS-5-5")):
+            self.alert("M%d" % i, "ACTION")
+            out = self.compact(model, path)
+            self.assertIsNotNone(out, model)
+            self.assertIn("M%d" % i, out["additionalContext"], model)
+
+    def test_compaction_without_a_known_recipient_model_still_shows(self):
+        # No reply record, no transcript or no model in the input: show, never guess a subagent.
+        self.alert("C1", "ACTION")
+        self.assertIn("C1", self.compact("claude-haiku-5-5", self.transcript())["additionalContext"])
+        self.alert("C2", "ACTION")
+        self.assertIn("C2", self.compact("claude-haiku-5-5", os.path.join(self.data, "none.jsonl"))["additionalContext"])
+        self.alert("C3", "ACTION")
+        self.assertIn("C3", self.compact(None, self.transcript("claude-opus-5-5"))["additionalContext"])
+
+    def test_a_start_of_another_model_still_shows(self):
+        # A restart on another model is a start, not a compaction.
+        self.alert("S1", "ACTION")
+        out = self.hook({"session_id": R1, "source": "startup", "model": "claude-sonnet-5-5",
+                         "transcript_path": self.transcript("claude-opus-5-5")}, event="SessionStart")
+        self.assertIn("S1", out["additionalContext"])
+
     def test_unreadable_recipient_shows_action_to_main_sessions(self):
         os.remove(os.path.join(self.data, "recipient.md"))
         self.alert("A1", "ACTION")

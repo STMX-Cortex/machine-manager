@@ -116,6 +116,11 @@ enabled = false  # bool
 # The session hook.
 log_input_keys = false  # bool
 remind_waiter_minutes = 60  # min
+# A subagent's compaction calls SessionStart with the recipient's session id and no agent_id; only its model is its
+# own. The hook compares that model with the models of the recipient's newest replies, read back from the end of its
+# transcript.
+subagent_model_replies = 20  # replies
+subagent_model_scan_mb = 16  # MB
 
 [deletes]
 # Automatic deletes of safe, space-only files (the profile names the rules).

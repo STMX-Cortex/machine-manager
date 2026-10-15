@@ -36,6 +36,8 @@
   "heartbeat.url",
   "hook.log_input_keys",
   "hook.remind_waiter_minutes",
+  "hook.subagent_model_replies",
+  "hook.subagent_model_scan_mb",
   "launch_gate.enabled",
   "launch_gate.max_minutes",
   "mode.observe",
@@ -269,6 +271,16 @@
    "type": "number",
    "minimum": 1,
    "maximum": 1440
+  },
+  "hook.subagent_model_replies": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 1000
+  },
+  "hook.subagent_model_scan_mb": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 1024
   },
   "launch_gate.enabled": {
    "type": "boolean"

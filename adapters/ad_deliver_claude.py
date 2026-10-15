@@ -10,7 +10,9 @@ The hook prints unseen ATTENTION and ACTION alerts as additional context, only i
 - session_id must equal the id the profile's recipient_regex finds in recipient_file;
 - a call from inside a subagent carries agent_id (Claude Code 2.1.299 hook input schema: "Present only when the hook fires
   from within a subagent ... Absent for the main thread"); such calls get no output. Subagent calls carry the parent's
-  session_id, so the session check alone would not stop them.
+  session_id, so the session check alone would not stop them;
+- a subagent's compaction calls SessionStart with no agent_id at all; only its model differs from the recipient's
+  (subagent_compaction). Such calls get no output either.
 PreToolUse: the launch gate. In observe mode it only logs WOULD-DENY lines (state/gate.log) and denies nothing.
 Never blocks: it reads stdin for at most 0.15 s and ends within 0.8 s.
 Test overrides: MM_DATA, MM_PROFILE, MM_RECIPIENT_FILE, MM_NOW.
@@ -186,6 +188,63 @@ def recipient(cfg):
     return m.group(1) if m else None
 
 
+def model_name(value):
+    """'claude-opus-5-5[1m]' and 'claude-opus-5-5-20261001' both name claude-opus-5-5."""
+    return re.sub(r"-\d{8}$", "", re.sub(r"\[.*\]$", "", str(value or "").strip().lower()))
+
+
+def recipient_models(transcript, s):
+    """The models of the newest reply records in the session's own transcript (a subagent's replies are in their own
+    files). Empty when none is found in the scanned tail."""
+    replies = int(s["hook.subagent_model_replies"]) if s else 20
+    scan = int((s["hook.subagent_model_scan_mb"] if s else 16) * (1 << 20))
+    found, seen = set(), 0
+    try:
+        with open(transcript, "rb") as fh:
+            fh.seek(0, 2)
+            pos, carry, read = fh.tell(), b"", 0
+            while pos > 0 and read < scan and seen < replies:
+                size = min(1 << 20, pos)
+                pos -= size
+                read += size
+                fh.seek(pos)
+                lines = (fh.read(size) + carry).split(b"\n")
+                carry = lines.pop(0) if pos > 0 else b""
+                for line in reversed(lines):
+                    if b'"assistant"' not in line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    msg = rec.get("message") if isinstance(rec, dict) else None
+                    model = msg.get("model") if rec.get("type") == "assistant" and isinstance(msg, dict) else None
+                    if isinstance(model, str) and model and model != "<synthetic>":
+                        found.add(model_name(model))
+                        seen += 1
+                        if seen >= replies:
+                            break
+    except (OSError, TypeError, ValueError):
+        return set()
+    return found
+
+
+def subagent_compaction(data, event, s):
+    """A subagent's compaction (Claude Code 2.1.299, probes 2026-10-15): SessionStart with source "compact", no
+    agent_id, the parent's session_id and transcript_path, and the subagent's own model. Without this check it took
+    the recipient's unseen alerts. A compaction whose model is not among the recipient's own reply models is a
+    subagent's; with no known recipient model, or no model in the input, it is not (show rather than guess). A
+    subagent of the recipient's own model cannot be told apart."""
+    if event != "SessionStart" or data.get("source") != "compact":
+        return False
+    model = model_name(data.get("model"))
+    path = data.get("transcript_path")
+    if not model or not isinstance(path, str) or not path:
+        return False
+    own = recipient_models(path, s)
+    return bool(own) and model not in own
+
+
 def main():
     signal.signal(signal.SIGALRM, lambda *_: os._exit(0))
     signal.setitimer(signal.ITIMER_REAL, 0.8)
@@ -209,7 +268,7 @@ def main():
     session = data.get("session_id") if isinstance(data.get("session_id"), str) else None
     match = session is not None and session == r1
     log_keys(data, event, match, s)
-    if data.get("agent_id"):
+    if data.get("agent_id") or subagent_compaction(data, event, s):
         return  # a subagent's call: never shown, never gated
     if r1 is not None and not match:
         return
