@@ -45,6 +45,8 @@ max_minutes = 5  # min
 # Stop (SIGSTOP) the newest queue call at a critical RED; continue it after GREEN.
 enabled = false  # bool
 resume_after_green_s = 120  # s
+# The time limit of the lsof that finds the processes holding the newest call's slot file (a failed lsof pauses nothing).
+lsof_timeout_s = 10  # s
 
 [disk]
 # Free disk space and the build cache size.

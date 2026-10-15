@@ -122,13 +122,16 @@ def deletes_job(s, now, enabled, ctx, with_list, live_spec, mid):
     run = mmdelete.Run(s, ctx, enabled=enabled, now=now, live_spec=live_spec, mid=mid)
     run.all()
     res = {"time": now, "enabled": enabled, "would_bytes": run.would, "freed_bytes": run.freed,
-           "keep": sum(1 for l in run.lines if " KEEP " in l), "lines": len(run.lines)}
+           "keep": sum(1 for l in run.lines if " KEEP " in l), "lines": len(run.lines),
+           "link_skipped": list(run.link_skipped)}  # the LINK_SKIPPED alerts (rule 48)
     if with_list:
         items = mmdelete.cleanup_list(ctx, now)
         mmcore.write_atomic(mmcore.path("state", "cleanup-list.json"),
                             json.dumps(mmcore.stamp({"time": now, "items": items}, mid=mid), indent=1))
-        res["cleanup"] = {"time": now, "count": len(items), "bytes": sum(i["bytes"] or 0 for i in items),
-                          "top": sorted(items, key=lambda i: -(i["bytes"] or 0))[:5]}
+        cands = [i for i in items if i.get("command")]  # KEEP items (skipped trees and links) are no candidates
+        res["cleanup"] = {"time": now, "count": len(cands), "bytes": sum(i["bytes"] or 0 for i in cands),
+                          "top": sorted(cands, key=lambda i: -(i["bytes"] or 0))[:5]}
+        res["link_skipped"] += [i["path"] for i in items if i.get("link") and i["path"] not in res["link_skipped"]]
     mmcore.write_atomic(mmcore.path("state", "deletes-last.json"), json.dumps(res, sort_keys=True))
     return res
 
@@ -243,6 +246,9 @@ class Trim:
 
 class Pauser:
     """At a critical RED, SIGSTOP the newest queue call's process tree; SIGCONT it after GREEN.
+    The pids come from the processes that have the newest call's slot file open (lsof), never from its label text,
+    which agents can write (rule 47): each opener whose argument list runs the queue's launcher is paused with its
+    descendants; any other opener is never paused, and the result names it (the PAUSE_REFUSED alert).
     Only pids it stopped itself: each pid and its start time go into state/paused.json BEFORE its SIGSTOP, so a crash
     or a hang never leaves a process stopped (mmrecover.resume_paused runs at every start, in safe mode, at stop and
     rollback, and from the watchdog when the supervisor is stale)."""
@@ -258,16 +264,31 @@ class Pauser:
     def start_time(pid):
         return mmrecover.start_time(pid)
 
-    def pause(self, busy, procs):
-        holders = [b for b in busy if b.get("pid") and b.get("since")]
+    def pause(self, busy, procs, queue, lsof_timeout):
+        """None when there is nothing to pause; else {"busy": the newest entry, "slot": its file, "paused": [pids],
+        "refused": [opener pids not paused], "failed": why no opener could be read, or None}."""
+        holders = [b for b in busy if b.get("since")]
         if not holders or self.st:
             return None
         newest = max(holders, key=lambda b: b["since"])
+        slot = queue.slot_file(newest["slot"])
+        out = {"busy": newest, "slot": slot, "paused": [], "refused": [], "failed": None}
+        openers = mmread.file_openers(slot, lsof_timeout)
+        if openers is None:
+            out["failed"] = "lsof failed"
+            return out
+        tree = []  # each launcher, then its descendants (an opener among them inherited the file and goes with it)
+        for pid in openers:
+            if queue.runs_launcher(mmread.proc_argv(pid)):
+                tree += [d for d in mmread.descendants(procs, pid) if d not in tree]
+        out["refused"] = [pid for pid in openers if pid not in tree]
         plan = {}
-        for pid in mmread.descendants(procs, newest["pid"]):
+        for pid in tree:
             st = self.start_time(pid)
             if st:
                 plan[str(pid)] = st
+        if not plan:
+            return out
         mmrecover.add_paused(plan)
         failed = []
         for pid in plan:
@@ -277,7 +298,8 @@ class Pauser:
                 failed.append(pid)
         if failed:
             mmrecover.drop_paused(failed)
-        return newest, sorted(int(p) for p in plan if p not in failed)
+        out["paused"] = sorted(int(p) for p in plan if p not in failed)
+        return out
 
     def resume(self, why="green"):
         return mmrecover.resume_paused(why)
@@ -589,6 +611,8 @@ class Supervisor:
         dl = self.cache.get("deletes") or {}
         if dl.get("cleanup"):
             snap["cleanup"] = dl["cleanup"]
+        snap["link_skipped"] = dl.get("link_skipped") or []
+        snap["pause_refused"] = self.state.get("pause_refused")
         # the guarded cache trim
         procs = self.cache.get("procs")
         drained = bool(q and not q.get("busy") and not q.get("tickets") and procs is not None
@@ -833,20 +857,33 @@ class Supervisor:
         else:
             gate.pop("red_since", None)
         if not s["pause_newest_call.enabled"]:
+            self.state["pause_refused"] = None
             return
         p = Pauser(self.state)
         q = self.cache.get("queue")
         if mac_state == "RED" and critical(reasons) and not p.st and q:
-            busy = [b for b in q["busy"] if b.get("pid") and b.get("since")]
+            busy = [b for b in q["busy"] if b.get("since")]
+            refusal = None
             if not actions_on:
                 if busy and now - self.state.get("would_pause_at", 0) > 600:
                     self.state["would_pause_at"] = now
                     newest = max(busy, key=lambda b: b["since"])
                     self.log_decision("%s WOULD-PAUSE %s (actions off)" % (mmcore.now_local(now), newest.get("label")))
             else:
-                got = p.pause(q["busy"], self.cache.get("procs") or [])
-                if got:
-                    self.log_decision("%s PAUSE %s pids %s" % (mmcore.now_local(now), got[0].get("label"), got[1]))
+                got = p.pause(q["busy"], self.cache.get("procs") or [], self.queue, s["pause_newest_call.lsof_timeout_s"])
+                if got and got["paused"]:
+                    self.log_decision("%s PAUSE %s pids %s" % (mmcore.now_local(now), got["busy"].get("label"), got["paused"]))
+                if got and (got["refused"] or got["failed"]):
+                    why = got["failed"] or "pids %s have it open and do not run the queue launcher" % (
+                        ",".join(str(x) for x in got["refused"]))
+                    refusal = {"text": "pause refused at %s: %s; %s" % (
+                        got["slot"], why, "paused pids %s" % got["paused"] if got["paused"] else "nothing paused"),
+                        "pids": got["refused"]}
+            if refusal and refusal != self.state.get("pause_refused"):
+                self.log_decision("%s PAUSE-REFUSED %s" % (mmcore.now_local(now), refusal["text"]))
+            self.state["pause_refused"] = refusal  # the PAUSE_REFUSED alert while it holds
+        elif not p.st:
+            self.state["pause_refused"] = None  # no pause check and nothing paused: the refusal no longer holds
         if mac_state == "GREEN":
             gs = self.state.setdefault("green_for_pause", now)
             if p.st and now - gs >= s["pause_newest_call.resume_after_green_s"]:

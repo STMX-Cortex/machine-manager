@@ -6,6 +6,7 @@ bands, repeat, clear and ack (mmdecide.alert_raise / alert_absent). Pool (CI) co
 `names` gives the words a project wants in its texts: owner, recipient, trim_command, jobs_file.
 """
 import hashlib
+import shlex
 
 
 def _c(key, name, level, text, value=None, band=None, worse="up", command=None, investigate=None):
@@ -209,6 +210,16 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
                       "%d delete candidates for %s, %s; largest: %s" % (cl["count"], nm["recipient"], _gb(cl.get("bytes")), top),
                       command="mm cleanup",
                       value=(cl.get("bytes") or 0) / 1e9, band=10))
+    for p in g("link_skipped") or []:
+        out.append(_c("LINK_SKIPPED:" + _h(p), "LINK_SKIPPED", "ATTENTION",
+                      "a configured delete or prune path goes through a link (or out of its folder); skipped: %s" % p,
+                      command="ls -ld " + shlex.quote(p)))
+    # --- the pause: a process that is not the queue launcher had the newest call's slot file open
+    pr = g("pause_refused")
+    if pr:
+        pids = ",".join(str(x) for x in pr.get("pids") or [])
+        out.append(_c("PAUSE_REFUSED", "PAUSE_REFUSED", "ATTENTION", pr["text"],
+                      command="ps -o pid=,command= -p " + pids if pids else "mm status"))
 
     # --- the tool itself
     for prob in g("readings_mismatch") or []:

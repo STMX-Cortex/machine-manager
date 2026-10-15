@@ -135,6 +135,28 @@ as the load5 band. A slot raise needs `slots.raise_green_minutes` of GREEN while
 busy. `queue.slot_cpu_cores` is the CPU cap per held slot: each call's process tree is counted once, with one alert
 per call after two readings over its cap.
 
+## Agent-written files
+
+Agents may write their own git worktrees (each tree's `.git` file too), the queue's slot and ticket files, and their own
+cache folders. Nothing they write there makes the tool run a program, signal a process or delete outside the place the
+profile names:
+
+1. **Git.** The cleanup list takes worktrees from the main repository's `git worktree list` (only trees under the
+   profile's roots are candidates). It runs git in a tree only when the tree's `.git` is a regular file reading exactly
+   `gitdir: <its listed git folder>` (absolute), and then names that folder on git's command line, so git never reads it
+   from the tree. Every git call carries `--no-optional-locks -c core.fsmonitor=false -c core.hooksPath=/dev/null`
+   and `-c attr.tree=<the empty tree>` (git 2.42 or newer; no filter driver runs on the tree's files), and the status
+   skips submodules. Any other tree is a KEEP item with its reason and no command.
+2. **The pause.** The pids come from the processes that have the newest call's slot file open (lsof, with the time
+   limit `pause_newest_call.lsof_timeout_s`), never from its label text. Each one whose argument list runs the queue's
+   launcher (profile `queue.launcher`, named by its absolute path) is paused with its process tree. Any other process
+   is never paused: `PAUSE_REFUSED` names the slot file and its pid.
+3. **Links.** Deletes and prunes (`cache_entries`, `command_per_dir`, the cleanup list's commands) check every
+   component of the configured folder's path, and of each entry below it, with lstat. A link owned by root (`/tmp`,
+   `/var`) is allowed; any other link, or a real path outside the folder, refuses: a KEEP line in `deletes.log` (a KEEP
+   item with no command in the cleanup list) and `LINK_SKIPPED` naming the path. Cache entries are deleted through
+   folder descriptors opened without following a link, so a folder swapped for a link after the find is never entered.
+
 ## Glossary
 
 States: `GREEN` fine; `STEADY` busy but stable (no raise); `AMBER` slots down one step; `RED` slots to the floor;
@@ -148,6 +170,8 @@ ended a process; `GUARD_DOWN` the memory guard is not alive; `DISK_LOW`, `DISK_T
 cache is large; `TRIM_NEEDED` a trim waits for a drained queue; `TRIM_DONE`, `TRIM_REFUSED` the trim's end;
 `CLEANUP_LIST` candidates for a person; `CODEX95`, `CODEX98`, `CLAUDE98`, `CLAUDE_PROJ`, `FIVE_H` plan usage;
 `CACHE_5M` short prompt-cache writes; `QWAIT` a queue call waits long; `HEAD_BLOCK` an exclusive call blocks the queue;
+`PAUSE_REFUSED` a process that is not the queue's launcher has the newest call's slot file open; `LINK_SKIPPED` a delete
+or prune path goes through a link;
 `LONG_CALL` a call runs long; `REFUSED` the queue refused a call; `SLOT_CPU` a slot uses much CPU; `IDLE_ROOM` the
 queue is idle; `FSEV` the file-event daemon is large; `POWER` on battery; `RESUMED` the machine slept;
 `RECIPIENT_WAIT` the recipient waits on one tool call; `JOB_DEAD` a listed job died without a result;

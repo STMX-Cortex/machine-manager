@@ -52,3 +52,6 @@ Several machines and pools are several status records; placement takes a list of
 4. The launch gate fails open: no fresh status, no valid settings, or the off switch means no denial.
 5. Deletes re-check their guard right before the delete; a forbidden part of a path is never entered.
 6. The tool never pushes, dispatches or runs a placement command; it prints them.
+7. Nothing an agent can write chooses a program, a signal or a delete target (README.md, "Agent-written files"): git in
+   a worktree takes its git folder from the main repository's list, the pause takes its pids from the processes that
+   hold the slot file open, and a delete or prune refuses a path with a link not owned by root.

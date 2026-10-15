@@ -6,8 +6,11 @@ a sampler log (one line a minute) and a history log (one tab-separated row per f
 
 Interface (PORTING.md, "Adapters"): read(now) -> {slots, busy[{slot, mode, pid, label, since, kind}],
 tickets[{name, mode, age_s, label, kind}]}; slots_path(); sample_log(); history_log(); last_sample(now);
-parse_history(line); kind_of(text, mode); exclusive_argv(cmd) and exclusive_env(); shared_argv(cmd).
+parse_history(line); kind_of(text, mode); exclusive_argv(cmd) and exclusive_env(); shared_argv(cmd);
+slot_file(name); runs_launcher(argv).
 It reads only: it never writes, unlinks or takes a lock that blocks the queue (a shared flock test, released at once).
+A busy entry's pid and label are text a call writes, and agents can write them too: they never choose a process to
+signal. The pause takes its pids from the processes that have the slot file open (runs_launcher), never from this text.
 """
 import os
 import re
@@ -16,6 +19,9 @@ import time
 
 import mmcore
 import mmread
+
+# Python's one-letter flags that take no value; a flag outside this set ends the launcher check (runs_launcher).
+_NO_VALUE_FLAGS = frozenset("bBdEhiIOPqRsSuvVx")
 
 _LOAD_RE = re.compile(
     r"^(\d\d)-(\d\d) (\d\d):(\d\d) load ([\d.]+) ([\d.]+) ([\d.]+) free (\d+)% swap ([\d.]+)([KMG]) "
@@ -159,8 +165,28 @@ class Queue:
                 runs.setdefault(self.kind_of(c.get("cmd"), c.get("mode")), []).append(c["run"] / 60.0)
         return {k: statistics.median(v) for k, v in runs.items() if v}
 
+    def slot_file(self, name):
+        """The file of a busy entry's `slot` (read() gives its name)."""
+        return os.path.join(self.dir, os.path.basename(name))
+
     def launcher(self):
         return [sys.executable, "-I", os.path.join(self.dir, self.cfg["launcher"])]
+
+    def runs_launcher(self, argv):
+        """True when a process's argument list runs this queue's launcher: after the program and its one-letter flags
+        that take no value (as `-I`), the first word is the launcher's absolute path (real paths compared). A flag that
+        takes a value (`-c`, `-m`, `-W`, `-X`), any other word first, a relative path or an unreadable list: False.
+        No launcher in the profile: False. Label text is never used (rule 47)."""
+        if not argv or len(argv) < 2 or not self.cfg.get("launcher"):
+            return False
+        for w in argv[1:]:
+            if w.startswith("-"):
+                if len(w) > 1 and all(c in _NO_VALUE_FLAGS for c in w[1:]):
+                    continue
+                return False
+            launcher = os.path.join(self.dir, self.cfg["launcher"])
+            return os.path.isabs(w) and os.path.realpath(w) == os.path.realpath(launcher)
+        return False
 
     def exclusive_argv(self, cmd):
         return self.launcher() + ["--exclusive", "--"] + list(cmd)

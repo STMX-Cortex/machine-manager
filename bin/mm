@@ -296,8 +296,10 @@ def cmd_cleanup(args, as_json):
         print("cleanup=none reason=no_list_yet")
         return 1
     items = d.get("items") or []
+    # a KEEP item (a skipped tree or a link) has no command: its reason instead
     lines = [kv({"rule": i["rule"], "gb": None if i.get("bytes") is None else round(i["bytes"] / 1e9, 1),
-                 "path": i["path"]}) + " do=" + json.dumps(i["command"]) for i in items] or ["cleanup=none"]
+                 "path": i["path"]}) + (" do=" + json.dumps(i["command"]) if i.get("command") else
+                                        " keep=" + json.dumps(i.get("why") or "")) for i in items] or ["cleanup=none"]
     emit(as_json, d, lines)
     return 0 if items else 1
 

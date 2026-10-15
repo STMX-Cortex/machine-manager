@@ -51,6 +51,7 @@
   "other.recipient_tool_wait_minutes",
   "other.resume_gap_s",
   "pause_newest_call.enabled",
+  "pause_newest_call.lsof_timeout_s",
   "pause_newest_call.resume_after_green_s",
   "queue.default_run_minutes",
   "queue.head_block_minutes",
@@ -342,6 +343,11 @@
   },
   "pause_newest_call.enabled": {
    "type": "boolean"
+  },
+  "pause_newest_call.lsof_timeout_s": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 60
   },
   "pause_newest_call.resume_after_green_s": {
    "type": "number",

@@ -264,6 +264,7 @@ SCHEMA = {
     "slots.sustain_samples": ("int", 1, 10), "slots.cores": ("int", 0, 512),
     "launch_gate.enabled": ("bool", None, None), "launch_gate.max_minutes": ("num", 0, 120),
     "pause_newest_call.enabled": ("bool", None, None), "pause_newest_call.resume_after_green_s": ("num", 10, 3600),
+    "pause_newest_call.lsof_timeout_s": ("num", 1, 60),
     "banner.enabled": ("bool", None, None),
     "disk.low_gb": ("num", 1, 10000), "disk.recover_gb": ("num", 1, 10000), "disk.trend_hours": ("num", 0.5, 72),
     "disk.cache_attention_gb": ("num", 1, 10000), "disk.cache_action_gb": ("num", 1, 10000),

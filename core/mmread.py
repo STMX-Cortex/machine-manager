@@ -344,6 +344,40 @@ def read_ps():
     return parse_ps(out) if rc == 0 else None
 
 
+def file_openers(path_, timeout):
+    """Pids of every process that has the file open (lsof), or None when lsof cannot run or times out."""
+    rc, out = run(["/usr/sbin/lsof", "-t", "--", path_], timeout=timeout)
+    if rc not in (0, 1):  # 1: no process has it open
+        return None
+    return sorted({int(w) for w in out.split() if w.isdigit()})
+
+
+_CTL_KERN, _KERN_PROCARGS2 = 1, 49  # sys/sysctl.h
+
+
+def proc_argv(pid):
+    """A process's exact argument list (sysctl KERN_PROCARGS2: argc, the executable path, then argc NUL-ended words),
+    or None when it cannot be read (the process is gone or belongs to another user)."""
+    size = sysctl_int("kern.argmax")
+    if not size or size <= 4:
+        return None
+    mib = (ctypes.c_int * 3)(_CTL_KERN, _KERN_PROCARGS2, int(pid))
+    buf = ctypes.create_string_buffer(size)
+    n = ctypes.c_size_t(size)
+    if _libc.sysctl(mib, ctypes.c_uint(3), buf, ctypes.byref(n), None, ctypes.c_size_t(0)) != 0 or n.value < 4:
+        return None
+    raw = buf.raw[:n.value]
+    argc = struct.unpack("=i", raw[:4])[0]
+    rest = raw[4:]
+    end = rest.find(b"\0")  # the end of the executable path; NUL padding follows it
+    if argc < 1 or end < 0:
+        return None
+    words = rest[end:].lstrip(b"\0").split(b"\0")
+    if len(words) < argc:
+        return None
+    return [w.decode("utf-8", "surrogateescape") for w in words[:argc]]
+
+
 # --------------------------------------------------------------------------------------------- the queue (read only)
 
 
