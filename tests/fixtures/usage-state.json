@@ -1,1 +1,10 @@
-{"checked_at": 1791990984.9906921, "max_age_seconds": 1800, "claude_weekly_projection": 113.8, "levels": {"claude_5h": {"used_percent": 3.0}, "claude_weekly": {"used_percent": 51.0}, "codex_weekly": {"used_percent": 100}}}
+{
+  "checked_at": 1791990984.9906921,
+  "max_age_seconds": 1800,
+  "claude_weekly_projection": 113.8,
+  "levels": {
+    "claude_5h": {"used_percent": 3.0, "status": "ok", "read_at": 1791990984.9906921},
+    "claude_weekly": {"used_percent": 51.0, "status": "ok", "read_at": 1791990984.9906921},
+    "codex_weekly": {"used_percent": 100, "status": "ok", "read_at": 1791990984.9906921}
+  }
+}

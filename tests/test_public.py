@@ -4,7 +4,9 @@ own absolute path; every source file carries the SPDX header; LICENSE is the ful
 A private deny list (one regex per line, set MM_PUBLIC_DENY to its path) adds the owner's own names."""
 import os
 import re
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import mmtest
 from mmtest import mmcore
@@ -18,12 +20,35 @@ def files():
     for d, dirs, names in os.walk(mmtest.CODE):
         dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS)
         for n in sorted(names):
+            if n == ".git":
+                continue
             p = os.path.join(d, n)
             if os.path.splitext(n)[1] in TEXT_EXT:
                 yield os.path.relpath(p, mmtest.CODE), open(p, encoding="utf-8", errors="replace").read()
 
 
 class Public(unittest.TestCase):
+    def test_git_metadata_is_skipped_as_file_or_directory(self):
+        os.makedirs(mmtest.TMP_BASE, exist_ok=True)
+        for directory in (False, True):
+            with self.subTest(git_is_directory=directory), tempfile.TemporaryDirectory(dir=mmtest.TMP_BASE) as root:
+                git = os.path.join(root, ".git")
+                if directory:
+                    os.makedirs(git)
+                    git = os.path.join(git, "config")
+                with open(git, "w") as f:
+                    f.write("gitdir: /home/private-user/project\n")
+                public = os.path.join(root, "public.txt")
+                with open(public, "w") as f:
+                    f.write("ordinary content\n")
+                with patch.object(mmtest, "CODE", root):
+                    self.assertEqual(list(files()), [("public.txt", "ordinary content\n")])
+                    self.test_generic_leaks()
+                    with open(public, "w") as f:
+                        f.write("/home/private-user/project\n")
+                    with self.assertRaises(AssertionError):
+                        self.test_generic_leaks()
+
     def test_generic_leaks(self):
         found = []
         for rel, text in files():
