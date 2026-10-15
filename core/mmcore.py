@@ -270,6 +270,7 @@ SCHEMA = {
     "usage.codex_attention_pct": ("num", 0, 200), "usage.codex_action_pct": ("num", 0, 200),
     "usage.claude_action_pct": ("num", 0, 200), "usage.claude_projection_pct": ("num", 0, 1000),
     "usage.claude_5h_attention_pct": ("num", 0, 200), "usage.watch_state_max_age_s": ("num", 60, 86400),
+    "usage.read_clock_allowance_s": ("num", 0, 60),
     "queue.wait_minutes": ("num", 1, 1440), "queue.waits_over_20_per_hour": ("int", 1, 1000),
     "queue.long_call_minutes": ("num", 1, 1440), "queue.head_block_minutes": ("num", 1, 1440),
     "queue.slot_cpu_cores": ("num", 0.5, 64), "queue.placement_max_mac_wait_minutes": ("num", 0, 1440),

@@ -112,6 +112,7 @@
   "usage.claude_projection_pct",
   "usage.codex_action_pct",
   "usage.codex_attention_pct",
+  "usage.read_clock_allowance_s",
   "usage.watch_state_max_age_s"
  ],
  "properties": {
@@ -645,6 +646,11 @@
    "type": "number",
    "minimum": 0,
    "maximum": 200
+  },
+  "usage.read_clock_allowance_s": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 60
   },
   "usage.watch_state_max_age_s": {
    "type": "number",

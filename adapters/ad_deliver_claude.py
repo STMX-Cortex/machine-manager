@@ -4,7 +4,7 @@
 the supervisor reads from Claude Code (usage-watch state, the recipient's open tool calls, its job lines, cache writes).
 
 Interface (PORTING.md, "Adapters"): recipient(); hook(argv, stdin) (the hook process); take_unseen(session, level, now);
-format_alerts(records); banner(text, enabled); usage(now); open_tool_call(now); jobs(); cache_5m(now).
+format_alerts(records); banner(text, enabled); usage(now, s); open_tool_call(now); jobs(); cache_5m(now).
 
 The hook prints unseen ATTENTION and ACTION alerts as additional context, only in the recipient's main session:
 - session_id must equal the id the profile's recipient_regex finds in recipient_file;
@@ -19,6 +19,7 @@ Test overrides: MM_DATA, MM_PROFILE, MM_RECIPIENT_FILE, MM_NOW.
 """
 import fcntl
 import json
+import math
 import os
 import re
 import select
@@ -313,20 +314,68 @@ def hook_process():
 
 # ------------------------------------------------------------------------------------------- session facts
 
-def read_usage(file, now):
-    """The usage-watch state: levels in percent and the state's age."""
-    try:
-        with open(file) as f:
-            d = json.load(f)
-        lv = d.get("levels", {})
+def _usage_json(text):
+    """Keep unconvertible JSON numbers local to their usage value."""
+    def number(text):
+        try:
+            value = float(text) if any(c in text for c in ".eE") else int(text)
+            if math.isfinite(value):
+                return value
+        except (ValueError, OverflowError):
+            pass
+        return math.nan
 
-        def pct(k):
-            v = lv.get(k, {}).get("used_percent")
-            return v if isinstance(v, (int, float)) else None
-        return {"age_s": now - float(d.get("checked_at", 0)), "claude_5h": pct("claude_5h"), "claude_week": pct("claude_weekly"),
-                "codex_week": pct("codex_weekly"), "proj": d.get("claude_weekly_projection"),
-                "max_age_s": d.get("max_age_seconds", 1800)}
-    except (OSError, ValueError, TypeError, AttributeError):
+    return json.loads(text, parse_int=number, parse_float=number, parse_constant=number)
+
+
+def read_usage(file, now, s=None):
+    """Current usage levels in percent; unknown rows retain their stale-source reasons."""
+    def number(v):
+        try:
+            return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        except OverflowError:
+            return False
+
+    try:
+        s = mmcore.defaults() if s is None else s
+        with open(file) as f:
+            d = _usage_json(f.read())
+        lv = d.get("levels", {})
+        checked = float(d.get("checked_at", 0))
+        max_age = d.get("max_age_seconds", s["usage.watch_state_max_age_s"])
+        if not isinstance(lv, dict) or not number(checked) or not number(max_age) or max_age < 0:
+            return None
+        out = {"age_s": now - checked, "max_age_s": max_age, "stale_levels": {}}
+        for level, key in (("claude_5h", "claude_5h"), ("claude_weekly", "claude_week"),
+                           ("codex_weekly", "codex_week"), ("codex_5h", "codex_5h")):
+            out[key] = None
+            row = lv.get(level)
+            if not isinstance(row, dict):
+                why = "row missing or invalid"
+            elif row.get("status") == "not_offered":
+                continue
+            elif row.get("status") not in ("ok", "cached"):
+                why = "status %s" % row.get("status", "missing")
+            elif not number(row.get("used_percent")):
+                why = "used_percent missing or invalid"
+            elif not number(row.get("read_at")):
+                why = "read_at missing or invalid"
+            elif row["read_at"] - now > s["usage.read_clock_allowance_s"]:
+                why = "read_at %.0f s in future" % (row["read_at"] - now)
+            elif now - row["read_at"] > max_age:
+                why = "reading %.0f s old" % (now - row["read_at"])
+            elif type(row.get("reset_at")) in (int, float) and not number(row["reset_at"]):
+                why = "reset_at invalid"
+            elif number(row.get("reset_at")) and row["reset_at"] <= now:
+                why = "window reset"
+            else:
+                out[key] = row["used_percent"]
+                continue
+            out["stale_levels"][level] = why
+        proj = d.get("claude_weekly_projection")
+        out["proj"] = proj if out["claude_week"] is not None and number(proj) else None
+        return out
+    except (OSError, ValueError, TypeError, AttributeError, OverflowError):
         return None
 
 
@@ -399,8 +448,9 @@ def _utc_epoch(ts):
 
 
 def cache_5m(project_dir, now, window=3600):
-    """Tokens written to the 5-min and 1-h prompt caches by subagents in the last hour (each message id once)."""
-    m5 = h1 = 0
+    """Recent subagent cache tokens, once per message id; overflowing sums are unknown (None)."""
+    m5 = h1 = 0.0
+    skipped = 0
     seen = set()
     try:
         sessions = os.listdir(project_dir)
@@ -420,23 +470,48 @@ def cache_5m(project_dir, now, window=3600):
                 with open(fp, "rb") as f:
                     for raw in f:
                         if b"ephemeral_5m" not in raw:
+                            skipped += 1
                             continue
                         try:
-                            d = json.loads(raw)
-                            t = mmread._utc_epoch(d.get("timestamp", ""))
-                        except (ValueError, TypeError):
+                            d = _usage_json(raw)
+                            if not isinstance(d, dict):
+                                raise ValueError("transcript line is not an object")
+                            ts = d.get("timestamp", "")
+                            if not isinstance(ts, str):
+                                raise ValueError("transcript timestamp is not a string")
+                            t = _utc_epoch(ts)
+                            msg = d.get("message")
+                            if not isinstance(msg, dict):
+                                raise ValueError("transcript message is not an object")
+                            mid = msg.get("id")
+                            if not isinstance(mid, str) or not mid:
+                                raise ValueError("transcript message id is not a string")
+                            usage = msg.get("usage")
+                            if not isinstance(usage, dict):
+                                raise ValueError("transcript usage is not an object")
+                            cc = usage.get("cache_creation")
+                            if not isinstance(cc, dict):
+                                raise ValueError("transcript cache creation is not an object")
+                        except (ValueError, TypeError, RecursionError):
+                            skipped += 1
                             continue
-                        msg = d.get("message") or {}
-                        mid = msg.get("id")
                         if now - t > window or mid in seen:
+                            skipped += 1
                             continue
                         seen.add(mid)
-                        cc = (msg.get("usage") or {}).get("cache_creation") or {}
-                        m5 += cc.get("ephemeral_5m_input_tokens", 0) or 0
-                        h1 += cc.get("ephemeral_1h_input_tokens", 0) or 0
+                        m = cc.get("ephemeral_5m_input_tokens")
+                        h = cc.get("ephemeral_1h_input_tokens")
+                        if m5 is not None and type(m) in (int, float) and math.isfinite(m):
+                            m5 += m
+                            if not math.isfinite(m5):
+                                m5 = None
+                        if h1 is not None and type(h) in (int, float) and math.isfinite(h):
+                            h1 += h
+                            if not math.isfinite(h1):
+                                h1 = None
             except OSError:
                 continue
-    return {"m5": m5, "h1": h1}
+    return {"m5": m5, "h1": h1, "skipped": skipped}
 
 
 
@@ -461,9 +536,9 @@ class Delivery:
     def recipient(self):
         return recipient(self.cfg)
 
-    def usage(self, now):
+    def usage(self, now, s=None):
         f = self.cfg.get("usage_state")
-        return read_usage(mmcore.expand(f), now) if f else None
+        return read_usage(mmcore.expand(f), now, s) if f else None
 
     def usage_file(self):
         f = self.cfg.get("usage_state")

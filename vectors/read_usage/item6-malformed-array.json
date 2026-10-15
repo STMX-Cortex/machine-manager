@@ -1,0 +1,11 @@
+{
+ "case": "item6-malformed-array",
+ "expected": null,
+ "function": "read_usage",
+ "input": {
+  "now": 1800000000.0,
+  "text": "[]"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

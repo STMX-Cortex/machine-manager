@@ -108,5 +108,6 @@
  "usage.claude_projection_pct": 95,
  "usage.codex_action_pct": 98,
  "usage.codex_attention_pct": 95,
+ "usage.read_clock_allowance_s": 5,
  "usage.watch_state_max_age_s": 1800
 }

@@ -31,7 +31,8 @@ expected value after a JSON round trip (tuples are lists). A crash is a failure.
 Functions with vectors: `classify`, `slot_decide`, `alert_raise`, `alert_absent`, `alert_line`, `conditions`
 (`mmalerts.evaluate`), `delete_guard`, `place`, `expected_wait`, `drill_stop`, `replay` (whole incidents minute by
 minute), `mask`, `compare_readings`, `parse_load_line`, `parse_history_line`, `parse_kernel_line`, `parse_billing`,
-`parse_delete_line`, and for self-recovery `sample_problems`, `self_check`, `crash_loop`, `resume_targets`,
+`parse_delete_line`, `read_usage` (row freshness, percentages and weekly projection), and for self-recovery
+`sample_problems`, `self_check`, `crash_loop`, `resume_targets`,
 `reboot_check`.
 
 ## Schemas

@@ -1,0 +1,11 @@
+{
+ "case": "item6-malformed-bad-check-time",
+ "expected": null,
+ "function": "read_usage",
+ "input": {
+  "now": 1800000000.0,
+  "text": "{\"checked_at\":\"bad\",\"levels\":{}}"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

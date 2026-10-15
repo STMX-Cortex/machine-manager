@@ -145,9 +145,13 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
     c5m = g("cache5m")
     if c5m:
         m5, h1 = c5m.get("m5", 0), c5m.get("h1", 0)
-        if m5 > s["other.cache_5m_min_tokens_m"] * 1e6 and m5 * 100.0 / max(1, m5 + h1) > s["other.cache_5m_share_pct"]:
+        if m5 is not None and h1 is not None and m5 > s["other.cache_5m_min_tokens_m"] * 1e6:
+            share = m5 * 100.0 / max(1, m5 + h1)
+        else:
+            share = None
+        if share is not None and share > s["other.cache_5m_share_pct"]:
             out.append(_c("CACHE_5M", "CACHE_5M", "ATTENTION", "subagents wrote %.1fM tokens of 5-minute cache in 1 h (%.0f%%)"
-                          % (m5 / 1e6, m5 * 100.0 / max(1, m5 + h1))))
+                          % (m5 / 1e6, share)))
     if g("on_ac") is False:
         out.append(_c("POWER", "POWER", "ACTION", "machine on battery: timed jobs fail if it sleeps"))
     gap = g("resumed_gap_s")

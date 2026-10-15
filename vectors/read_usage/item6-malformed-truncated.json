@@ -1,0 +1,11 @@
+{
+ "case": "item6-malformed-truncated",
+ "expected": null,
+ "function": "read_usage",
+ "input": {
+  "now": 1800000000.0,
+  "text": "{\"levels\":"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -63,6 +63,7 @@ claude_action_pct = 98  # % weekly or 5-hour
 claude_projection_pct = 95  # %
 claude_5h_attention_pct = 85  # %
 watch_state_max_age_s = 1800  # s
+read_clock_allowance_s = 5  # s; tolerate small clock differences in a row's read_at (0..60)
 
 [queue]
 # The job queue: waits, long calls, placement.
