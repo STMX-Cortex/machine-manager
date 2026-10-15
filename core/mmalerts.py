@@ -214,6 +214,14 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
         out.append(_c("LINK_SKIPPED:" + _h(p), "LINK_SKIPPED", "ATTENTION",
                       "a configured delete or prune path goes through a link (or out of its folder); skipped: %s" % p,
                       command="ls -ld " + shlex.quote(p)))
+    for rid, err in g("deletes_failed") or []:
+        out.append(_c("DELETES_FAILED:" + str(rid), "DELETES_FAILED", "ATTENTION",
+                      "deletes: %s failed: %s (the other rules and the cleanup list still run)" % (rid, err)))
+    # --- the queue's slot and ticket files: a path there that is not a regular file counts as not held
+    for p in g("slot_not_a_file") or []:
+        out.append(_c("SLOT_NOT_A_FILE:" + _h(p), "SLOT_NOT_A_FILE", "ATTENTION",
+                      "a queue slot or ticket path is not a regular file (a link or a FIFO); counted as not held, "
+                      "never paused through: %s" % p, command="ls -ld " + shlex.quote(p)))
     # --- the pause: a process that is not the queue launcher had the newest call's slot file open
     pr = g("pause_refused")
     if pr:

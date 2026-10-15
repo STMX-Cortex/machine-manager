@@ -147,15 +147,25 @@ profile names:
    from the tree. Every git call carries `--no-optional-locks -c core.fsmonitor=false -c core.hooksPath=/dev/null`
    and `-c attr.tree=<the empty tree>` (git 2.42 or newer; no filter driver runs on the tree's files), and the status
    skips submodules. Any other tree is a KEEP item with its reason and no command.
-2. **The pause.** The pids come from the processes that have the newest call's slot file open (lsof, with the time
-   limit `pause_newest_call.lsof_timeout_s`), never from its label text. Each one whose argument list runs the queue's
-   launcher (profile `queue.launcher`, named by its absolute path) is paused with its process tree. Any other process
-   is never paused: `PAUSE_REFUSED` names the slot file and its pid.
-3. **Links.** Deletes and prunes (`cache_entries`, `command_per_dir`, the cleanup list's commands) check every
+2. **The pause.** The slot path must be a regular file (lstat) before lsof runs on it. The pids come from the processes
+   that have the newest call's slot file open with write access (lsof, with the time limit
+   `pause_newest_call.lsof_timeout_s`), never from its label text; a read-only opener (a waiter's scan) is never paused
+   and never named. Each one whose argument list runs the queue's launcher (profile `queue.launcher`, named by its
+   absolute path, or by a path relative to that process's working folder; real paths compared) is paused with its
+   process tree. Any other process is never paused: `PAUSE_REFUSED` names the slot file and its pid. A waiter that
+   tries a slot has it open read-write for a moment (an accepted limit).
+3. **Slot and ticket files.** The queue read and the evidence bundle open each slot and ticket file without following a
+   link and without waiting, require a regular file and read at most 4096 bytes. A link, a FIFO or any other kind there
+   counts as not held, is never paused through, and raises `SLOT_NOT_A_FILE` naming the path.
+4. **Links.** Deletes and prunes (`cache_entries`, `command_per_dir`, the cleanup list's commands) check every
    component of the configured folder's path, and of each entry below it, with lstat. A link owned by root (`/tmp`,
    `/var`) is allowed; any other link, or a real path outside the folder, refuses: a KEEP line in `deletes.log` (a KEEP
    item with no command in the cleanup list) and `LINK_SKIPPED` naming the path. Cache entries are deleted through
    folder descriptors opened without following a link, so a folder swapped for a link after the find is never entered.
+5. **Markers and failures.** A cache's marker file is opened the same way (no link, no wait, a regular file only, at most
+   4096 bytes, invalid UTF-8 replaced): a link, a FIFO or a folder there is no marker. One delete rule that fails never
+   stops the others or the cleanup list: its KEEP line in `deletes.log` and `DELETES_FAILED` name the rule (or
+   `cleanup_list`) and the error.
 
 ## Glossary
 
@@ -170,8 +180,9 @@ ended a process; `GUARD_DOWN` the memory guard is not alive; `DISK_LOW`, `DISK_T
 cache is large; `TRIM_NEEDED` a trim waits for a drained queue; `TRIM_DONE`, `TRIM_REFUSED` the trim's end;
 `CLEANUP_LIST` candidates for a person; `CODEX95`, `CODEX98`, `CLAUDE98`, `CLAUDE_PROJ`, `FIVE_H` plan usage;
 `CACHE_5M` short prompt-cache writes; `QWAIT` a queue call waits long; `HEAD_BLOCK` an exclusive call blocks the queue;
-`PAUSE_REFUSED` a process that is not the queue's launcher has the newest call's slot file open; `LINK_SKIPPED` a delete
-or prune path goes through a link;
+`PAUSE_REFUSED` a process that is not the queue's launcher has the newest call's slot file open for writing;
+`SLOT_NOT_A_FILE` a queue slot or ticket path is not a regular file; `LINK_SKIPPED` a delete or prune path goes through
+a link; `DELETES_FAILED` a delete rule or the cleanup list failed;
 `LONG_CALL` a call runs long; `REFUSED` the queue refused a call; `SLOT_CPU` a slot uses much CPU; `IDLE_ROOM` the
 queue is idle; `FSEV` the file-event daemon is large; `POWER` on battery; `RESUMED` the machine slept;
 `RECIPIENT_WAIT` the recipient waits on one tool call; `JOB_DEAD` a listed job died without a result;

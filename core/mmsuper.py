@@ -11,6 +11,7 @@ import json
 import os
 import queue as queue_mod
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -123,9 +124,15 @@ def deletes_job(s, now, enabled, ctx, with_list, live_spec, mid):
     run.all()
     res = {"time": now, "enabled": enabled, "would_bytes": run.would, "freed_bytes": run.freed,
            "keep": sum(1 for l in run.lines if " KEEP " in l), "lines": len(run.lines),
-           "link_skipped": list(run.link_skipped)}  # the LINK_SKIPPED alerts (rule 48)
+           "link_skipped": list(run.link_skipped),  # the LINK_SKIPPED alerts (rule 48)
+           "errors": list(run.errors)}  # [rule id or "cleanup_list", error]: the DELETES_FAILED alerts
     if with_list:
-        items = mmdelete.cleanup_list(ctx, now)
+        try:
+            items = mmdelete.cleanup_list(ctx, now)
+        except Exception as e:  # the rules above ran; DELETES_FAILED names the list
+            items = None
+            res["errors"].append(["cleanup_list", mmdelete.error_text(e)])
+    if with_list and items is not None:
         mmcore.write_atomic(mmcore.path("state", "cleanup-list.json"),
                             json.dumps(mmcore.stamp({"time": now, "items": items}, mid=mid), indent=1))
         cands = [i for i in items if i.get("command")]  # KEEP items (skipped trees and links) are no candidates
@@ -266,20 +273,34 @@ class Pauser:
 
     def pause(self, busy, procs, queue, lsof_timeout):
         """None when there is nothing to pause; else {"busy": the newest entry, "slot": its file, "paused": [pids],
-        "refused": [opener pids not paused], "failed": why no opener could be read, or None}."""
+        "refused": [write-access opener pids not paused], "failed": why no opener could be read, or None,
+        "not_a_file": the slot path when it is not a regular file (then lsof never runs on it), or None}.
+        Candidates are the processes that have the slot file open with write access (the launcher holds it read-write);
+        a read-only opener (a waiter's scan) is never paused and never named."""
         holders = [b for b in busy if b.get("since")]
         if not holders or self.st:
             return None
         newest = max(holders, key=lambda b: b["since"])
         slot = queue.slot_file(newest["slot"])
-        out = {"busy": newest, "slot": slot, "paused": [], "refused": [], "failed": None}
-        openers = mmread.file_openers(slot, lsof_timeout)
+        out = {"busy": newest, "slot": slot, "paused": [], "refused": [], "failed": None, "not_a_file": None}
+        try:
+            regular = stat.S_ISREG(os.lstat(slot).st_mode)
+        except FileNotFoundError:
+            return out  # the call ended and its file is gone: nothing to pause
+        except OSError as e:
+            out["failed"] = "lstat failed (%s)" % e.__class__.__name__
+            return out
+        if not regular:
+            out["not_a_file"] = slot
+            return out
+        openers = mmread.file_writers(slot, lsof_timeout)
         if openers is None:
             out["failed"] = "lsof failed"
             return out
         tree = []  # each launcher, then its descendants (an opener among them inherited the file and goes with it)
         for pid in openers:
-            if queue.runs_launcher(mmread.proc_argv(pid)):
+            # a relative launcher word is resolved against the process's working folder (asked only when needed)
+            if queue.runs_launcher(mmread.proc_argv(pid), lambda pid=pid: mmread.proc_cwd(pid, lsof_timeout)):
                 tree += [d for d in mmread.descendants(procs, pid) if d not in tree]
         out["refused"] = [pid for pid in openers if pid not in tree]
         plan = {}
@@ -612,7 +633,13 @@ class Supervisor:
         if dl.get("cleanup"):
             snap["cleanup"] = dl["cleanup"]
         snap["link_skipped"] = dl.get("link_skipped") or []
+        snap["deletes_failed"] = list(dl.get("errors") or [])
+        if self.deletes.error:  # the whole deletes job failed (outside any rule)
+            snap["deletes_failed"].append(["deletes_job", self.deletes.error])
         snap["pause_refused"] = self.state.get("pause_refused")
+        # a slot or ticket path that is not a regular file: from the queue read, and from the pause's own check
+        snap["slot_not_a_file"] = sorted(set((q or {}).get("not_files") or [])
+                                         | ({self.state["pause_not_a_file"]} if self.state.get("pause_not_a_file") else set()))
         # the guarded cache trim
         procs = self.cache.get("procs")
         drained = bool(q and not q.get("busy") and not q.get("tickets") and procs is not None
@@ -857,13 +884,13 @@ class Supervisor:
         else:
             gate.pop("red_since", None)
         if not s["pause_newest_call.enabled"]:
-            self.state["pause_refused"] = None
+            self.state["pause_refused"] = self.state["pause_not_a_file"] = None
             return
         p = Pauser(self.state)
         q = self.cache.get("queue")
         if mac_state == "RED" and critical(reasons) and not p.st and q:
             busy = [b for b in q["busy"] if b.get("since")]
-            refusal = None
+            refusal = not_a_file = None
             if not actions_on:
                 if busy and now - self.state.get("would_pause_at", 0) > 600:
                     self.state["would_pause_at"] = now
@@ -873,6 +900,10 @@ class Supervisor:
                 got = p.pause(q["busy"], self.cache.get("procs") or [], self.queue, s["pause_newest_call.lsof_timeout_s"])
                 if got and got["paused"]:
                     self.log_decision("%s PAUSE %s pids %s" % (mmcore.now_local(now), got["busy"].get("label"), got["paused"]))
+                if got and got["not_a_file"]:
+                    not_a_file = got["not_a_file"]  # SLOT_NOT_A_FILE; nothing paused through it
+                    if not_a_file != self.state.get("pause_not_a_file"):
+                        self.log_decision("%s PAUSE-REFUSED %s is not a regular file" % (mmcore.now_local(now), not_a_file))
                 if got and (got["refused"] or got["failed"]):
                     why = got["failed"] or "pids %s have it open and do not run the queue launcher" % (
                         ",".join(str(x) for x in got["refused"]))
@@ -882,8 +913,10 @@ class Supervisor:
             if refusal and refusal != self.state.get("pause_refused"):
                 self.log_decision("%s PAUSE-REFUSED %s" % (mmcore.now_local(now), refusal["text"]))
             self.state["pause_refused"] = refusal  # the PAUSE_REFUSED alert while it holds
+            self.state["pause_not_a_file"] = not_a_file  # the SLOT_NOT_A_FILE alert while it holds
         elif not p.st:
-            self.state["pause_refused"] = None  # no pause check and nothing paused: the refusal no longer holds
+            # no pause check and nothing paused: the refusal no longer holds
+            self.state["pause_refused"] = self.state["pause_not_a_file"] = None
         if mac_state == "GREEN":
             gs = self.state.setdefault("green_for_pause", now)
             if p.st and now - gs >= s["pause_newest_call.resume_after_green_s"]:

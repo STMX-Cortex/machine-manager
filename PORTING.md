@@ -54,4 +54,7 @@ Several machines and pools are several status records; placement takes a list of
 6. The tool never pushes, dispatches or runs a placement command; it prints them.
 7. Nothing an agent can write chooses a program, a signal or a delete target (README.md, "Agent-written files"): git in
    a worktree takes its git folder from the main repository's list, the pause takes its pids from the processes that
-   hold the slot file open, and a delete or prune refuses a path with a link not owned by root.
+   hold the regular slot file open for writing, and a delete or prune refuses a path with a link not owned by root.
+   Nothing an agent can write hangs or stops a tick: slot, ticket and marker files are opened without following a link
+   and without waiting, only a regular file counts, and at most 4096 bytes are read; one failing delete rule never
+   stops the others.

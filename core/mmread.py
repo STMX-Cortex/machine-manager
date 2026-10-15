@@ -5,10 +5,12 @@ Project formats (a queue's sampler log, its history, a session's files) live in 
 """
 import ctypes
 import ctypes.util
+import errno
 import fcntl
 import json
 import os
 import re
+import stat
 import struct
 import subprocess
 import threading
@@ -344,12 +346,30 @@ def read_ps():
     return parse_ps(out) if rc == 0 else None
 
 
-def file_openers(path_, timeout):
-    """Pids of every process that has the file open (lsof), or None when lsof cannot run or times out."""
-    rc, out = run(["/usr/sbin/lsof", "-t", "--", path_], timeout=timeout)
+def file_writers(path_, timeout):
+    """Pids of every process that has the file open with write access (lsof access `u` read-write or `w` write-only,
+    on any of its descriptors); a read-only opener is not one. None when lsof cannot run or times out."""
+    rc, out = run(["/usr/sbin/lsof", "-F", "pa", "--", path_], timeout=timeout)
     if rc not in (0, 1):  # 1: no process has it open
         return None
-    return sorted({int(w) for w in out.split() if w.isdigit()})
+    pids, pid = set(), None
+    for line in out.splitlines():
+        if line[:1] == "p" and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line[:1] == "a" and line[1:] in ("u", "w") and pid is not None:
+            pids.add(pid)
+    return sorted(pids)
+
+
+def proc_cwd(pid, timeout):
+    """A process's working folder (lsof), or None when lsof cannot tell (the process is gone, lsof fails or times out)."""
+    rc, out = run(["/usr/sbin/lsof", "-a", "-p", str(int(pid)), "-d", "cwd", "-Fn"], timeout=timeout)
+    if rc != 0:
+        return None
+    for line in out.splitlines():
+        if line[:1] == "n" and os.path.isabs(line[1:]):
+            return line[1:]
+    return None
 
 
 _CTL_KERN, _KERN_PROCARGS2 = 1, 49  # sys/sysctl.h
@@ -381,18 +401,66 @@ def proc_argv(pid):
 # --------------------------------------------------------------------------------------------- the queue (read only)
 
 
-def flock_held(path_):
-    """(held, first line): another process holds an flock on the file."""
+# Bytes read from a file that agents may write (a queue slot or ticket file, a cache marker): the first line of a
+# label, or a marker text, is far shorter.
+FILE_READ_MAX = 4096
+
+
+class NotRegular(Exception):
+    """The path holds a link, a FIFO, a folder or another kind of file, not a regular file."""
+
+
+def open_regular(path_):
+    """A read-only descriptor of the regular file at path_, opened without following a link and without waiting (a FIFO
+    opens at once). Raises NotRegular for anything else at the path, and OSError (FileNotFoundError when nothing is
+    there)."""
     try:
-        with open(path_) as f:
-            try:
-                fcntl.flock(f, fcntl.LOCK_SH | fcntl.LOCK_NB)
-                fcntl.flock(f, fcntl.LOCK_UN)
-                return False, None
-            except BlockingIOError:
-                return True, f.readline().rstrip("\r\n")[:240]
+        fd = os.open(path_, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except OSError as e:
+        if e.errno == errno.ELOOP:  # O_NOFOLLOW on a link
+            raise NotRegular(path_) from None
+        raise
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise NotRegular(path_)
+    return fd
+
+
+def read_regular(path_, limit=FILE_READ_MAX):
+    """At most `limit` bytes from the start of the regular file at path_ (open_regular), or None when it is missing,
+    not a regular file or unreadable."""
+    try:
+        fd = open_regular(path_)
+    except (OSError, NotRegular):
+        return None
+    try:
+        return os.read(fd, limit)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def flock_held(path_):
+    """(held, first line, not_a_file): another process holds an flock on the regular file at path_. It is opened with
+    open_regular and at most FILE_READ_MAX bytes are read; a link, a FIFO or any other kind is not held, with
+    not_a_file True."""
+    try:
+        fd = open_regular(path_)
     except FileNotFoundError:
-        return False, None
+        return False, None, False
+    except NotRegular:
+        return False, None, True
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False, None, False
+        except BlockingIOError:
+            first = os.read(fd, FILE_READ_MAX).split(b"\n", 1)[0]
+            return True, first.decode("utf-8", "replace").rstrip("\r")[:240], False
+    finally:
+        os.close(fd)
 
 
 class Tail:

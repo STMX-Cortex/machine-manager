@@ -15,6 +15,9 @@ list, with no command) and the path in `link_skipped`, for the LINK_SKIPPED aler
 Git (rule 46): the cleanup list takes worktrees from the main repository's `git worktree list`; it runs git in a tree
 only when the tree's `.git` is a regular file reading exactly its listed gitdir, and then with that gitdir given on the
 command line (never read from the tree) and the guards of GIT_GUARDS.
+Markers and failures: a cache's marker file is read with mmread.read_regular (no link, no wait, a regular file only, at
+most mmread.FILE_READ_MAX bytes, invalid UTF-8 replaced). A rule that fails is logged as a KEEP line and kept in
+`errors` for the DELETES_FAILED alert; the other rules still run.
 
 Rule types (profile deletes.rules[].type): own_files, folders, cache_entries, app_folders, command_per_dir, trim, note.
 Cleanup-list types (profile deletes.cleanup[].type): git_worktrees, git_branches, stale_children, paths.
@@ -126,6 +129,7 @@ class Run:
         self.would = 0
         self.young = {}  # (rule, folder, minutes) -> count: young items get one summary line, not one line each
         self.link_skipped = []  # paths refused for a link (rule 48): the LINK_SKIPPED alerts
+        self.errors = []  # [rule id, error] of each rule that failed (the DELETES_FAILED alerts); the others still run
 
     # ---- log
     def log(self, verb, rule, p, nbytes=None, guard="", extra=""):
@@ -403,23 +407,36 @@ class Run:
         for r in self.c.cfg.get("rules", []):
             if ids is not None and r["id"] not in ids:
                 continue
-            getattr(self, r["type"])(r)
+            try:
+                getattr(self, r["type"])(r)
+            except Exception as e:  # one failing rule never stops the others (DELETES_FAILED names it)
+                why = error_text(e)
+                self.errors.append([r.get("id", "?"), why])
+                self.log("KEEP", r.get("id", "?"), "-", guard="rule failed: " + why)
         for (rule, folder, minutes), n in sorted(self.young.items()):
             self.log("KEEP", rule, folder, guard="young: %d entries changed within %g min" % (n, minutes))
         self.young = {}
         return self.lines
 
 
+ERROR_TEXT_MAX = 200  # characters of one failed rule's error kept for its log line and its DELETES_FAILED alert
+
+
+def error_text(e):
+    """One failed rule's error as one short line: its class and message."""
+    return " ".join(("%s: %s" % (e.__class__.__name__, e)).split())[:ERROR_TEXT_MAX]
+
+
 # ------------------------------------------------------------------------------------- cache helpers
 
 def has_marker(c, marker_file, marker_text):
+    """The cache's marker file holds the marker text. The marker is opened without following a link and without
+    waiting, only a regular file counts, at most mmread.FILE_READ_MAX bytes are read and decoded with errors replaced:
+    an agent-made marker (a link, a FIFO, a folder, invalid UTF-8, a huge file) is no marker, never a hang or an error."""
     if not marker_file:
         return os.path.isdir(c)
-    try:
-        with open(os.path.join(c, marker_file)) as f:
-            return (marker_text or "") in f.read(4096)
-    except OSError:
-        return False
+    data = mmread.read_regular(os.path.join(c, marker_file))
+    return data is not None and (marker_text or "") in data.decode("utf-8", "replace")
 
 
 def old_cache_entries(c, minutes, now, entry_regex="[0-9a-f]{2}", links=None):
