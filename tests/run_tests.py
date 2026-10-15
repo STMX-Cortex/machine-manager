@@ -33,6 +33,7 @@ GROUPS = {
     "sandbox_holds_r2": ["test_sandbox_holds_r2"],  # C-14: QUEUE_FILE_UNREADABLE, list alerts, A1, fresh snapshot, QWAIT
     "sandbox_holds_review": ["test_sandbox_holds_review"],    # review round 1, part C: relative launcher (R10C-1)
     "sandbox_holds_review2": ["test_sandbox_holds_review2"],  # review round 2, part C: R2C-1 to R2C-3
+    "sandbox_holds_review3": ["test_sandbox_holds_review3"],  # review round 3, part C: R3C-1 to R3C-3
     "install": ["test_install"],      # install, stop, start, rollback, init, check (temporary HOME)
     "cli": ["test_cli"],              # golden outputs and limits
     "drill": ["test_drill"],          # the drill's stop rules on a fake reader
