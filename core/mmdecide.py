@@ -135,7 +135,7 @@ def slot_decide(state, inp, s):
     demand = inp["waiting"] >= s["slots.raise_requires_waiting"] and inp["busy"] >= slots
     if not demand:
         st["demand_since"] = None
-    elif st.get("demand_since") is None:
+    elif st.get("demand_since") is None or st["demand_since"] > now:
         st["demand_since"] = now
     pin = None
     if override and override.get("until", 0) > now:

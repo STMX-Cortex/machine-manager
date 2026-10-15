@@ -691,13 +691,12 @@ class Supervisor:
     def _proc_facts(self, now):
         procs, q = self.cache.get("procs"), self.cache.get("queue")
         if not procs:
+            self.state["call_cpu_prev"] = {}
+            self.cache.update(slot_cpu={}, top_outside=[], fsev_mb=None)
             return
-        in_slots, slot_cpu, calls, current = set(), {}, {}, {}
-        for b in (q or {}).get("busy", []):
-            if b.get("pid"):
-                calls.setdefault(str(b["pid"]), set()).add(b["slot"])
-        for call, slots in calls.items():
-            pids = set(mmread.descendants(procs, int(call)))
+        in_slots, slot_cpu, current = set(), {}, {}
+        for call, (pid, slots) in mmalerts.queue_calls((q or {}).get("busy", [])).items():
+            pids = set(mmread.descendants(procs, pid))
             in_slots.update(pids)
             cpu = sum(p["cpu"] for p in procs if p["pid"] in pids) / 100.0
             prev = self.state.get("call_cpu_prev", {}).get(call)
