@@ -3,7 +3,8 @@
  "expected": [
   "STEADY",
   [
-   "load5 not under 8"
+   "load5 not under 8",
+   "load1 not under 8"
   ],
   false
  ],

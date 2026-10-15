@@ -702,15 +702,19 @@ class Supervisor:
     def _proc_facts(self, now):
         procs, q = self.cache.get("procs"), self.cache.get("queue")
         if not procs:
+            self.state["call_cpu_prev"] = {}
+            self.cache.update(slot_cpu={}, top_outside=[], fsev_mb=None)
             return
-        in_slots, slot_cpu = set(), {}
-        for b in (q or {}).get("busy", []):
-            pids = mmread.descendants(procs, b.get("pid")) if b.get("pid") else []
+        in_slots, slot_cpu, current = set(), {}, {}
+        for call, (pid, slots) in mmalerts.queue_calls((q or {}).get("busy", [])).items():
+            pids = set(mmread.descendants(procs, pid))
             in_slots.update(pids)
-            cpu = sum(p["cpu"] for p in procs if p["pid"] in set(pids)) / 100.0
-            prev = self.state.get("slot_cpu_prev", {}).get(b["slot"])
-            slot_cpu[b["slot"]] = min(cpu, prev) if prev is not None else 0.0  # sustained over 2 reads
-            self.state.setdefault("slot_cpu_prev", {})[b["slot"]] = cpu
+            cpu = sum(p["cpu"] for p in procs if p["pid"] in pids) / 100.0
+            prev = self.state.get("call_cpu_prev", {}).get(call)
+            for slot in slots:
+                slot_cpu[slot] = min(cpu, prev) if prev is not None else 0.0  # sustained over 2 reads
+            current[call] = cpu
+        self.state["call_cpu_prev"] = current
         outside = sorted((p for p in procs if p["pid"] not in in_slots), key=lambda p: -p["rss_mb"])[:3]
         self.cache["top_outside"] = [(os.path.basename(p["comm"]), p["rss_mb"]) for p in outside]
         self.cache["slot_cpu"] = slot_cpu

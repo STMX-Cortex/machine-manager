@@ -1,0 +1,521 @@
+{
+ "case": "item1-trial-burst-after-idle-green",
+ "expected": [
+  {
+   "i": 0,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 1,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 2,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 3,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 4,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 5,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 6,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 7,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 8,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 9,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 10,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 11,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 12,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 13,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 14,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 15,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 16,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 17,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 18,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 19,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 20,
+   "pushed": [],
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "slots": 5,
+   "state": "GREEN"
+  },
+  {
+   "i": 21,
+   "pushed": [],
+   "reasons": [
+    "load1 not under 8"
+   ],
+   "slots": 5,
+   "state": "STEADY"
+  }
+ ],
+ "function": "replay",
+ "input": {
+  "samples": [
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000000.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000060.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000120.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000180.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000240.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000300.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000360.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000420.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000480.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000540.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000600.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000660.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000720.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000780.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000840.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000900.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800000960.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800001020.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800001080.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800001140.0,
+    "waiting": 0
+   },
+   {
+    "busy": 0,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800001200.0,
+    "waiting": 0
+   },
+   {
+    "busy": 5,
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 28,
+    "load5": 4.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 10.0,
+    "t": 1800001260.0,
+    "waiting": 3
+   }
+  ],
+  "start_slots": 5
+ },
+ "settings": "base",
+ "settings_over": {
+  "slots.green_load1_per_core": 0.8
+ }
+}

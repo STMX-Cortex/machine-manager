@@ -21,6 +21,22 @@ def _gb(b):
     return "?" if b is None else "%.1f GB" % (b / 1e9)
 
 
+def queue_calls(busy):
+    """Call identity and held slots, using the earliest lock start for each PID."""
+    by_pid = {}
+    for b in busy:
+        if b.get("pid"):
+            by_pid.setdefault(b["pid"], []).append(b)
+    calls = {}
+    for pid, held in by_pid.items():
+        starts = [b["since"] for b in held if b.get("since") is not None]
+        if starts:
+            # A wide call's lock files can have slightly different mtimes.
+            call = "%s:%s" % (pid, float(min(starts)))
+            calls[call] = (pid, {b["slot"] for b in held})
+    return calls
+
+
 def evaluate(snap, s, now, active=frozenset(), names=None):
     """Active conditions for one evaluation. `active` holds the keys active before (for hysteresis)."""
     out = []
@@ -129,10 +145,20 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
                                                                else "admitted without memory rules (mem=na)")
         out.append(_c("REFUSED:%s:%d" % (c["pid"], int(c["end"])), "REFUSED", "ATTENTION",
                       "queue call %s: %s" % (why, (c.get("cmd") or "")[:120])))
-    for slot, cores in (g("slot_cpu") or {}).items():
-        if cores > s["queue.slot_cpu_cores"]:
-            out.append(_c("SLOT_CPU:" + slot, "SLOT_CPU", "ATTENTION", "slot %s process tree uses about %.1f cores" % (slot, cores),
-                          investigate={"question": "Which process in this slot runs wider than its cap?",
+    slot_cpu = g("slot_cpu") or {}
+    if "queue" in snap:
+        calls = {call: held for call, (_, held) in queue_calls((g("queue") or {}).get("busy", [])).items()}
+    else:
+        # Older pure inputs omit the queue; live snapshots always supply it.
+        calls = {slot: {slot} for slot in slot_cpu}
+    for call, held in calls.items():
+        readings = [slot_cpu[slot] for slot in held if slot in slot_cpu]
+        if not readings:
+            continue
+        cores = max(readings)
+        if cores > s["queue.slot_cpu_cores"] * len(held):
+            out.append(_c("SLOT_CPU:" + call, "SLOT_CPU", "ATTENTION", "call %s process tree uses about %.1f cores over %d slots" % (call, cores, len(held)),
+                          investigate={"question": "Which process in this call runs wider than its cap?",
                                        "hypotheses": ["go test -p unbounded", "cargo jobs", "pytest -n"]}))
     idle = g("idle_minutes")
     if idle is not None and idle >= s["queue.idle_room_minutes"]:

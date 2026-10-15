@@ -84,6 +84,7 @@
  "slots.cores": 10,
  "slots.floor": 3,
  "slots.green_free_pct": 55,
+ "slots.green_load1_per_core": 0.8,
  "slots.green_load5": 8,
  "slots.green_sys_pct": 25,
  "slots.hold_after_red_minutes": 30,

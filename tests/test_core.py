@@ -363,6 +363,245 @@ class T12Settings(TempData):
         self.assertEqual(st3.load()["slots.floor"], 2, "no settings.toml: the defaults")
 
 
+class SlotTrialClassification(unittest.TestCase):
+    """Coarse rule items 1 and 4 from the 2026-10-15 queue trial."""
+
+    def classify(self, **over):
+        import mmdecide
+        from slot_trial_helpers import NOW, sample, settings
+        return mmdecide.classify([sample(NOW - 60), sample(**over)], settings(), disk_gb=100)
+
+    def test_item1_trial_burst_leaves_green_in_one_sample(self):
+        state, reasons, complete = self.classify(load1=28, load5=4)
+        self.assertEqual(state, "STEADY")
+        self.assertTrue(complete)
+        self.assertTrue(any("load1" in r for r in reasons), reasons)
+
+    def test_item1_green_load1_band_is_strict(self):
+        for load, expected in ((7.99, "GREEN"), (8, "STEADY"), (8.01, "STEADY")):
+            with self.subTest(load1=load):
+                self.assertEqual(self.classify(load1=load)[0], expected)
+
+    def test_item1_green_load1_band_scales_with_cores_and_setting(self):
+        import mmdecide
+        from slot_trial_helpers import sample, settings
+        for cores, band in ((5, 0.8), (10, 0.4), (10, 1.2)):
+            for offset, expected in ((-0.01, "GREEN"), (0, "STEADY")):
+                with self.subTest(cores=cores, band=band, offset=offset):
+                    s = settings(**{"slots.cores": cores, "slots.green_load1_per_core": band})
+                    self.assertEqual(mmdecide.classify([sample(load1=cores * band + offset)], s)[0], expected)
+
+    def test_item1_unknown_load1_cannot_authorize_green(self):
+        for value in (None, "2", True):
+            with self.subTest(load1=value):
+                self.assertEqual(self.classify(load1=value)[0], "STEADY")
+        import mmdecide
+        from slot_trial_helpers import sample, settings
+        x = sample()
+        del x["load1"]
+        self.assertEqual(mmdecide.classify([x], settings())[0], "STEADY")
+
+    def test_item4_existing_load5_band_and_memory_thresholds_stay(self):
+        for reading, expected in (({"load5": 8}, "STEADY"), ({"load5": 14}, "STEADY"),
+                                  ({"load5": 14.01}, "AMBER"), ({"free_pct": 55}, "GREEN"),
+                                  ({"free_pct": 54.99}, "STEADY"), ({"free_pct": 50}, "STEADY"),
+                                  ({"free_pct": 49.99}, "AMBER"), ({"free_pct": 35}, "AMBER"),
+                                  ({"free_pct": 34.99}, "RED"), ({"pressure": 4}, "RED")):
+            with self.subTest(reading=reading):
+                self.assertEqual(self.classify(**reading)[0], expected)
+
+    def test_item4_red_load_still_needs_two_samples_above_twice_cores(self):
+        import mmdecide
+        from slot_trial_helpers import NOW, sample, settings
+        for loads, expected in (((2, 28), "GREEN"), ((20, 20), "GREEN"), ((20.01, 20.01), "RED")):
+            # Raising the GREEN band isolates the unchanged RED threshold/sustain rule.
+            s = settings(**{"slots.green_load1_per_core": 4})
+            window = [sample(NOW - 60, load1=loads[0]), sample(load1=loads[1])]
+            with self.subTest(loads=loads):
+                self.assertEqual(mmdecide.classify(window, s)[0], expected)
+
+
+class SlotTrialDemand(unittest.TestCase):
+    def controller(self, **over):
+        from slot_trial_helpers import settings
+        return mmcore.SlotController(settings(**over), {})
+
+    def idle_green(self, ctl):
+        ctl.decide(T0, G, [], 5, 0, 0, False)
+        self.assertIsNone(ctl.decide(T0 + 3600, G, [], 5, 0, 0, False)[0])
+
+    def test_item1_trial_burst_after_idle_green_never_raises(self):
+        import mmdecide
+        from slot_trial_helpers import sample, settings
+        c = self.controller()
+        self.idle_green(c)
+        state, reasons, _ = mmdecide.classify([sample(T0 + 3600), sample(T0 + 3610, load1=28)], settings())
+        self.assertIsNone(c.decide(T0 + 3610, state, reasons, 5, 5, 3, False)[0])
+
+    def test_item2_idle_green_does_not_pay_for_new_demand(self):
+        c = self.controller()
+        self.idle_green(c)
+        for elapsed in (0, 14 * 60, 15 * 60 - 1):
+            with self.subTest(elapsed=elapsed):
+                self.assertIsNone(c.decide(T0 + 3610 + elapsed, G, [], 5, 5, 3, False)[0])
+        self.assertEqual(c.decide(T0 + 3610 + 15 * 60, G, [], 5, 5, 3, False)[0], 6)
+
+    def test_item2_both_waiters_and_all_slots_busy_must_hold(self):
+        for busy, waiting in ((4, 3), (5, 0)):
+            with self.subTest(busy=busy, waiting=waiting):
+                c = self.controller()
+                c.decide(T0, G, [], 5, busy, waiting, False)
+                c.decide(T0 + 3600, G, [], 5, busy, waiting, False)
+                self.assertIsNone(c.decide(T0 + 3610, G, [], 5, 5, 3, False)[0])
+                self.assertEqual(c.decide(T0 + 4510, G, [], 5, 5, 3, False)[0], 6)
+
+    def test_item2_losing_demand_resets_the_raise_hold(self):
+        for busy, waiting in ((4, 3), (5, 0)):
+            with self.subTest(busy=busy, waiting=waiting):
+                c = self.controller()
+                c.decide(T0, G, [], 5, 5, 3, False)
+                c.decide(T0 + 600, G, [], 5, busy, waiting, False)
+                self.assertIsNone(c.decide(T0 + 610, G, [], 5, 5, 3, False)[0])
+                self.assertIsNone(c.decide(T0 + 1509, G, [], 5, 5, 3, False)[0])
+                self.assertEqual(c.decide(T0 + 1510, G, [], 5, 5, 3, False)[0], 6)
+
+    def test_item2_green_time_starts_after_earlier_demand(self):
+        c = self.controller()
+        c.decide(T0, "STEADY", [], 5, 5, 3, False)
+        c.decide(T0 + 3600, G, [], 5, 5, 3, False)
+        self.assertIsNone(c.decide(T0 + 4499, G, [], 5, 5, 3, False)[0])
+        self.assertEqual(c.decide(T0 + 4500, G, [], 5, 5, 3, False)[0], 6)
+
+    def test_item2_green_interruption_restarts_joint_hold(self):
+        c = self.controller()
+        c.decide(T0, G, [], 5, 5, 3, False)
+        c.decide(T0 + 600, "STEADY", [], 5, 5, 3, False)
+        c.decide(T0 + 610, G, [], 5, 5, 3, False)
+        self.assertIsNone(c.decide(T0 + 1509, G, [], 5, 5, 3, False)[0])
+        self.assertEqual(c.decide(T0 + 1510, G, [], 5, 5, 3, False)[0], 6)
+
+    def test_item2_configured_hold_and_waiter_threshold_apply(self):
+        c = self.controller(**{"slots.raise_green_minutes": 2, "slots.raise_requires_waiting": 2})
+        self.idle_green(c)
+        c.decide(T0 + 3610, G, [], 5, 5, 1, False)
+        self.assertIsNone(c.decide(T0 + 4000, G, [], 5, 5, 2, False)[0])
+        self.assertIsNone(c.decide(T0 + 4119, G, [], 5, 5, 2, False)[0])
+        self.assertEqual(c.decide(T0 + 4120, G, [], 5, 5, 2, False)[0], 6)
+
+    def test_item2_old_saved_state_does_not_credit_unknown_demand_time(self):
+        from slot_trial_helpers import settings
+        c = mmcore.SlotController(settings(), {"green_since": T0 - 3600, "last_change": T0 - 3600})
+        self.assertIsNone(c.decide(T0, G, [], 5, 5, 3, False)[0])
+
+    def test_item4_red_floor_amber_steps_and_events_stay(self):
+        c = self.controller()
+        self.assertEqual(c.decide(T0, "RED", ["trial"], 8, 8, 0, False)[0], 3)
+        self.assertIsNone(c.decide(T0 + 10, "RED", [], 3, 3, 0, False)[0])
+        c = self.controller()
+        self.assertEqual(c.decide(T0, "AMBER", [], 6, 6, 0, False)[0], 5)
+        self.assertIsNone(c.decide(T0 + 119, "AMBER", [], 5, 5, 0, False)[0])
+        self.assertEqual(c.decide(T0 + 120, "AMBER", [], 5, 5, 0, False)[0], 4)
+        for event in ("guard-kill", "timing-failure"):
+            self.assertEqual(self.controller().decide(T0, G, [], 6, 6, 0, False, events=[event])[0], 5)
+
+    def test_item4_raise_one_step_ceiling_and_exclusive_waiter_stay(self):
+        for slots, wx, expected in ((5, False, 6), (10, False, None), (5, True, None)):
+            c = self.controller()
+            c.decide(T0, G, [], slots, slots, 3, wx)
+            with self.subTest(slots=slots, wx=wx):
+                self.assertEqual(c.decide(T0 + 900, G, [], slots, slots, 3, wx)[0], expected)
+                if expected is not None:
+                    self.assertIsNone(c.decide(T0 + 901, G, [], 6, 6, 3, False)[0])
+
+    def test_item4_red_and_trim_holds_stay(self):
+        for event in ("red", "trim"):
+            c = self.controller()
+            c.decide(T0, "RED" if event == "red" else G, [], 3, 3, 3, False,
+                     events=["trim"] if event == "trim" else [])
+            c.decide(T0 + 1, G, [], 3, 3, 3, False)
+            with self.subTest(event=event):
+                self.assertIsNone(c.decide(T0 + 1799, G, [], 3, 3, 3, False)[0])
+                self.assertEqual(c.decide(T0 + 1800, G, [], 3, 3, 3, False)[0], 4)
+
+    def test_item4_red_and_amber_still_override_pin(self):
+        pin = {"slots": 7, "until": T0 + 3600, "reason": "trial"}
+        self.assertEqual(self.controller().decide(T0, G, [], 5, 0, 0, False, override=pin)[0], 7)
+        self.assertEqual(self.controller().decide(T0, "RED", [], 7, 7, 0, False, override=pin)[0], 3)
+        self.assertEqual(self.controller().decide(T0, "AMBER", [], 7, 7, 0, False, override=pin)[0], 6)
+
+
+class SlotTrialSettings(TempData):
+    def test_item1_new_load1_setting_default_and_schema_range(self):
+        key = "slots.green_load1_per_core"
+        self.assertEqual(mmcore.defaults().get(key), 0.8)
+        schema = mmcore.settings_json_schema()["properties"][key]
+        self.assertEqual((schema["type"], schema["minimum"], schema["maximum"]), ("number", 0.1, 4))
+
+    def test_item1_new_load1_setting_accepts_endpoints_and_rejects_bad_values(self):
+        key = "slots.green_load1_per_core"
+        self.assertTrue(key in mmcore.SCHEMA, "validation must recognize " + key)
+        for value in (0.1, 0.8, 1, 4):
+            with self.subTest(valid=value):
+                self.assertEqual(mmcore.validate(base_settings(**{key: value})), [])
+        for value in (0.099, 4.001, 0, -1, True, False, "0.8", None, float("nan"), float("inf")):
+            with self.subTest(invalid=value):
+                self.assertTrue(any(p.startswith(key) for p in mmcore.validate(base_settings(**{key: value}))))
+        missing = base_settings()
+        del missing[key]
+        self.assertIn(key + ": missing", mmcore.validate(missing))
+
+    def test_item1_new_load1_setting_loads_override_and_keeps_last_good(self):
+        key = "slots.green_load1_per_core"
+        self.write_settings(**{key: 1.2})
+        st = mmcore.Settings()
+        self.assertEqual((st.load() or {}).get(key), 1.2)
+        self.assertIsNone(st.problem)
+        self.write_settings(**{key: 4.01})
+        self.assertEqual(st.load()[key], 1.2)
+        self.assertTrue(st.problem)
+
+    def test_item4_existing_hold_cpu_defaults_and_ranges_stay(self):
+        for key, default, lo, hi in (("slots.raise_green_minutes", 15, 1, 240),
+                                     ("queue.slot_cpu_cores", 4, 0.5, 64)):
+            with self.subTest(key=key):
+                self.assertEqual(mmcore.defaults()[key], default)
+                self.assertEqual(mmcore.SCHEMA[key], ("num", lo, hi))
+                for value in (lo, hi):
+                    self.assertEqual(mmcore.validate(base_settings(**{key: value})), [])
+                for value in (lo - 0.01, hi + 0.01, True, "4"):
+                    self.assertTrue(any(p.startswith(key) for p in mmcore.validate(base_settings(**{key: value}))))
+
+
+class SlotTrialGate(TempData):
+    def test_item4_gate_denies_fresh_red_and_opens_for_other_states_and_stale(self):
+        cfg = {"launch_tools": ["Agent"]}
+        s = base_settings(**{"launch_gate.enabled": True})
+        data = {"tool_name": "Agent"}  # Input only; no agent program is launched.
+        for state in ("RED", "AMBER", "STEADY", "GREEN"):
+            for age in (0, 61):
+                mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps(
+                    {"time": NOW - age, "state": state, "red_since": NOW - 60, "reasons": ["trial"]}))
+                with self.subTest(state=state, age=age):
+                    result = ad_deliver_claude.gate_decision(data, s, NOW, cfg)
+                    if state == "RED" and age == 0:
+                        self.assertTrue(result.startswith("E_GATE_RED"), result)
+                    else:
+                        self.assertIsNone(result)
+
+    def test_item4_gate_still_fails_open_for_missing_status_settings_off_and_expired_red(self):
+        cfg, data = {"launch_tools": ["Agent"]}, {"tool_name": "Agent"}
+        s = base_settings(**{"launch_gate.enabled": True})
+        self.assertIsNone(ad_deliver_claude.gate_decision(data, s, NOW, cfg))
+        mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps(
+            {"time": NOW, "state": "RED", "red_since": NOW - s["launch_gate.max_minutes"] * 60 - 1}))
+        self.assertIsNone(ad_deliver_claude.gate_decision(data, s, NOW, cfg))
+        self.assertIsNone(ad_deliver_claude.gate_decision(data, None, NOW, cfg))
+        mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps(
+            {"time": NOW, "state": "RED", "red_since": NOW - 60}))
+        mmcore.write_atomic(os.path.join(self.data, "off.json"), json.dumps({"off": True}))
+        self.assertIsNone(ad_deliver_claude.gate_decision(data, s, NOW, cfg))
+
+
 class Logs(TempData):
     def test_own_logs_rotate_to_one_old_copy(self):
         f = os.path.join(self.data, "x.log")

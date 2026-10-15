@@ -130,6 +130,11 @@ overrides only the keys it names; an unknown key or a bad value is a problem (`S
 values stay in force. The public defaults are safe: `mode.observe = true`, `mode.slot_writes = "off"`,
 `deletes.enabled = false`, `launch_gate.enabled = false`, `pause_newest_call.enabled = false`, `banner.enabled = false`.
 
+GREEN needs load1 strictly below `slots.green_load1_per_core` times the core count (default 0.8, range 0.1-4), as well
+as the load5 band. A slot raise needs `slots.raise_green_minutes` of GREEN while enough calls wait and all slots stay
+busy. `queue.slot_cpu_cores` is the CPU cap per held slot: each call's process tree is counted once, with one alert
+per call after two readings over its cap.
+
 ## Glossary
 
 States: `GREEN` fine; `STEADY` busy but stable (no raise); `AMBER` slots down one step; `RED` slots to the floor;

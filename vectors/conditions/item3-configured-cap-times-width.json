@@ -1,0 +1,39 @@
+{
+ "case": "item3-configured-cap-times-width",
+ "expected": [],
+ "function": "conditions",
+ "input": {
+  "now": 1800000000.0,
+  "snap": {
+   "queue": {
+    "busy": [
+     {
+      "label": "W 4100 trial",
+      "mode": "W",
+      "pid": 4100,
+      "since": 1799999940.0,
+      "slot": ".gate.lock"
+     },
+     {
+      "label": "W 4100 trial",
+      "mode": "W",
+      "pid": 4100,
+      "since": 1799999940.0,
+      "slot": ".slot.2"
+     }
+    ],
+    "slots": 5,
+    "tickets": []
+   },
+   "slot_cpu": {
+    ".gate.lock": 5.8,
+    ".slot.2": 5.8
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {
+  "queue.slot_cpu_cores": 3,
+  "slots.green_load1_per_core": 0.8
+ }
+}

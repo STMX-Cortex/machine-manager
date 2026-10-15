@@ -88,6 +88,7 @@
   "slots.cores",
   "slots.floor",
   "slots.green_free_pct",
+  "slots.green_load1_per_core",
   "slots.green_load5",
   "slots.green_sys_pct",
   "slots.hold_after_red_minutes",
@@ -526,6 +527,11 @@
    "type": "number",
    "minimum": 0,
    "maximum": 100
+  },
+  "slots.green_load1_per_core": {
+   "type": "number",
+   "minimum": 0.1,
+   "maximum": 4
   },
   "slots.green_load5": {
    "type": "number",
