@@ -448,8 +448,9 @@ def _utc_epoch(ts):
 
 
 def cache_5m(project_dir, now, window=3600):
-    """Tokens written to the 5-min and 1-h prompt caches by subagents in the last hour (each message id once)."""
-    m5 = h1 = 0
+    """Recent subagent cache tokens, once per message id; overflowing sums are unknown (None)."""
+    m5 = h1 = 0.0
+    skipped = 0
     seen = set()
     try:
         sessions = os.listdir(project_dir)
@@ -469,27 +470,45 @@ def cache_5m(project_dir, now, window=3600):
                 with open(fp, "rb") as f:
                     for raw in f:
                         if b"ephemeral_5m" not in raw:
+                            skipped += 1
                             continue
                         try:
                             d = _usage_json(raw)
+                            if not isinstance(d, dict):
+                                raise ValueError("transcript line is not an object")
                             t = _utc_epoch(d.get("timestamp", ""))
-                        except (ValueError, TypeError):
+                            msg = d.get("message")
+                            if not isinstance(msg, dict):
+                                raise ValueError("transcript message is not an object")
+                            mid = msg.get("id")
+                            if not isinstance(mid, str) or not mid:
+                                raise ValueError("transcript message id is not a string")
+                            usage = msg.get("usage")
+                            if not isinstance(usage, dict):
+                                raise ValueError("transcript usage is not an object")
+                            cc = usage.get("cache_creation")
+                            if not isinstance(cc, dict):
+                                raise ValueError("transcript cache creation is not an object")
+                        except (ValueError, TypeError, RecursionError):
+                            skipped += 1
                             continue
-                        msg = d.get("message") or {}
-                        mid = msg.get("id")
                         if now - t > window or mid in seen:
+                            skipped += 1
                             continue
                         seen.add(mid)
-                        cc = (msg.get("usage") or {}).get("cache_creation") or {}
                         m = cc.get("ephemeral_5m_input_tokens")
                         h = cc.get("ephemeral_1h_input_tokens")
-                        if type(m) in (int, float) and math.isfinite(m):
+                        if m5 is not None and type(m) in (int, float) and math.isfinite(m):
                             m5 += m
-                        if type(h) in (int, float) and math.isfinite(h):
+                            if not math.isfinite(m5):
+                                m5 = None
+                        if h1 is not None and type(h) in (int, float) and math.isfinite(h):
                             h1 += h
+                            if not math.isfinite(h1):
+                                h1 = None
             except OSError:
                 continue
-    return {"m5": m5, "h1": h1}
+    return {"m5": m5, "h1": h1, "skipped": skipped}
 
 
 
