@@ -5,6 +5,7 @@ One result file per group in tests/results/. --quick skips the slow and live gro
 Temporary folders go under MM_TEST_TMP (default: the system temp folder); each test removes its own."""
 import io
 import os
+from pathlib import Path
 import sys
 import time
 import unittest
@@ -14,7 +15,9 @@ sys.path.insert(0, HERE)
 
 GROUPS = {
     "core": ["test_core"],            # T1 parsers, T6 alerts, T7 controller, T10 names, T12 settings, B1 masking
-    "usage_rows": ["test_usage_rows", "test_usage_rows_review"],  # coarse rule items 1-6 and review regressions
+    "usage_rows": ["test_usage_rows"] + [
+        path.stem for path in sorted(Path(HERE).glob("test_usage_rows_review*.py"))
+    ],                              # coarse rule items 1-6 and every review round
     "vectors": ["test_vectors"],      # every vector, the replays (T2-T4), the schemas
     "supervisor": ["test_supervisor"],  # T5 tick errors and dry run, T7 slot writes and pause, T12, B2 off, B3 check
     "watchdog": ["test_watchdog"],    # T5
