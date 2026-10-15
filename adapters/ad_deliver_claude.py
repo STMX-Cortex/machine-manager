@@ -317,7 +317,10 @@ def hook_process():
 def read_usage(file, now, s=None):
     """Current usage levels in percent; unknown rows retain their stale-source reasons."""
     def number(v):
-        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        try:
+            return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        except OverflowError:
+            return False
 
     try:
         s = mmcore.defaults() if s is None else s
@@ -347,6 +350,8 @@ def read_usage(file, now, s=None):
                 why = "read_at %.0f s in future" % (row["read_at"] - now)
             elif now - row["read_at"] > max_age:
                 why = "reading %.0f s old" % (now - row["read_at"])
+            elif type(row.get("reset_at")) in (int, float) and not number(row["reset_at"]):
+                why = "reset_at invalid"
             elif number(row.get("reset_at")) and row["reset_at"] <= now:
                 why = "window reset"
             else:

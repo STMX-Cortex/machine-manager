@@ -530,6 +530,19 @@ class Supervisor:
         events = []
         if self.due("minute", 60, now):
             self._minute(now, s, events)
+        # Usage rows may expire or become current between minute checks.
+        if self.delivery and self.delivery.usage_file():
+            u = self.delivery.usage(now, s)
+            self.cache["usage"] = u
+            stale = {k: v for k, v in self.cache["stale_sources"].items()
+                     if k != "usage" and not k.startswith("usage:")}
+            if u is None:
+                stale["usage"] = "state unreadable"
+            elif u["age_s"] > s["usage.watch_state_max_age_s"]:
+                stale["usage"] = "state %.0f min old" % (u["age_s"] / 60)
+            if u is not None:
+                stale.update({"usage:" + level: why for level, why in u.get("stale_levels", {}).items()})
+            self.cache["stale_sources"] = stale
         snap["history_hour"] = [c for c in self.cache["history_hour"] if now - c["end"] < 3600]
         snap["refused_recent"] = [c for c in self.cache["refused"] if now - c["end"] < 3600]
         snap["kills_new"] = [k for t, k in self.cache["kills_held"] if now - t < 1800]
@@ -737,15 +750,6 @@ class Supervisor:
                     stale["queue-sampler"] = "last line %.0f s old" % age
             except OSError:
                 stale["queue-sampler"] = "missing"
-        if self.delivery and self.delivery.usage_file():
-            u = self.delivery.usage(now, s)
-            self.cache["usage"] = u
-            if u is None:
-                stale["usage"] = "state unreadable"
-            elif u["age_s"] > s["usage.watch_state_max_age_s"]:
-                stale["usage"] = "state %.0f min old" % (u["age_s"] / 60)
-            if u is not None:
-                stale.update({"usage:" + level: why for level, why in u.get("stale_levels", {}).items()})
         mg = self.p.get("memory_guard") or {}
         if mg.get("state_file"):
             sw = mmcore.read_json(mmcore.expand(mg["state_file"]), None)
