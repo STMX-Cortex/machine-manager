@@ -30,6 +30,9 @@ GROUPS = {
     "deletes": ["test_deletes"],      # T14a-h, T15
     "sandbox_holds": ["test_sandbox_holds"],  # rules 46-48: git, the pause and deletes against agent-written files
     "sandbox_holds_r1": ["test_sandbox_holds_r1"],  # C-10 read-write openers, regular slot file; C-11 markers, DELETES_FAILED
+    "sandbox_holds_r2": ["test_sandbox_holds_r2"],  # C-14: QUEUE_FILE_UNREADABLE, list alerts, A1, fresh snapshot, QWAIT
+    "sandbox_holds_review": ["test_sandbox_holds_review"],    # review round 1, part C: relative launcher (R10C-1)
+    "sandbox_holds_review2": ["test_sandbox_holds_review2"],  # review round 2, part C: R2C-1 to R2C-3
     "install": ["test_install"],      # install, stop, start, rollback, init, check (temporary HOME)
     "cli": ["test_cli"],              # golden outputs and limits
     "drill": ["test_drill"],          # the drill's stop rules on a fake reader
