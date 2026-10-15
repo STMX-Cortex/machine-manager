@@ -56,5 +56,6 @@ Several machines and pools are several status records; placement takes a list of
    a worktree takes its git folder from the main repository's list, the pause takes its pids from the processes that
    hold the regular slot file open for writing, and a delete or prune refuses a path with a link not owned by root.
    Nothing an agent can write hangs or stops a tick: slot, ticket and marker files are opened without following a link
-   and without waiting, only a regular file counts, and at most 4096 bytes are read; one failing delete rule never
-   stops the others.
+   and without waiting, only a regular file counts, and at most 4096 bytes are read; an error with one file costs only
+   that file; one failing delete rule never stops the others. Waiting calls and unreadable queue files raise one alert
+   each (`QWAIT`, `QUEUE_FILE_UNREADABLE`), never one per file.

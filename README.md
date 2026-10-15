@@ -152,11 +152,16 @@ profile names:
    `pause_newest_call.lsof_timeout_s`), never from its label text; a read-only opener (a waiter's scan) is never paused
    and never named. Each one whose argument list runs the queue's launcher (profile `queue.launcher`, named by its
    absolute path, or by a path relative to that process's working folder; real paths compared) is paused with its
-   process tree. Any other process is never paused: `PAUSE_REFUSED` names the slot file and its pid. A waiter that
-   tries a slot has it open read-write for a moment (an accepted limit).
+   process tree, as the process list shows it just before the signals (read afresh, never an older reading). Any other
+   process is never paused: `PAUSE_REFUSED` names the slot file and its pid. A held slot with no write opener (a
+   read-only lock, whose holder lsof cannot show) pauses nothing: `PAUSE_REFUSED` names the slot. A waiter that tries
+   a slot has it open read-write for a moment (an accepted limit).
 3. **Slot and ticket files.** The queue read and the evidence bundle open each slot and ticket file without following a
-   link and without waiting, require a regular file and read at most 4096 bytes. A link, a FIFO or any other kind there
-   counts as not held, is never paused through, and raises `SLOT_NOT_A_FILE` naming the path.
+   link and without waiting, require a regular file and read at most 4096 bytes. An error costs only that file. A link,
+   a FIFO, a socket or any other kind there counts as not held, is never paused through, and raises `SLOT_NOT_A_FILE`
+   naming the path. A regular file that cannot be opened or read (mode 000) counts as not held and raises one
+   `QUEUE_FILE_UNREADABLE` alert, however many there are: the count and the first 5 paths. Waiting calls raise one
+   `QWAIT` alert (the count and the oldest call), never one per ticket.
 4. **Links.** Deletes and prunes (`cache_entries`, `command_per_dir`, the cleanup list's commands) check every
    component of the configured folder's path, and of each entry below it, with lstat. A link owned by root (`/tmp`,
    `/var`) is allowed; any other link, or a real path outside the folder, refuses: a KEEP line in `deletes.log` (a KEEP
@@ -164,8 +169,12 @@ profile names:
    folder descriptors opened without following a link, so a folder swapped for a link after the find is never entered.
 5. **Markers and failures.** A cache's marker file is opened the same way (no link, no wait, a regular file only, at most
    4096 bytes, invalid UTF-8 replaced): a link, a FIFO or a folder there is no marker. One delete rule that fails never
-   stops the others or the cleanup list: its KEEP line in `deletes.log` and `DELETES_FAILED` name the rule (or
-   `cleanup_list`) and the error.
+   stops the others or the cleanup list: its KEEP line in `deletes.log` (`rule=<id>`) and `DELETES_FAILED` name the
+   rule and the error. A cleanup list that fails stops no rule: its KEEP line in `deletes.log` (`rule=cleanup_list`)
+   and `DELETES_FAILED` name it. A failure of the whole pass (`deletes_job`) means no rule or list result that time:
+   `DELETES_FAILED` names `deletes_job` and the error. The cleanup list's alerts (`CLEANUP_LIST`, its `LINK_SKIPPED`
+   paths, `DELETES_FAILED` for `cleanup_list`) keep their state until the list runs again
+   (`deletes.cleanup_list_hours`), not only until the next deletes pass.
 
 ## Glossary
 
@@ -179,10 +188,12 @@ Alerts:
 ended a process; `GUARD_DOWN` the memory guard is not alive; `DISK_LOW`, `DISK_TREND` free disk; `CACHE_BIG` the build
 cache is large; `TRIM_NEEDED` a trim waits for a drained queue; `TRIM_DONE`, `TRIM_REFUSED` the trim's end;
 `CLEANUP_LIST` candidates for a person; `CODEX95`, `CODEX98`, `CLAUDE98`, `CLAUDE_PROJ`, `FIVE_H` plan usage;
-`CACHE_5M` short prompt-cache writes; `QWAIT` a queue call waits long; `HEAD_BLOCK` an exclusive call blocks the queue;
-`PAUSE_REFUSED` a process that is not the queue's launcher has the newest call's slot file open for writing;
+`CACHE_5M` short prompt-cache writes; `QWAIT` queue calls wait long (one alert: the count and the oldest);
+`HEAD_BLOCK` an exclusive call blocks the queue; `PAUSE_REFUSED` the newest call's slot file is held by a process
+that is not the queue's launcher, or by a read-only lock;
 `SLOT_NOT_A_FILE` a queue slot or ticket path is not a regular file; `LINK_SKIPPED` a delete or prune path goes through
-a link; `DELETES_FAILED` a delete rule or the cleanup list failed;
+a link; `DELETES_FAILED` a delete rule, the cleanup list or the whole deletes pass failed; `QUEUE_FILE_UNREADABLE`
+queue slot or ticket files cannot be opened or read;
 `LONG_CALL` a call runs long; `REFUSED` the queue refused a call; `SLOT_CPU` a slot uses much CPU; `IDLE_ROOM` the
 queue is idle; `FSEV` the file-event daemon is large; `POWER` on battery; `RESUMED` the machine slept;
 `RECIPIENT_WAIT` the recipient waits on one tool call; `JOB_DEAD` a listed job died without a result;

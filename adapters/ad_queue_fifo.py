@@ -5,12 +5,14 @@ a sampler log (one line a minute) and a history log (one tab-separated row per f
 (profile queue.launcher) runs a command as a shared call, or with --exclusive as the only call.
 
 Interface (PORTING.md, "Adapters"): read(now) -> {slots, busy[{slot, mode, pid, label, since, kind}],
-tickets[{name, mode, age_s, label, kind}], not_files[path]}; slots_path(); sample_log(); history_log();
-last_sample(now); parse_history(line); kind_of(text, mode); exclusive_argv(cmd) and exclusive_env(); shared_argv(cmd);
-slot_file(name); runs_launcher(argv, cwd).
+tickets[{name, mode, age_s, label, kind}], not_files[path], unreadable[path]}; slots_path(); sample_log();
+history_log(); last_sample(now); parse_history(line); kind_of(text, mode); exclusive_argv(cmd) and exclusive_env();
+shared_argv(cmd); slot_file(name); runs_launcher(argv, cwd).
 It reads only: it never writes, unlinks or takes a lock that blocks the queue (a shared flock test, released at once).
-Each slot and ticket file is opened without following a link and without waiting (mmread.flock_held): a path there that
-is not a regular file (a link, a FIFO) counts as not held and is listed in `not_files` (the SLOT_NOT_A_FILE alert).
+Each slot and ticket file is opened without following a link and without waiting (mmread.flock_held), and an error
+costs only that file: a path there that is not a regular file (a link, a FIFO, a socket) counts as not held and is
+listed in `not_files` (the SLOT_NOT_A_FILE alert); a regular file that cannot be opened or read (mode 000) counts as
+not held and is listed in `unreadable` (the QUEUE_FILE_UNREADABLE alert).
 A busy entry's pid and label are text a call writes, and agents can write them too: they never choose a process to
 signal. The pause takes its pids from the processes that have the slot file open (runs_launcher), never from this text.
 """
@@ -73,14 +75,14 @@ def read_queue(d, now=None, kind_of=None):
             slots = max(1, min(int(f.read().split()[0]), 16))
     except (OSError, ValueError, IndexError):
         slots = None
-    busy, not_files = [], []
+    busy, problems = [], {mmread.NOT_A_FILE: [], mmread.UNREADABLE: []}
     names = [".gate.lock"] + sorted((n for n in os.listdir(d) if re.fullmatch(r"\.slot\.[0-9]+", n)),
                                     key=lambda n: int(n.split(".")[-1]))
     for name in names:
         p = os.path.join(d, name)
-        held, line, odd = mmread.flock_held(p)
-        if odd:
-            not_files.append(p)
+        held, line, problem = mmread.flock_held(p)
+        if problem:
+            problems[problem].append(p)
         if held:
             mode = line[:1] if line and line[:2] in ("S ", "W ", "X ") else "S"
             m = re.match(r"^(?:[SWX] )?(\d+) ", line or "")
@@ -99,9 +101,9 @@ def read_queue(d, now=None, kind_of=None):
     for name in entries:
         if name.startswith("."):
             continue
-        held, line, odd = mmread.flock_held(os.path.join(qdir, name))
-        if odd:
-            not_files.append(os.path.join(qdir, name))
+        held, line, problem = mmread.flock_held(os.path.join(qdir, name))
+        if problem:
+            problems[problem].append(os.path.join(qdir, name))
         if not held:
             continue  # a dead ticket: the queue removes it; we only skip it
         try:
@@ -111,7 +113,8 @@ def read_queue(d, now=None, kind_of=None):
         mode = line[:1] if line and line[:2] in ("S ", "W ", "X ") else "O"
         tickets.append({"name": name, "mode": mode, "age_s": None if born is None else now - born, "label": line,
                         "kind": kind_of(line, mode) if kind_of else None})
-    return {"slots": slots, "busy": busy, "tickets": tickets, "not_files": not_files}
+    return {"slots": slots, "busy": busy, "tickets": tickets, "not_files": problems[mmread.NOT_A_FILE],
+            "unreadable": problems[mmread.UNREADABLE]}
 
 
 class Queue:

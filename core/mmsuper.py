@@ -119,26 +119,43 @@ def sizes_job(paths, delivery):
     return {"sizes": sizes, "cache5m": delivery.cache_5m(time.time()) if delivery else None, "at": time.time()}
 
 
+def list_part(res):
+    """The cleanup list's part of a deletes result ({time, cleanup, link_skipped, errors}; {} when none): its `list`,
+    or the `cleanup` of a result written before the list kept its own part."""
+    res = res if isinstance(res, dict) else {}
+    if isinstance(res.get("list"), dict):
+        return res["list"]
+    return {"cleanup": res["cleanup"]} if res.get("cleanup") else {}
+
+
 def deletes_job(s, now, enabled, ctx, with_list, live_spec, mid):
+    """One deletes pass: the rules, and the cleanup list when it is due. The rules' alerts (LINK_SKIPPED,
+    DELETES_FAILED) hold until the next pass; the list's part (`list`: CLEANUP_LIST, its LINK_SKIPPED paths,
+    DELETES_FAILED for cleanup_list) is carried over from the last result until the list runs again."""
     run = mmdelete.Run(s, ctx, enabled=enabled, now=now, live_spec=live_spec, mid=mid)
     run.all()
     res = {"time": now, "enabled": enabled, "would_bytes": run.would, "freed_bytes": run.freed,
            "keep": sum(1 for l in run.lines if " KEEP " in l), "lines": len(run.lines),
            "link_skipped": list(run.link_skipped),  # the LINK_SKIPPED alerts (rule 48)
-           "errors": list(run.errors)}  # [rule id or "cleanup_list", error]: the DELETES_FAILED alerts
+           "errors": list(run.errors)}  # [rule id, error]: the DELETES_FAILED alerts
     if with_list:
+        lst = {"time": now, "link_skipped": [], "errors": []}
         try:
             items = mmdelete.cleanup_list(ctx, now)
-        except Exception as e:  # the rules above ran; DELETES_FAILED names the list
-            items = None
-            res["errors"].append(["cleanup_list", mmdelete.error_text(e)])
-    if with_list and items is not None:
-        mmcore.write_atomic(mmcore.path("state", "cleanup-list.json"),
-                            json.dumps(mmcore.stamp({"time": now, "items": items}, mid=mid), indent=1))
-        cands = [i for i in items if i.get("command")]  # KEEP items (skipped trees and links) are no candidates
-        res["cleanup"] = {"time": now, "count": len(cands), "bytes": sum(i["bytes"] or 0 for i in cands),
-                          "top": sorted(cands, key=lambda i: -(i["bytes"] or 0))[:5]}
-        res["link_skipped"] += [i["path"] for i in items if i.get("link") and i["path"] not in res["link_skipped"]]
+        except Exception as e:  # the rules above ran; DELETES_FAILED names the list, deletes.log has its KEEP line
+            why = mmdelete.error_text(e)
+            lst["errors"].append(["cleanup_list", why])
+            run.log("KEEP", "cleanup_list", "-", guard="cleanup list failed: " + why)
+        else:
+            mmcore.write_atomic(mmcore.path("state", "cleanup-list.json"),
+                                json.dumps(mmcore.stamp({"time": now, "items": items}, mid=mid), indent=1))
+            cands = [i for i in items if i.get("command")]  # KEEP items (skipped trees and links) are no candidates
+            lst["cleanup"] = {"time": now, "count": len(cands), "bytes": sum(i["bytes"] or 0 for i in cands),
+                              "top": sorted(cands, key=lambda i: -(i["bytes"] or 0))[:5]}
+            lst["link_skipped"] = [i["path"] for i in items if i.get("link")]
+    else:  # the list did not run: its last state holds
+        lst = list_part(mmcore.read_json(mmcore.path("state", "deletes-last.json"), None))
+    res["list"] = lst
     mmcore.write_atomic(mmcore.path("state", "deletes-last.json"), json.dumps(res, sort_keys=True))
     return res
 
@@ -271,12 +288,14 @@ class Pauser:
     def start_time(pid):
         return mmrecover.start_time(pid)
 
-    def pause(self, busy, procs, queue, lsof_timeout):
+    def pause(self, busy, queue, lsof_timeout):
         """None when there is nothing to pause; else {"busy": the newest entry, "slot": its file, "paused": [pids],
-        "refused": [write-access opener pids not paused], "failed": why no opener could be read, or None,
-        "not_a_file": the slot path when it is not a regular file (then lsof never runs on it), or None}.
+        "refused": [write-access opener pids not paused], "failed": why the pause was refused without such a pid, or
+        None, "not_a_file": the slot path when it is not a regular file (then lsof never runs on it), or None}.
         Candidates are the processes that have the slot file open with write access (the launcher holds it read-write);
-        a read-only opener (a waiter's scan) is never paused and never named."""
+        a read-only opener (a waiter's scan) is never paused and never named. A held slot with no write opener (a
+        read-only lock, whose holder lsof cannot show) is refused by its slot. The process tree is read afresh just
+        before the signals, never taken from an older reading."""
         holders = [b for b in busy if b.get("since")]
         if not holders or self.st:
             return None
@@ -297,11 +316,22 @@ class Pauser:
         if openers is None:
             out["failed"] = "lsof failed"
             return out
+        if not openers:
+            if mmread.flock_held(slot)[0]:
+                out["failed"] = ("it is locked but no process has it open for writing (a read-only lock; lsof cannot "
+                                 "show its holder)")
+            return out  # else the call ended between the queue read and now: nothing to pause
+        # a relative launcher word is resolved against the process's working folder (asked only when needed)
+        launchers = [pid for pid in openers
+                     if queue.runs_launcher(mmread.proc_argv(pid), lambda pid=pid: mmread.proc_cwd(pid, lsof_timeout))]
+        procs = mmread.read_ps() if launchers else []  # this moment's process tree, never an older reading
+        if procs is None:
+            out["failed"] = "ps failed"
+            out["refused"] = [pid for pid in openers if pid not in launchers]
+            return out
         tree = []  # each launcher, then its descendants (an opener among them inherited the file and goes with it)
-        for pid in openers:
-            # a relative launcher word is resolved against the process's working folder (asked only when needed)
-            if queue.runs_launcher(mmread.proc_argv(pid), lambda pid=pid: mmread.proc_cwd(pid, lsof_timeout)):
-                tree += [d for d in mmread.descendants(procs, pid) if d not in tree]
+        for pid in launchers:
+            tree += [d for d in mmread.descendants(procs, pid) if d not in tree]
         out["refused"] = [pid for pid in openers if pid not in tree]
         plan = {}
         for pid in tree:
@@ -630,12 +660,15 @@ class Supervisor:
                 if self.deletes.kick(s, now, deletes_on, self.delete_ctx, with_list, self.live_spec, self.mid) and with_list:
                     self.state["cleanup_at"] = now
         dl = self.cache.get("deletes") or {}
-        if dl.get("cleanup"):
-            snap["cleanup"] = dl["cleanup"]
-        snap["link_skipped"] = dl.get("link_skipped") or []
-        snap["deletes_failed"] = list(dl.get("errors") or [])
-        if self.deletes.error:  # the whole deletes job failed (outside any rule)
+        lst = list_part(dl)  # the cleanup list's alerts hold until the list runs again
+        if lst.get("cleanup"):
+            snap["cleanup"] = lst["cleanup"]
+        snap["link_skipped"] = list(dl.get("link_skipped") or [])
+        snap["link_skipped"] += [p for p in lst.get("link_skipped") or [] if p not in snap["link_skipped"]]
+        snap["deletes_failed"] = list(dl.get("errors") or []) + list(lst.get("errors") or [])
+        if self.deletes.error:  # the whole deletes job failed (outside any rule): no result of that pass
             snap["deletes_failed"].append(["deletes_job", self.deletes.error])
+        snap["queue_unreadable"] = list((q or {}).get("unreadable") or [])  # QUEUE_FILE_UNREADABLE
         snap["pause_refused"] = self.state.get("pause_refused")
         # a slot or ticket path that is not a regular file: from the queue read, and from the pause's own check
         snap["slot_not_a_file"] = sorted(set((q or {}).get("not_files") or [])
@@ -897,7 +930,7 @@ class Supervisor:
                     newest = max(busy, key=lambda b: b["since"])
                     self.log_decision("%s WOULD-PAUSE %s (actions off)" % (mmcore.now_local(now), newest.get("label")))
             else:
-                got = p.pause(q["busy"], self.cache.get("procs") or [], self.queue, s["pause_newest_call.lsof_timeout_s"])
+                got = p.pause(q["busy"], self.queue, s["pause_newest_call.lsof_timeout_s"])
                 if got and got["paused"]:
                     self.log_decision("%s PAUSE %s pids %s" % (mmcore.now_local(now), got["busy"].get("label"), got["paused"]))
                 if got and got["not_a_file"]:

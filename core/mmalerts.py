@@ -8,6 +8,10 @@ bands, repeat, clear and ack (mmdecide.alert_raise / alert_absent). Pool (CI) co
 import hashlib
 import shlex
 
+# Paths QUEUE_FILE_UNREADABLE names (design C-14, C-15): exactly this many when more files cannot be read; the count in
+# its text covers the rest, so one alert stays short however many files an agent makes.
+UNREADABLE_NAMED = 5
+
 
 def _c(key, name, level, text, value=None, band=None, worse="up", command=None, investigate=None):
     return {"key": key, "name": name, "level": level, "text": text, "value": value, "band": band, "worse": worse,
@@ -120,11 +124,13 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
     q = g("queue")
     if q and q.get("slots"):
         slots, busy, tickets = q["slots"], q.get("busy", []), q.get("tickets", [])
-        for t in tickets:
-            age = t.get("age_s")
-            if age is not None and age > s["queue.wait_minutes"] * 60:
-                out.append(_c("QWAIT:" + t["name"], "QWAIT", "ATTENTION", "queue call waits %.0f min: %s"
-                              % (age / 60, (t.get("label") or "")[:120]), value=age / 60, band=10))
+        waits = [t for t in tickets if t.get("age_s") is not None and t["age_s"] > s["queue.wait_minutes"] * 60]
+        if waits:  # one key for all waiting calls (C-14): a ticket's name, which agents choose, is never a key
+            oldest = max(waits, key=lambda t: t["age_s"])
+            out.append(_c("QWAIT:calls", "QWAIT", "ATTENTION",
+                          "%d queue call(s) wait over %g min; the oldest waits %.0f min: %s"
+                          % (len(waits), s["queue.wait_minutes"], oldest["age_s"] / 60,
+                             (oldest.get("label") or "")[:120]), value=oldest["age_s"] / 60, band=10))
         if tickets and tickets[0]["mode"] in ("W", "X") and (tickets[0].get("age_s") or 0) > s["queue.head_block_minutes"] * 60 \
                 and len(busy) < slots:
             holders = ", ".join((b.get("label") or "?")[:40] for b in busy) or "none"
@@ -215,9 +221,22 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
                       "a configured delete or prune path goes through a link (or out of its folder); skipped: %s" % p,
                       command="ls -ld " + shlex.quote(p)))
     for rid, err in g("deletes_failed") or []:
+        if rid == "deletes_job":
+            why = "the whole pass stopped: no rule or cleanup-list result this time"
+        elif rid == "cleanup_list":
+            why = "the delete rules ran; the list runs again after deletes.cleanup_list_hours"
+        else:
+            why = "the other rules and the cleanup list still run"
         out.append(_c("DELETES_FAILED:" + str(rid), "DELETES_FAILED", "ATTENTION",
-                      "deletes: %s failed: %s (the other rules and the cleanup list still run)" % (rid, err)))
+                      "deletes: %s failed: %s (%s)" % (rid, err, why)))
     # --- the queue's slot and ticket files: a path there that is not a regular file counts as not held
+    bad = g("queue_unreadable") or []
+    if bad:  # one key however many files (C-14): the count and the first UNREADABLE_NAMED paths
+        named = bad[:UNREADABLE_NAMED]
+        out.append(_c("QUEUE_FILE_UNREADABLE", "QUEUE_FILE_UNREADABLE", "ATTENTION",
+                      "%d queue slot or ticket file(s) cannot be opened or read; counted as not held: %s%s"
+                      % (len(bad), ", ".join(named), ", and %d more" % (len(bad) - len(named)) if len(bad) > len(named)
+                         else ""), command="ls -l " + " ".join(shlex.quote(x) for x in named)))
     for p in g("slot_not_a_file") or []:
         out.append(_c("SLOT_NOT_A_FILE:" + _h(p), "SLOT_NOT_A_FILE", "ATTENTION",
                       "a queue slot or ticket path is not a regular file (a link or a FIFO); counted as not held, "

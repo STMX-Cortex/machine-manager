@@ -412,13 +412,20 @@ class NotRegular(Exception):
 
 def open_regular(path_):
     """A read-only descriptor of the regular file at path_, opened without following a link and without waiting (a FIFO
-    opens at once). Raises NotRegular for anything else at the path, and OSError (FileNotFoundError when nothing is
-    there)."""
+    opens at once). Raises NotRegular for anything else at the path (a socket, which cannot be opened, too), and OSError
+    for a regular file that cannot be opened (FileNotFoundError when nothing is there)."""
     try:
         fd = os.open(path_, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
     except OSError as e:
         if e.errno == errno.ELOOP:  # O_NOFOLLOW on a link
             raise NotRegular(path_) from None
+        if e.errno != errno.ENOENT:  # e.g. EOPNOTSUPP for a socket, EACCES for a mode-000 file: which kind is there?
+            try:
+                regular = stat.S_ISREG(os.lstat(path_).st_mode)
+            except OSError:
+                regular = True  # the kind is unknown: the open's own error stands
+            if not regular:
+                raise NotRegular(path_) from None
         raise
     if not stat.S_ISREG(os.fstat(fd).st_mode):
         os.close(fd)
@@ -441,24 +448,34 @@ def read_regular(path_, limit=FILE_READ_MAX):
         os.close(fd)
 
 
+# flock_held's third value: why the file counts as not held (None: no problem).
+NOT_A_FILE = "not_a_file"  # a link, a FIFO, a socket or another kind that is not a regular file (SLOT_NOT_A_FILE)
+UNREADABLE = "unreadable"  # a regular file that cannot be opened or read, as a mode-000 file (QUEUE_FILE_UNREADABLE)
+
+
 def flock_held(path_):
-    """(held, first line, not_a_file): another process holds an flock on the regular file at path_. It is opened with
-    open_regular and at most FILE_READ_MAX bytes are read; a link, a FIFO or any other kind is not held, with
-    not_a_file True."""
+    """(held, first line, problem): another process holds an flock on the regular file at path_. It is opened with
+    open_regular and at most FILE_READ_MAX bytes are read. Any error costs only this file: it counts as not held, with
+    problem NOT_A_FILE (not a regular file) or UNREADABLE (any other error opening, locking or reading it); a missing
+    file is not held, with no problem."""
     try:
         fd = open_regular(path_)
     except FileNotFoundError:
-        return False, None, False
+        return False, None, None
     except NotRegular:
-        return False, None, True
+        return False, None, NOT_A_FILE
+    except OSError:
+        return False, None, UNREADABLE
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
             fcntl.flock(fd, fcntl.LOCK_UN)
-            return False, None, False
+            return False, None, None
         except BlockingIOError:
             first = os.read(fd, FILE_READ_MAX).split(b"\n", 1)[0]
-            return True, first.decode("utf-8", "replace").rstrip("\r")[:240], False
+            return True, first.decode("utf-8", "replace").rstrip("\r")[:240], None
+    except OSError:
+        return False, None, UNREADABLE
     finally:
         os.close(fd)
 
