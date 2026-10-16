@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Write the vectors (vectors/<function>/<case>.json) from hand-made inputs and the incident fixtures.
 
-The expected values come from this Python core at the time of writing; tests/test_vectors.py pins the meaning of the
+The expected values come from this Python core unless a case supplies a hand-written contract expectation;
+tests/test_vectors.py pins the meaning of the
 important ones by hand (for example: the 09:13 replay is RED at 09:11 with slots at the floor). Rerun this script only
 when a behaviour change is intended, and review the diff of vectors/ before keeping it.
 """
+import argparse
 import json
 import os
 import shutil
@@ -35,10 +37,13 @@ def series(n, **kw):
 
 
 CASES = {}
+EXPECTED = {}
 
 
-def case(fn, name, inp, over=None):
+def case(fn, name, inp, over=None, expected=None):
     CASES.setdefault(fn, []).append((name, inp, over or {}))
+    if expected is not None:
+        EXPECTED[fn, name] = expected
 
 
 # ---- classify
@@ -52,7 +57,7 @@ case("classify", "red-free", {"window": series(2, free_pct=30.0)})
 case("classify", "red-swap-growth", {"window": series(2, swap_used_mb=[500.0, 1100.0])})
 case("classify", "red-compressor-growth", {"window": series(2, comp_mb=[300.0, 2400.0])})
 case("classify", "sys-one-sample-is-not-sustained", {"window": series(2, sys_pct=[10.0, 50.0])})
-case("classify", "red-sys-sustained", {"window": series(2, sys_pct=[45.0, 48.0])})
+case("classify", "red-sys-sustained", {"window": series(2, sys_pct=[45.0, 48.0], pressure=[1, 2])})
 case("classify", "red-load1-sustained", {"window": series(2, load1=[25.0, 30.0])})
 case("classify", "red-kernel-event", {"window": series(1), "kernel_event": True})
 case("classify", "red-disk", {"window": series(1), "disk_gb": 15.0})
@@ -60,6 +65,36 @@ case("classify", "steady-incomplete", {"window": [{"t": NOW, "free_pct": 80.0}],
 case("classify", "amber-swap-30min", {"window": series(31, swap_used_mb=[500.0 + 4 * k for k in range(31)])})
 case("classify", "steady-disk-under-recover", {"window": series(3), "disk_gb": 44.0})
 case("classify", "pressure-warn-amber", {"window": series(2, pressure=2), "disk_gb": 100.0})
+
+# R-1: expectations are independent of the implementation so these vectors fail before the rule lands.
+SYS_RED = "system CPU > 40% in 2 samples"
+SYS_AMBER = [SYS_RED + ", no memory sign", "system CPU > 30% in 2 samples"]
+
+
+def sys_memory_case(name, state, reasons, over=None, **columns):
+    settings = {"slots.red_sys_needs_memory_sign": True, "slots.red_sys_comp_growth_mb_60s": 256}
+    settings.update(over or {})
+    columns.setdefault("sys_pct", [45.0, 48.0])
+    case("classify", name, {"window": series(2, **columns)}, settings, expected=[state, reasons, True])
+
+
+sys_memory_case("amber-sys-no-memory-sign", "AMBER", SYS_AMBER)
+sys_memory_case("red-sys-pressure-warn", "RED", [SYS_RED], pressure=[1, 2])
+sys_memory_case("amber-sys-past-pressure-warn", "AMBER", SYS_AMBER, pressure=[2, 1])
+sys_memory_case("red-sys-swap-small-growth", "RED", [SYS_RED], swap_used_mb=[500.0, 500.01])
+sys_memory_case("amber-sys-swap-flat", "AMBER", SYS_AMBER, swap_used_mb=[500.0, 500.0])
+sys_memory_case("amber-sys-swap-falling", "AMBER", SYS_AMBER, swap_used_mb=[501.0, 500.0])
+sys_memory_case("amber-sys-comp-under-sign-limit", "AMBER", SYS_AMBER, comp_mb=[300.0, 555.99])
+sys_memory_case("amber-sys-comp-at-sign-limit", "AMBER", SYS_AMBER, comp_mb=[300.0, 556.0])
+sys_memory_case("red-sys-comp-over-sign-limit", "RED", [SYS_RED], comp_mb=[300.0, 556.01])
+sys_memory_case("amber-sys-comp-custom-limit", "AMBER", SYS_AMBER,
+                over={"slots.red_sys_comp_growth_mb_60s": 700}, comp_mb=[300.0, 557.0])
+sys_memory_case("red-sys-comp-custom-limit", "RED", [SYS_RED],
+                over={"slots.red_sys_comp_growth_mb_60s": 64}, comp_mb=[300.0, 364.01])
+sys_memory_case("red-sys-memory-sign-disabled", "RED", [SYS_RED],
+                over={"slots.red_sys_needs_memory_sign": False})
+sys_memory_case("sys-memory-sign-one-high-sample", "STEADY", ["system CPU not under 25%"], sys_pct=[10.0, 48.0])
+sys_memory_case("red-free-with-sys-no-memory-sign", "RED", ["free 30% < 35%"], free_pct=30.0)
 
 # ---- slot_decide
 st0 = {"last_change": NOW - 3600, "green_since": NOW - 3600}
@@ -337,28 +372,35 @@ case("reboot_check", "reboot-no-last-tick", {"prev": dict(PREV, last_tick=None, 
                                              "cur": {"boot_time": NOW - 300, "now": NOW, "panics": [], "missing_jobs": []}})
 
 
-def main():
-    if os.path.isdir(VEC):
+def main(function=None):
+    # A scoped regeneration leaves separately maintained cases and shared settings intact.
+    if function is None and os.path.isdir(VEC):
         for d in os.listdir(VEC):
             if not d.startswith("_"):
                 shutil.rmtree(os.path.join(VEC, d))
-    os.makedirs(os.path.join(VEC, "_settings"), exist_ok=True)
-    with open(os.path.join(VEC, "_settings", "base.json"), "w") as f:
-        json.dump(BASE, f, indent=1, sort_keys=True)
+    if function is None:
+        os.makedirs(os.path.join(VEC, "_settings"), exist_ok=True)
+        with open(os.path.join(VEC, "_settings", "base.json"), "w") as f:
+            json.dump(BASE, f, indent=1, sort_keys=True)
     n = 0
     for fn, cases in CASES.items():
+        if function is not None and fn != function:
+            continue
         os.makedirs(os.path.join(VEC, fn), exist_ok=True)
         for name, inp, over in cases:
             s = dict(BASE, **over)
             inp = json.loads(json.dumps(inp))
-            exp = json.loads(json.dumps(FUNCTIONS[fn](inp, s)))
+            exp = EXPECTED[fn, name] if (fn, name) in EXPECTED else FUNCTIONS[fn](inp, s)
+            exp = json.loads(json.dumps(exp))
             v = {"function": fn, "case": name, "settings": "base", "settings_over": over, "input": inp, "expected": exp}
             with open(os.path.join(VEC, fn, name + ".json"), "w") as f:
                 json.dump(v, f, indent=1, sort_keys=True)
                 f.write("\n")
             n += 1
-    print("vectors=%d functions=%d" % (n, len(CASES)))
+    print("vectors=%d functions=%d" % (n, 1 if function is not None else len(CASES)))
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--function", choices=sorted(CASES), help="update only this function, keeping other cases")
+    main(parser.parse_args().function)

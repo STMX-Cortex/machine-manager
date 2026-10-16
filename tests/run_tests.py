@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 GROUPS = {
+    "red_sys_memory_sign": ["test_red_sys_memory_sign"],  # R-1: system CPU needs a current memory sign for RED
     "core": ["test_core"],            # T1 parsers, T6 alerts, T7 controller, T10 names, T12 settings, B1 masking
     "usage_rows": ["test_usage_rows", "test_usage_rows_transcript"] + [
         path.stem for path in sorted(Path(HERE).glob("test_usage_rows_review*.py"))

@@ -1,0 +1,45 @@
+{
+ "case": "amber-sys-comp-custom-limit",
+ "expected": [
+  "AMBER",
+  [
+   "system CPU > 40% in 2 samples, no memory sign",
+   "system CPU > 30% in 2 samples"
+  ],
+  true
+ ],
+ "function": "classify",
+ "input": {
+  "window": [
+   {
+    "comp_mb": 300.0,
+    "free_pct": 80.0,
+    "load1": 2.0,
+    "load5": 2.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 500.0,
+    "sys_pct": 45.0,
+    "t": 1799999940.0
+   },
+   {
+    "comp_mb": 557.0,
+    "free_pct": 80.0,
+    "load1": 2.0,
+    "load5": 2.0,
+    "pressure": 1,
+    "seg_pct": 5.0,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 500.0,
+    "sys_pct": 48.0,
+    "t": 1800000000.0
+   }
+  ]
+ },
+ "settings": "base",
+ "settings_over": {
+  "slots.red_sys_comp_growth_mb_60s": 700,
+  "slots.red_sys_needs_memory_sign": true
+ }
+}
