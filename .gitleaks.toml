@@ -10,5 +10,7 @@ paths = [
   '''^tests/test_cli\.py$''',
   '''^tests/gen_vectors\.py$''',
   '''^vectors/mask/''',
+  '''^tests/test_sandbox_holds_review6\.py$''',
+  '''^tests/test_sandbox_holds_review7\.py$''',
   '''__pycache__/''',
 ]
