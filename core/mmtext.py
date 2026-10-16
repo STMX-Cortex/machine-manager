@@ -147,9 +147,10 @@ _SECRET_RES = [
                r"|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,})"),
     None,  # private key blocks: _KEY_BEGIN and _KEY_END, line by line in mask()
     re.compile(r"(?<![A-Za-z0-9+_=-])[A-Za-z0-9+_=-]{32,}(?![A-Za-z0-9+_=-])"),
-    # a URL's password: up to its `@`, `/` and `:` included (a base64 password, C-24); a try stops at the next `://`,
-    # so a run of `://a:` costs time linear in it (R5C-1)
-    re.compile(r"(?i)(://[^/\s:@]+:)((?:[^@\s:]|:(?!//))+)(@)"),
+    # a URL's password: up to its `@`, with any `/` (a base64 password) or `:` in it (C-24), after a user name that may
+    # be empty (`redis://:<password>@host`, R7C-1); a try stops at the next `://`, so a run of `://a:` costs time
+    # linear in it (R5C-1)
+    re.compile(r"(?i)(://[^/\s:@]*:)((?:[^@\s:]|:(?!//))+)(@)"),
 ]
 _KEY_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 _KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
