@@ -183,11 +183,11 @@ class ExplainShowsNoControls(mmtest.TempData):
         self.assertIn("HEAD_BLOCK", by_name, conds)
         self.assertIn("QUEUE_FILE_UNREADABLE", by_name, conds)
         head, unreadable = by_name["HEAD_BLOCK"], by_name["QUEUE_FILE_UNREADABLE"]
-        for odd in ODD:  # the fixtures carry what the test is about
+        # the fixtures carry what the test is about: the ticket's name (HEAD_BLOCK's key, C-16) and the unreadable
+        # file's path hold every ODD character; the rule may clean its text and command at once (C-20)
+        for odd in ODD:
             self.assertIn(odd, head["key"])
-            self.assertIn(odd, unreadable["text"])
-        for odd in ("\n", "\x1b"):
-            self.assertIn(odd, unreadable["command"])
+            self.assertIn(odd, read["unreadable"][0])
         self.store_conditions(conds)
         ids = self.shown_ids()
         head_ids = [i for i in ids if i.startswith("HEAD_BLOCK:")]
@@ -220,7 +220,7 @@ class ExplainShowsNoControls(mmtest.TempData):
             key = "ODD_CMD:%d" % i
             odd_cmds[key] = "echo safe-%d" % i + odd + FORGED_LINE
             st.raise_(key, "ODD_CMD", "ATTENTION", "one odd character in the command", command=odd_cmds[key])
-        clean = "ls -l /opt/example/q | sort"
+        clean = "ls -l /opt/example/q"  # no `|`: C-20 (1) replaces it, so a command holding one is withheld
         st.raise_("CLEAN_CMD:1", "CLEAN_CMD", "ATTENTION", "a command with no control character", command=clean)
         ids = self.shown_ids()
         self.assertEqual(sorted(ids), sorted(list(odd_cmds) + ["CLEAN_CMD:1"]), ids)

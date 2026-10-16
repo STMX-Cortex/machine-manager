@@ -36,6 +36,7 @@ GROUPS = {
     "sandbox_holds_review3": ["test_sandbox_holds_review3"],  # review round 3, part C: R3C-1 to R3C-3
     "sandbox_holds_r3": ["test_sandbox_holds_r3"],  # C-17, C-19 (2): `mm explain` shows no control character
     "sandbox_holds_review4": ["test_sandbox_holds_review4"],  # review round 4, part C: R4C-1 to R4C-4
+    "sandbox_holds_c20": ["test_sandbox_holds_c20"],  # C-20: agent values cleaned and quoted in every output
     "install": ["test_install"],      # install, stop, start, rollback, init, check (temporary HOME)
     "cli": ["test_cli"],              # golden outputs and limits
     "drill": ["test_drill"],          # the drill's stop rules on a fake reader
