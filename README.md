@@ -131,6 +131,12 @@ overrides only the keys it names; an unknown key or a bad value is a problem (`S
 values stay in force. The public defaults are safe: `mode.observe = true`, `mode.slot_writes = "off"`,
 `deletes.enabled = false`, `launch_gate.enabled = false`, `pause_newest_call.enabled = false`, `banner.enabled = false`.
 
+System CPU above `slots.red_sys_pct` for `slots.sustain_samples` (defaults 40% and 2 samples) needs a current memory
+sign for RED: kernel pressure at least 2, any swap growth in the last 60 s, or compressor growth in the last 60 s
+above `slots.red_sys_comp_growth_mb_60s` (default 256 MB). Without a sign, this rule gives AMBER with a
+`no memory sign` reason. The owner can set `slots.red_sys_needs_memory_sign = false` in the data folder's
+`settings.toml` to restore system CPU alone giving RED. Other RED rules still apply independently.
+
 GREEN needs load1 strictly below `slots.green_load1_per_core` times the core count (default 0.8, range 0.1-4), as well
 as the load5 band. A slot raise needs `slots.raise_green_minutes` of GREEN while enough calls wait and all slots stay
 busy. `queue.slot_cpu_cores` is the CPU cap per held slot: each call's process tree is counted once, with one alert

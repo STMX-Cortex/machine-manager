@@ -272,6 +272,10 @@ SCHEMA = {
     "slots.red_free_pct": ("num", 0, 100), "slots.red_swap_growth_mb_60s": ("num", 1, 100000),
     "slots.red_comp_growth_mb_60s": ("num", 1, 100000), "slots.red_segments_pct": ("num", 1, 100),
     "slots.red_swap_used_of_total_pct": ("num", 1, 100), "slots.red_sys_pct": ("num", 0, 100),
+    # Default true; range false|true; authority: the owner.
+    "slots.red_sys_needs_memory_sign": ("bool", None, None),
+    # Default 256 MB in 60 s; range 1-100000 MB; authority: the owner.
+    "slots.red_sys_comp_growth_mb_60s": ("num", 1, 100000),
     "slots.red_load1_per_core": ("num", 0.1, 100), "slots.red_disk_gb": ("num", 0, 10000),
     "slots.sustain_samples": ("int", 1, 10), "slots.cores": ("int", 0, 512),
     "launch_gate.enabled": ("bool", None, None), "launch_gate.max_minutes": ("num", 0, 120),

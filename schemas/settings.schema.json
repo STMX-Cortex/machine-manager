@@ -103,6 +103,8 @@
   "slots.red_segments_pct",
   "slots.red_swap_growth_mb_60s",
   "slots.red_swap_used_of_total_pct",
+  "slots.red_sys_comp_growth_mb_60s",
+  "slots.red_sys_needs_memory_sign",
   "slots.red_sys_pct",
   "slots.sustain_samples",
   "trim.age_minutes",
@@ -603,6 +605,14 @@
    "type": "number",
    "minimum": 1,
    "maximum": 100
+  },
+  "slots.red_sys_comp_growth_mb_60s": {
+   "type": "number",
+   "minimum": 1,
+   "maximum": 100000
+  },
+  "slots.red_sys_needs_memory_sign": {
+   "type": "boolean"
   },
   "slots.red_sys_pct": {
    "type": "number",

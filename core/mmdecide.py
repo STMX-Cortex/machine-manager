@@ -51,9 +51,9 @@ def classify(window, s, disk_gb=None, kernel_event=False):
     g = growth("swap_used_mb", 60)
     if g is not None and g > s["slots.red_swap_growth_mb_60s"]:
         red.append("swap +%.0f MB in 60 s" % g)
-    g = growth("comp_mb", 60)
-    if g is not None and g > s["slots.red_comp_growth_mb_60s"]:
-        red.append("compressor +%.0f MB in 60 s" % g)
+    comp_growth = growth("comp_mb", 60)
+    if comp_growth is not None and comp_growth > s["slots.red_comp_growth_mb_60s"]:
+        red.append("compressor +%.0f MB in 60 s" % comp_growth)
     seg = get(cur, "seg_pct")
     if seg is not None and seg > s["slots.red_segments_pct"]:
         red.append("compressor segments %.0f%% of limit" % seg)
@@ -62,7 +62,16 @@ def classify(window, s, disk_gb=None, kernel_event=False):
     if used is not None and total and used / total * 100 > s["slots.red_swap_used_of_total_pct"] and g60 and g60 > 0:
         red.append("swap %.0f of %.0f MB and growing" % (used, total))
     if sustained("sys_pct", s["slots.red_sys_pct"]):
-        red.append("system CPU > %g%% in %d samples" % (s["slots.red_sys_pct"], n))
+        reason = "system CPU > %g%% in %d samples" % (s["slots.red_sys_pct"], n)
+        memory_sign = (
+            (pressure is not None and pressure >= 2)
+            or (g60 is not None and g60 > 0)
+            or (comp_growth is not None and comp_growth > s.get("slots.red_sys_comp_growth_mb_60s", 256))
+        )
+        if not s.get("slots.red_sys_needs_memory_sign", True) or memory_sign:
+            red.append(reason)
+        else:
+            amber.append(reason + ", no memory sign")
     if sustained("load1", s["slots.red_load1_per_core"] * s["slots.cores"]):
         red.append("load1 > %g in %d samples" % (s["slots.red_load1_per_core"] * s["slots.cores"], n))
     if kernel_event:
