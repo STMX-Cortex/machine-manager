@@ -442,8 +442,11 @@ class Settings:
             self.problem = str(e)[:400]
             if self.values is None:
                 kept = read_json(self.last_good_file)
-                if isinstance(kept, dict) and not validate(kept, self.real_slots):
-                    self.values = resolve(kept)
+                if isinstance(kept, dict):
+                    restored = defaults()
+                    restored.update(kept)
+                    if not validate(restored, self.real_slots):
+                        self.values = resolve(restored)
         return self.values
 
     def __getitem__(self, key):
