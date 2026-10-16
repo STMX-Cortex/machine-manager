@@ -120,8 +120,9 @@ A TOML file the tool reads and never writes. Only `name` is required; a section 
 (an external guard's heartbeat), `queue` (adapter `fifo-gates`), `kinds` (machine-only and pool job kinds), `ci`
 (adapter `github-gh`, read-only), `delivery` (adapter `claude-code-hook`), `trim` (the guarded cache trim), `deletes`
 (`rules`, `cleanup`, `forbidden_parts`, `protected_roots`), `recovery` (`expected_jobs`: `{name, match}` regular
-expressions over process command lines, checked after a Mac reboot). Placeholders: `{data}`, `{user_tmp}`, `{claude_tmp}`,
-`~`. The schema is `schemas/profile.schema.json`.
+expressions over process command lines, checked after a Mac reboot), `text_line_max` (default 4096, from 256 to
+1048576: the longest line any pattern sees, "Agent-written files", item 7). Placeholders: `{data}`, `{user_tmp}`,
+`{claude_tmp}`, `~`. The schema is `schemas/profile.schema.json`.
 
 ## Settings
 
@@ -183,7 +184,22 @@ profile names:
    JSON-quoted unless every character is a letter, a digit or one of `._/:@+,~-`. ` | do: ` comes only with the
    alert's own command. A command that would name a value cleaning changes, or that holds a control character, is
    withheld: a line shows `mm explain KEY` (the id shell-quoted when it needs it), `mm explain` shows
-   `command=withheld`, `mm cleanup` shows `do=withheld`, and `mm place` gives no commands.
+   `command=withheld`, `mm cleanup` shows `do=withheld`, and `mm place` gives no commands. Such a value is masked
+   before it is quoted, and a text is masked part by part, so a mask never takes a closing quote; a command the mask
+   changes is withheld too. The same cleaning holds in every file the tool writes that a person or a tool reads: its
+   own logs (`decisions.log`, `errors.log`, `deletes.log`, `events.jsonl`, `alerts.jsonl` and the others: one record
+   per line), the evidence bundle (each copied log cleaned line by line, a tab kept only in the tab-separated
+   `history.log` and `load.log`; every JSON file with cleaned strings; process names quoted in `ps.txt`) and the
+   banner. State files only the tool reads (`alerts-state.json`, `controller.json`, cursor files) may keep raw values;
+   every value shown from them is cleaned.
+7. **Patterns.** Every regular expression the tool runs over text an agent can make (the mask, the log, ps and
+   kernel-line parsers, the profile's patterns over labels, commands, process names and branch names) sees that text
+   split at its line feeds, each line cut to the profile's `text_line_max` characters, its end marked `[...cut]`. A
+   record ends only at a line feed: a LINE SEPARATOR, NEL or CR inside a name stays inside its record. A cut never
+   opens a gate: where a pattern decides a refusal or a guard, a line too long to see whole counts as a match (the
+   launch gate's `launch_bash_regex`: a launch while the machine is RED; `live_tools.path_regexes`: a live run, so a
+   delete or trim waits). Patterns that only show, sort or mask text use the cut line. In a kernel suspend line the
+   process name runs to the last ` [<pid>] due to `.
 
 ## Glossary
 

@@ -6,7 +6,6 @@ Python 3 standard library only (3.11+ for tomllib). Nothing here names a project
 folder from this file; project values come from a profile (TOML); live data goes to a data folder outside the code.
 The decisions are pure functions in mmdecide.
 """
-import bisect
 import fcntl
 import json
 import re
@@ -109,7 +108,11 @@ PROFILE_DEFAULTS = {
     "trim": {},
     "deletes": {"forbidden_parts": [".ssh"], "protected_roots": [], "rules": [], "cleanup": []},
     "recovery": {"expected_jobs": []},
+    "text_line_max": mmtext.TEXT_LINE_MAX_DEFAULT,  # C-22: the longest line any pattern sees (mmtext.cut)
 }
+# text_line_max's range: a line long enough for any record machine-manager parses; short enough that a pattern's cost
+# per line stays small.
+TEXT_LINE_MAX_RANGE = (256, 1 << 20)
 
 
 def _deep(base, over):
@@ -131,6 +134,11 @@ def load_profile(file=None):
     if not isinstance(prof.get("name"), str) or not prof["name"]:
         raise MMError("E_PROFILE", "profile has no name: %s" % f, 'add name = "<project>"')
     out = _deep(PROFILE_DEFAULTS, prof)
+    n = out["text_line_max"]
+    if isinstance(n, bool) or not isinstance(n, int) or not TEXT_LINE_MAX_RANGE[0] <= n <= TEXT_LINE_MAX_RANGE[1]:
+        raise MMError("E_PROFILE", "text_line_max must be a whole number from %d to %d: %s"
+                      % (TEXT_LINE_MAX_RANGE + (f,)), "correct text_line_max in the profile; mm check")
+    mmtext.set_text_line_max(n)
     out["_file"] = f
     return out
 
@@ -173,12 +181,13 @@ def append_line(path, line, max_bytes=LOG_MAX_BYTES):
     except OSError:
         pass
     with open(path, "a") as f:
-        f.write(line.rstrip("\n") + "\n")
+        f.write(mmtext.clean(line.rstrip("\n")) + "\n")  # C-17's replacement: one record per line for all (C-23)
 
 
 def log_path(p):
-    """A path for a one-line log record: as is, or JSON-quoted when it holds a space, a quote or a control character."""
-    p = str(p)
+    """A path for a one-line log record: cleaned (mmtext.clean, C-23: an agent may name it), then as is, or JSON-quoted
+    when it holds a space, a quote or a backslash."""
+    p = mmtext.clean(str(p))
     return json.dumps(p) if re.search(r'[\s"\\]', p) or not p else p
 
 
@@ -473,72 +482,8 @@ def safe_state():
 
 
 # --------------------------------------------------------------------------------------------- masking
-
-import re as _re  # noqa: E402
-
-_SECRET_RES = [
-    _re.compile(r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|_KEY|CREDENTIALS?|AUTH))(\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)"),
-    _re.compile(r"(?i)(--(?:token|password|passphrase|secret|api-key|key|auth)(?:=|\s+))(\S+)"),
-    _re.compile(r"(?i)\b(bearer|basic|token)(\s+)([A-Za-z0-9._~+/=-]{8,})"),
-    _re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{16,}|xox[abpr]-[A-Za-z0-9-]{10,}"
-                r"|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,})"),
-    _re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|$)", _re.S),
-    _re.compile(r"(?<![A-Za-z0-9+_=-])[A-Za-z0-9+_=-]{32,}(?![A-Za-z0-9+_=-])"),
-    _re.compile(r"(?i)(://[^/\s:@]+:)([^@\s]+)(@)"),
-]
-
-# A path, whose segments the long-random-word rule keeps (mask's doc: "Paths ... are kept"): a word that starts with
-# /, ~/, ./ or ../ at the start of the text or after white space, a quote, =, (, [ or ,; it runs to white space or a
-# quote. A word starting with :// (a URL) is no path: its parts stay masked as before.
-_PATH_RE = _re.compile(r"""(?:^|(?<=[\s"'=(\[,]))(?:~|\.\.?)?/[^\s"']*""")
-
-
-def mask(text):
-    """Secret-shaped parts of a text replaced by ***: KEY=value pairs with secret names, --token style flags, bearer
-    strings, known token prefixes, private key blocks, passwords in URLs and long random words (32+ chars, letters and
-    digits, high entropy). Paths (_PATH_RE: the long-random-word rule never cuts into one), hex digests and UUIDs are
-    kept."""
-    if not isinstance(text, str) or not text:
-        return text
-    t = _SECRET_RES[4].sub("***PRIVATE KEY***", text)
-    t = _SECRET_RES[0].sub(lambda m: m.group(1) + m.group(2) + "***", t)
-    t = _SECRET_RES[1].sub(lambda m: m.group(1) + "***", t)
-    t = _SECRET_RES[2].sub(lambda m: m.group(1) + m.group(2) + "***", t)
-    t = _SECRET_RES[3].sub("***", t)
-    t = _SECRET_RES[6].sub(lambda m: m.group(1) + "***" + m.group(3), t)
-    paths = [m.span() for m in _PATH_RE.finditer(t)]  # in text order, never overlapping
-    starts = [a for a, _ in paths]
-
-    def word(m):
-        i = bisect.bisect_right(starts, m.start()) - 1  # the last path starting at or before the word (C-21: no scan)
-        if i >= 0 and m.end() <= paths[i][1]:
-            return m.group(0)  # a segment of a path
-        return "***" if _random(m.group(0)) else m.group(0)
-    t = _SECRET_RES[5].sub(word, t)
-    return t
-
-
-def _random(w):
-    """A long word that looks random: letters and digits mixed, high entropy (hex digests and UUIDs stay)."""
-    import math
-    if not (_re.search(r"[0-9]", w) and _re.search(r"[A-Za-z]", w)) or _re.fullmatch(r"[0-9a-fA-F-]+", w):
-        return False
-    n = len(w)
-    ent = -sum(c / n * math.log2(c / n) for c in (w.count(ch) for ch in set(w)))
-    return ent >= 4.2
-
-
-def mask_obj(o):
-    """mask() over every string inside lists and dicts (keys too)."""
-    if isinstance(o, str):
-        return mask(o)
-    if isinstance(o, list):
-        return [mask_obj(x) for x in o]
-    if isinstance(o, tuple):
-        return tuple(mask_obj(x) for x in o)
-    if isinstance(o, dict):
-        return {mask_obj(k) if isinstance(k, str) else k: mask_obj(v) for k, v in o.items()}
-    return o
+# mmtext holds the mask (C-22: it runs on bounded lines); re-exported here for every writer.
+mask, mask_obj, mask_keep_quotes = mmtext.mask, mmtext.mask_obj, mmtext.mask_keep_quotes
 
 
 # --------------------------------------------------------------------------------------------- alerts
@@ -569,8 +514,12 @@ class AlertStore:
 
     def _append(self, st, record):
         st["seq"] += 1
-        record = dict(mask_obj(record), seq=st["seq"], time=now_local(self.clock()), machine_id=self.mid,
-                      schema_version=SCHEMA_VERSION)
+        # alerts.jsonl is read by tools (the hook, `mm wait`): every string masked and cleaned (C-23b); the command
+        # keeps its own `|`, and one that holds a control character is withheld (C-17)
+        command = record.get("command")
+        record = dict(mmtext.clean_obj(mask_obj(dict(record, command=None))), seq=st["seq"],
+                      time=now_local(self.clock()), machine_id=self.mid, schema_version=SCHEMA_VERSION)
+        record["command"] = WITHHELD_COMMAND if command and has_controls(str(command)) else command
         with open(self.log_file, "a") as f:
             f.write(json.dumps(record, sort_keys=True) + "\n")
         try:
@@ -596,7 +545,11 @@ class AlertStore:
         """One active condition. value/band: a number and the step that counts as 'worse by one band'."""
         self.seen.add(key)
         now = self.clock()
-        text, command = mask(text), mask(command)
+        # the text masked part by part, so a mask never takes the closing quote of an agent value; a command the mask
+        # would change is withheld, never stored half-masked (R5C-4)
+        text = mask_keep_quotes(text)
+        if command and mask(command) != command:
+            command = WITHHELD_COMMAND
         cond = {"key": key, "name": name, "level": level, "text": text, "value": value, "band": band, "worse": worse,
                 "command": command, "investigate": mask_obj(investigate)}
         with Locked(self.lock_file):

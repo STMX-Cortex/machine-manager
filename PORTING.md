@@ -7,8 +7,8 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 
 | Layer | Python modules | Port rule |
 | --- | --- | --- |
-| Pure decisions | `core/mmdecide.py`, `core/mmalerts.py`, `core/mmreplay.py`, `core/mmtext.py`, parsers in `core/mmread.py` and `adapters/` | Same inputs, same outputs: pass the vectors |
-| Records and files | `core/mmcore.py` (settings, alert store, masking, atomic writes, line formats) | Match `schemas/`; atomic rename writes |
+| Pure decisions | `core/mmdecide.py`, `core/mmalerts.py`, `core/mmreplay.py`, `core/mmtext.py` (cleaning, masking, cut lines), parsers in `core/mmread.py` and `adapters/` | Same inputs, same outputs: pass the vectors |
+| Records and files | `core/mmcore.py` (settings, alert store, atomic writes, line formats) | Match `schemas/`; atomic rename writes |
 | Readings | `core/mmread.py` (system calls; the macOS commands as a cross-check) | Any method; `mm check` compares with the commands |
 | Jobs and loop | `core/mmsuper.py`, `core/mmwatch.py`, `core/mmrecover.py`, `core/mmdelete.py`, `core/mmdrill.py`, `bin/cachetrim.py` | Same behaviour; tests in `tests/` describe it |
 | Adapters | `adapters/ad_queue_fifo.py`, `adapters/ad_ci_github.py`, `adapters/ad_deliver_claude.py` | One per kind; chosen by the profile's `adapter` value |
@@ -48,7 +48,8 @@ Several machines and pools are several status records; placement takes a list of
 
 1. Readings never block a tick for long: every outside command has a time limit.
 2. Mask secrets before anything reaches an alert, evidence, status or output (`mask` vectors). Paths are kept: the
-   long-random-word rule never cuts into a word that starts with `/`, `~/`, `./` or `../`.
+   long-random-word rule never cuts into a word that starts with `/`, `~/`, `./` or `../`. A value is masked before
+   it is quoted; a text of own words and quoted values is masked part by part (`mask_keep_quotes`).
 3. Observe mode and the off switch turn every action into a `WOULD` line.
 4. The launch gate fails open: no fresh status, no valid settings, or the off switch means no denial.
 5. Deletes re-check their guard right before the delete; a forbidden part of a path is never entered.
@@ -62,4 +63,6 @@ Several machines and pools are several status records; placement takes a list of
    each (`QWAIT`, `QUEUE_FILE_UNREADABLE`), never one per file. Every function a tick runs over agent-made input is
    near-linear (O(n log n) at most). In every output an agent's value shows cleaned (Unicode Cc, Cf, Zl, Zp and `|` as
    `?`, `core/mmtext.py`) and, in plain output and alert texts, JSON-quoted unless bare; a command that would name a
-   value cleaning changes, or that holds a control character, is withheld (README.md, "Agent-written files", item 6).
+   value cleaning changes, or that holds a control character, is withheld (README.md, "Agent-written files", item 6),
+   in every file the tool writes as in every output. Every regular expression over agent-made text runs on its lines
+   split at line feeds only, each cut to `text_line_max` characters with a mark (item 7).

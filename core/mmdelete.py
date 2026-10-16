@@ -35,6 +35,7 @@ import time
 import mmcore
 import mmdecide
 import mmread
+import mmtext
 
 
 def user_tmp():
@@ -209,7 +210,7 @@ class Run:
             return "lsof -U failed: %s" % str(e)[:60]
         pid = None
         prefixes = (os.path.realpath(p) + os.sep, p.rstrip(os.sep) + os.sep)
-        for line in u.stdout.splitlines():
+        for line in mmtext.split_lines(u.stdout):  # socket names are agent text
             if line.startswith("p"):
                 pid = line[1:]
             elif line.startswith("n") and line[1:].startswith(prefixes):

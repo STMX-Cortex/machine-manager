@@ -16,6 +16,7 @@ from decimal import Decimal, InvalidOperation
 
 import mmcore
 import mmread
+import mmtext
 import shlex
 import subprocess
 
@@ -83,11 +84,11 @@ def is_noise(r, noise):
     for n in noise:
         if "workflow" in n and name != n["workflow"]:
             continue
-        if "workflow_regex" in n and not re.search(n["workflow_regex"], name):
+        if "workflow_regex" in n and not mmtext.search(n["workflow_regex"], name):  # names agents chose (C-22)
             continue
         if n.get("event") and r.get("event") != n["event"]:
             continue
-        if n.get("branch_regex") and not re.search(n["branch_regex"], r.get("headBranch") or ""):
+        if n.get("branch_regex") and not mmtext.search(n["branch_regex"], r.get("headBranch") or ""):
             continue
         return True
     return False

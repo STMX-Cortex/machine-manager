@@ -451,6 +451,12 @@
     }
    },
    "additionalProperties": false
+  },
+  "text_line_max": {
+   "type": "integer",
+   "minimum": 256,
+   "maximum": 1048576,
+   "description": "C-22: the longest line any pattern sees; longer lines are cut with a mark (default 4096)"
   }
  },
  "additionalProperties": false

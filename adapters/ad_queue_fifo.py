@@ -23,6 +23,7 @@ import time
 
 import mmcore
 import mmread
+import mmtext
 
 # Python's one-letter flags that take no value; a flag outside this set ends the launcher check (runs_launcher).
 _NO_VALUE_FLAGS = frozenset("bBdEhiIOPqRsSuvVx")
@@ -34,7 +35,7 @@ _LOAD_RE = re.compile(
 
 def parse_load_line(line, year):
     """One sampler line (gates/load.log) -> sample dict (t = local epoch), or None for a broken line."""
-    m = _LOAD_RE.match((line or "").strip())
+    m = _LOAD_RE.match(mmtext.cut((line or "").strip()))  # a line an agent may write: cut first (C-22)
     if not m:
         return None
     g = m.groups()
@@ -138,7 +139,7 @@ class Queue:
         if mode == "X":
             return self.cfg.get("exclusive_mode_kind", "exclusive")
         for r, k in self.patterns:
-            if r.search(text or ""):
+            if mmtext.search(r, text):  # a label or command an agent wrote: its lines cut first (C-22)
                 return k
         return "other"
 
@@ -165,7 +166,7 @@ class Queue:
         try:
             with open(f, "rb") as fh:
                 fh.seek(max(0, os.path.getsize(f) - max_bytes))
-                data = fh.read().decode("utf-8", "replace").splitlines()[1:]
+                data = mmtext.split_lines(fh.read().decode("utf-8", "replace"))[1:]  # agents write it (C-22)
         except OSError:
             return {}
         for line in data:

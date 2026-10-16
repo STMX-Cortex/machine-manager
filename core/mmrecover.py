@@ -25,6 +25,7 @@ import urllib.request
 import mmcore
 import mmdecide
 import mmread
+import mmtext
 
 PANIC_DIR = "/Library/Logs/DiagnosticReports"
 
@@ -204,7 +205,8 @@ def missing_jobs(expected):
     rc, out = mmread.run(["/bin/ps", "-axo", "args="], timeout=10)
     if rc != 0:
         return ["(ps failed)"]
-    lines = out.splitlines()
+    # command lines agents chose: records end at line feeds; each cut before the patterns (C-22)
+    lines = [mmtext.cut(line) for line in mmtext.split_lines(out)]
     miss = []
     for job in expected:
         try:

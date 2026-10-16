@@ -6,6 +6,8 @@ facts of one alert: alert.json (the question, the hypotheses, the time window), 
 queue's sampler and history tails, the queue, ps top lists with the slot trees marked, kernel memorystatus lines of the
 window, vm_stat / sysctl / memory_pressure readings, the usage state, the pool summary and sizes.
 state/evidence-index.json maps alert seq and key to the folder. Every text is masked (mmcore.mask) before it is written.
+Each text file is cleaned line by line as it is written (mmtext.log_text: cut lines, no control or separator character;
+C-22, C-23); each JSON file holds masked and cleaned strings (agent values are text an agent can make).
 """
 import json
 import os
@@ -14,6 +16,7 @@ import time
 
 import mmcore
 import mmread
+import mmtext
 
 
 def _slot(n):
@@ -33,12 +36,15 @@ def _slot(n):
 
 
 def _tail_lines(f, n, max_bytes=1 << 20):
+    """The last n lines of a file (its last max_bytes), split at "\n" only: a separator character an agent wrote
+    inside a line stays in its line, where the copy cleans it (C-23)."""
     try:
         with open(f, "rb") as fh:
             fh.seek(max(0, os.path.getsize(f) - max_bytes))
-            return fh.read().decode("utf-8", "replace").splitlines()[-n:]
+            text = fh.read().decode("utf-8", "replace")
     except OSError:
         return []
+    return mmtext.split_lines(text)[-n:]
 
 
 def bundle(rec, s, now, queue=None, slot=None, extra=None, usage_file=None):
@@ -50,19 +56,35 @@ def bundle(rec, s, now, queue=None, slot=None, extra=None, usage_file=None):
     shutil.rmtree(tmp, ignore_errors=True)
     os.makedirs(tmp)
 
-    def put(name, text):
-        text = mmcore.mask(text)
+    def put(name, text, tabs=False):
+        """A text file: masked (its quotes kept), then cut and cleaned line by line (C-22, C-23); tabs=True keeps the
+        tabs of a tab-separated log (C-23a)."""
+        text = mmtext.log_text(mmcore.mask_keep_quotes(text), keep="\t" if tabs else "")
         with open(os.path.join(tmp, name), "w") as f:
             f.write(text if text.endswith("\n") or not text else text + "\n")
 
+    def put_lines(name, lines):
+        """Lines that need no mask or cut (each a JSON record machine-manager encoded from masked, cleaned values)."""
+        with open(os.path.join(tmp, name), "w") as f:
+            f.write("".join(line + "\n" for line in lines))
+
+    def put_json(name, obj, cleaned=False):
+        """A JSON file: every string masked and cleaned (unless the caller did it)."""
+        obj = obj if cleaned else mmtext.clean_obj(mmcore.mask_obj(obj))
+        with open(os.path.join(tmp, name), "w") as f:
+            f.write(json.dumps(obj, indent=1, default=str) + "\n")
+
     inv = rec.get("investigate") or {}
-    put("alert.json", json.dumps({
-        "alert": {k: rec.get(k) for k in ("seq", "key", "name", "level", "text", "time", "command")},
+    doc = mmtext.clean_obj(mmcore.mask_obj({
+        "alert": {k: rec.get(k) for k in ("seq", "key", "name", "level", "text", "time")},
         "question": inv.get("question"), "hypotheses": inv.get("hypotheses", []),
         "window": [mmcore.now_local(now - win), mmcore.now_local(now)], "made": mmcore.now_local(now),
         "machine_id": mmcore.machine_id((extra or {}).get("profile")), "schema_version": mmcore.SCHEMA_VERSION,
         "files": ["metrics.csv", "load.log", "history.log", "queue.json", "ps.txt", "kernel.jsonl", "readings.txt",
-                  "usage.json", "github.json", "sizes.json", "status.json", "decisions.log"]}, indent=1))
+                  "usage.json", "github.json", "sizes.json", "status.json", "decisions.log"]}))
+    # the command as every output shows it (mmcore.shown_command: none when withheld or controlled); its own `|` kept
+    doc["alert"]["command"] = mmcore.shown_command(rec.get("command"))
+    put_json("alert.json", doc, cleaned=True)
     # metrics of the window
     rows = _tail_lines(mmcore.path("metrics.csv"), 400)
     head = rows[:1] if rows and rows[0].startswith("time,") else ["time,..."]
@@ -70,13 +92,13 @@ def bundle(rec, s, now, queue=None, slot=None, extra=None, usage_file=None):
     put("metrics.csv", "\n".join(head + keep))
     q = None
     if queue is not None:
-        put("load.log", "\n".join(_tail_lines(queue.sample_log(), int(win / 60) + 5)))
-        put("history.log", "\n".join(_tail_lines(queue.history_log(), 60)))
+        put("load.log", "\n".join(_tail_lines(queue.sample_log(), int(win / 60) + 5)), tabs=True)
+        put("history.log", "\n".join(_tail_lines(queue.history_log(), 60)), tabs=True)
         try:
             q = queue.read(now)
         except OSError as e:
             q = {"error": str(e)}
-    put("queue.json", json.dumps(q, indent=1, default=str))
+    put_json("queue.json", q)
     procs = mmread.read_ps() or []
     marks = {}
     for b in (q or {}).get("busy", []) if isinstance(q, dict) else []:
@@ -86,12 +108,14 @@ def bundle(rec, s, now, queue=None, slot=None, extra=None, usage_file=None):
     for title, key in (("memory", "rss_mb"), ("cpu", "cpu")):
         lines.append("## by " + title)
         for p in sorted(procs, key=lambda p: -p[key])[:25]:
-            lines.append("%7d %7d %9.0f MB %6.1f%% %s%s" % (p["pid"], p["ppid"], p["rss_mb"], p["cpu"], p["comm"],
+            lines.append("%7d %7d %9.0f MB %6.1f%% %s%s" % (p["pid"], p["ppid"], p["rss_mb"], p["cpu"],
+                                                            mmtext.quoted(p["comm"]),
                                                             "  slot=%s" % marks[p["pid"]] if p["pid"] in marks else ""))
     put("ps.txt", "\n".join(lines))
     kl = [l for l in _tail_lines(mmcore.path("state", "kernel.jsonl"), 200)
           if _seen(l) is not None and now - _seen(l) <= win]
-    put("kernel.jsonl", "\n".join(kl))
+    # each record decoded, its strings cleaned, encoded again: a JSON line is never cut or masked as text
+    put_lines("kernel.jsonl", [json.dumps(mmtext.clean_obj(mmcore.mask_obj(json.loads(line)))) for line in kl])
     rd = []
     for argv in (["/usr/bin/vm_stat"], ["/usr/sbin/sysctl", "vm.swapusage", "vm.loadavg", "vm.compressor.segment.total",
                                         "kern.memorystatus_level"], ["/usr/bin/memory_pressure", "-Q"]):
@@ -100,13 +124,14 @@ def bundle(rec, s, now, queue=None, slot=None, extra=None, usage_file=None):
     put("readings.txt", "\n\n".join(rd))
     try:
         with open(usage_file) as f:
-            put("usage.json", f.read(200000))
-    except (OSError, TypeError):
-        put("usage.json", "{}")
+            usage = json.loads(f.read(200000))
+    except (OSError, TypeError, ValueError):
+        usage = {}
+    put_json("usage.json", usage)
     gh = mmcore.read_json(mmcore.path("state", "github.json"), {}) or {}
-    put("github.json", json.dumps({k: gh.get(k) for k in ("time", "runs", "billing", "errors", "watched")}, indent=1))
-    put("sizes.json", json.dumps((extra or {}).get("sizes") or {}, indent=1))
-    put("status.json", json.dumps(mmcore.read_json(mmcore.path("status.json"), {}) or {}, indent=1))
+    put_json("github.json", {k: gh.get(k) for k in ("time", "runs", "billing", "errors", "watched")})
+    put_json("sizes.json", (extra or {}).get("sizes") or {})
+    put_json("status.json", mmcore.read_json(mmcore.path("status.json"), {}) or {})
     put("decisions.log", "\n".join(_tail_lines(mmcore.path("state", "decisions.log"), 40)))
     shutil.rmtree(d, ignore_errors=True)
     os.replace(tmp, d)

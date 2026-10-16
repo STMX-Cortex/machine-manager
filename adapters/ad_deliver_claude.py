@@ -29,6 +29,7 @@ import time
 
 import mmcore  # noqa: E402
 import mmread  # noqa: E402
+import mmtext  # noqa: E402
 
 EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "PreToolUse")
 LIMIT = 1 << 20
@@ -171,7 +172,11 @@ def gate_decision(data, s, now, cfg):
         return None
     tool = data.get("tool_name")
     cmd = ((data.get("tool_input") or {}).get("command") or "") if isinstance(data.get("tool_input"), dict) else ""
-    if tool in cfg.get("launch_tools", []) or (tool == "Bash" and re.search(cfg.get("launch_bash_regex", "(?!)"), cmd)):
+    # the pattern sees the command's lines cut (C-22); with a pattern, a line too long to see whole counts as a launch
+    # (C-22a: a cut never opens the gate)
+    rx = cfg.get("launch_bash_regex")
+    launch = tool == "Bash" and bool(rx) and (mmtext.too_long(cmd) or bool(mmtext.search(rx, cmd)))
+    if tool in cfg.get("launch_tools", []) or launch:
         return ("E_GATE_RED machine RED (%s); fix: wait until it is not RED (at most %g min from %s), then retry; mm status"
                 % ("; ".join(cur.get("reasons", []))[:120], s["launch_gate.max_minutes"], mmcore.now_local(cur["red_since"])[11:]))
     return None
@@ -185,13 +190,13 @@ def recipient(cfg):
             head = fh.read(4096)
     except (OSError, TypeError):
         return None
-    m = re.search(cfg.get("recipient_regex", "(?!)"), head)
+    m = mmtext.search(cfg.get("recipient_regex", "(?!)"), head)  # a file an agent may write: its lines cut (C-22)
     return m.group(1) if m else None
 
 
 def model_name(value):
     """'claude-opus-5-5[1m]' and 'claude-opus-5-5-20261001' both name claude-opus-5-5."""
-    return re.sub(r"-\d{8}$", "", re.sub(r"\[.*\]$", "", str(value or "").strip().lower()))
+    return re.sub(r"-\d{8}$", "", re.sub(r"\[.*\]$", "", mmtext.cut(str(value or "").strip().lower())))
 
 
 def recipient_models(transcript, s):
@@ -393,7 +398,7 @@ def jobs(cfg, base=None):
     cut = text.find(marker) if marker else -1
     if cut >= 0:
         text = text[:cut]
-    for line in text.splitlines():
+    for line, _ in mmtext.lines(text):  # a file agents write: cut lines (C-22)
         m = re.search(r"\bpid=(\d+)", line)
         r = re.search(r"\brc=([^\s,;)`]+)", line)
         if m and r and r.group(1) not in ("0", "1", "2"):
@@ -409,7 +414,7 @@ def oldest_open_tool_call(transcript, ignore=("Agent", "Task", "Workflow", "Moni
         with open(transcript, "rb") as f:
             f.seek(0, 2)
             f.seek(max(0, f.tell() - nbytes))
-            lines = f.read().decode("utf-8", "replace").splitlines()
+            lines = mmtext.split_lines(f.read().decode("utf-8", "replace"))  # JSON lines may hold a raw U+2028
     except OSError:
         return None
     calls, done = {}, set()
@@ -521,7 +526,8 @@ def banner(text, enabled):
     if not enabled:
         return False
     cmd = os.environ.get("MM_BANNER_CMD")
-    safe = mmcore.mask(text).replace("\\", " ").replace('"', "'")[:200]
+    # an alert line: masked part by part, its quotes kept (mmcore.mask_keep_quotes), then cleaned (C-23)
+    safe = mmtext.clean(mmcore.mask_keep_quotes(text)).replace("\\", " ").replace('"', "'")[:200]
     argv = [cmd, safe] if cmd else ["/usr/bin/osascript", "-e", 'display notification "%s" with title "machine-manager"' % safe]
     rc, _ = mmread.run(argv, timeout=10)
     return rc == 0

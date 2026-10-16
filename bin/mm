@@ -327,7 +327,8 @@ def cmd_event(args, as_json):
         return err("E_USAGE", "event timing-failure [--note TEXT]", "mm help")
     note = opt(args, "--note", "")
     mmcore.append_line(mmcore.path("state", "events.jsonl"),
-                       json.dumps({"event": "timing-failure", "note": mmcore.mask(note)[:200], "time": mmcore.now_local()}),
+                       json.dumps({"event": "timing-failure", "note": mmcore.clean(mmcore.mask(note))[:200],
+                                   "time": mmcore.now_local()}),
                        max_bytes=1 << 20)
     print("event=timing-failure recorded=yes")
     return 0

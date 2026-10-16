@@ -176,8 +176,9 @@ def evaluate(start, stop_t, reason, probe=None):
     amber = isinstance(reason, str) and reason.startswith("supervisor ")
     lines = []
     try:
-        with open(mmcore.path("state", "decisions.log")) as f:
-            lines = [l for l in f.read().splitlines()[-200:] if " slots " in l and ("WOULD" in l or "SET" in l)]
+        with open(mmcore.path("state", "decisions.log"), newline="") as f:  # records end only at line feeds (C-22)
+            lines = [line for line in mmcore.mmtext.split_lines(f.read())[-200:]
+                     if " slots " in line and ("WOULD" in line or "SET" in line)]
     except OSError:
         pass
     t0 = mmcore.now_local(start)

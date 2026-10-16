@@ -162,8 +162,8 @@ def deletes_job(s, now, enabled, ctx, with_list, live_spec, mid):
 
 def _tail(f):
     try:
-        with open(f) as fh:
-            lines = [l.strip() for l in fh.read().splitlines() if l.strip()]
+        with open(f, newline="") as fh:
+            lines = [line.strip() for line in mmcore.mmtext.split_lines(fh.read()) if line.strip()]
         return mmcore.mask(lines[-1][:200]) if lines else ""
     except OSError:
         return ""
@@ -500,7 +500,8 @@ class Supervisor:
         return False
 
     def log_decision(self, line):
-        mmcore.append_line(mmcore.path("state", "decisions.log"), mmcore.mask(line))
+        # labels and other agent values come quoted (mmtext.quoted); masked part by part, so the quotes stay (R5C-4)
+        mmcore.append_line(mmcore.path("state", "decisions.log"), mmcore.mask_keep_quotes(line))
 
     def tick(self):
         now = self.clock()
@@ -932,11 +933,13 @@ class Supervisor:
                 if busy and now - self.state.get("would_pause_at", 0) > 600:
                     self.state["would_pause_at"] = now
                     newest = max(busy, key=lambda b: b["since"])
-                    self.log_decision("%s WOULD-PAUSE %s (actions off)" % (mmcore.now_local(now), newest.get("label")))
+                    self.log_decision("%s WOULD-PAUSE %s (actions off)"
+                                      % (mmcore.now_local(now), mmcore.quoted(newest.get("label") or "")))
             else:
                 got = p.pause(q["busy"], self.queue, s["pause_newest_call.lsof_timeout_s"])
                 if got and got["paused"]:
-                    self.log_decision("%s PAUSE %s pids %s" % (mmcore.now_local(now), got["busy"].get("label"), got["paused"]))
+                    label = mmcore.quoted(got["busy"].get("label") or "")
+                    self.log_decision("%s PAUSE %s pids %s" % (mmcore.now_local(now), label, got["paused"]))
                 if got and got["not_a_file"]:
                     not_a_file = got["not_a_file"]  # SLOT_NOT_A_FILE; nothing paused through it
                     if not_a_file != self.state.get("pause_not_a_file"):

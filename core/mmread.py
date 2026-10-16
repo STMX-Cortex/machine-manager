@@ -16,6 +16,8 @@ import subprocess
 import threading
 import time
 
+import mmtext
+
 _libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
 
 
@@ -276,11 +278,14 @@ def parse_pmset(text):
     return None
 
 
-_KERNEL_RE = re.compile(r"memorystatus: (suspending (\S.*?) \[(\d+)\] due to (.*)|triggering no paging space action)")
+# The name runs to the LAST " [<pid>] due to " (R5C-3): an executable's name may hold those words; macOS's pid and
+# reason come last.
+_KERNEL_RE = re.compile(r"memorystatus: (suspending (\S.*) \[(\d+)\] due to (.*)|triggering no paging space action)")
 
 
 def parse_kernel_line(line):
-    """A `log stream --style ndjson` line (or a plain log line) -> event dict for the two memorystatus events, or None."""
+    """A `log stream --style ndjson` line (or a plain log line) -> event dict for the two memorystatus events, or None.
+    The patterns see the message's lines cut (mmtext.search, C-22)."""
     text = line
     stamp = None
     try:
@@ -289,9 +294,9 @@ def parse_kernel_line(line):
             text = d.get("eventMessage", "")
             stamp = d.get("timestamp")
     except ValueError:
-        m = re.match(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+)", line)
+        m = re.match(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+)", mmtext.cut(line))
         stamp = m.group(1) if m else None
-    m = _KERNEL_RE.search(text or "")
+    m = mmtext.search(_KERNEL_RE, text if isinstance(text, str) else "")
     if not m:
         return None
     if m.group(2):
@@ -300,9 +305,10 @@ def parse_kernel_line(line):
 
 
 def parse_ps(text):
-    """`ps -axo pid=,ppid=,rss=,%cpu=,comm=` -> list of dicts."""
+    """`ps -axo pid=,ppid=,rss=,%cpu=,comm=` -> list of dicts. Records end only at line feeds (C-22): a name an agent
+    chose may hold any other line-breaking character."""
     out = []
-    for line in text.splitlines():
+    for line in mmtext.split_lines(text):
         parts = line.split(None, 4)
         if len(parts) < 5:
             continue
@@ -324,7 +330,10 @@ def live_named(procs, spec):
     out = []
     for p in procs:
         base = os.path.basename(p["comm"])
-        if base in names or (suffixes and base.endswith(suffixes)) or any(r.search(p["comm"]) for r in regs):
+        # a guard's pattern (deletes and trims wait for a live run): a name too long to see whole counts as a match,
+        # so the guard fails closed (C-22a)
+        live_re = regs and (mmtext.too_long(p["comm"]) or any(mmtext.search(r, p["comm"]) for r in regs))
+        if base in names or (suffixes and base.endswith(suffixes)) or live_re:
             out.append(p)
     return out
 
@@ -353,7 +362,7 @@ def file_writers(path_, timeout):
     if rc not in (0, 1):  # 1: no process has it open
         return None
     pids, pid = set(), None
-    for line in out.splitlines():
+    for line in mmtext.split_lines(out):  # file names are agent text: records end only at line feeds
         if line[:1] == "p" and line[1:].isdigit():
             pid = int(line[1:])
         elif line[:1] == "a" and line[1:] in ("u", "w") and pid is not None:
@@ -366,7 +375,7 @@ def proc_cwd(pid, timeout):
     rc, out = run(["/usr/sbin/lsof", "-a", "-p", str(int(pid)), "-d", "cwd", "-Fn"], timeout=timeout)
     if rc != 0:
         return None
-    for line in out.splitlines():
+    for line in mmtext.split_lines(out):
         if line[:1] == "n" and os.path.isabs(line[1:]):
             return line[1:]
     return None
@@ -503,7 +512,7 @@ class Tail:
         if cut < 0:
             return []
         self.offset += cut + 1
-        return data[:cut].decode("utf-8", "replace").splitlines()
+        return mmtext.split_lines(data[:cut].decode("utf-8", "replace"))  # agent files: records end at line feeds
 
 
 def last_line(file, nbytes=4096):
@@ -511,7 +520,7 @@ def last_line(file, nbytes=4096):
         with open(file, "rb") as f:
             f.seek(0, 2)
             f.seek(max(0, f.tell() - nbytes))
-            lines = f.read().decode("utf-8", "replace").splitlines()
+            lines = mmtext.split_lines(f.read().decode("utf-8", "replace"))
         return lines[-1] if lines else None
     except OSError:
         return None
