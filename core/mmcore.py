@@ -6,14 +6,17 @@ Python 3 standard library only (3.11+ for tomllib). Nothing here names a project
 folder from this file; project values come from a profile (TOML); live data goes to a data folder outside the code.
 The decisions are pure functions in mmdecide.
 """
+import bisect
 import fcntl
 import json
 import re
 import os
+import shlex
 import socket
 import time
 
 import mmdecide
+import mmtext
 
 CORE = os.path.dirname(os.path.realpath(__file__))
 CODE = os.path.dirname(CORE)
@@ -503,10 +506,12 @@ def mask(text):
     t = _SECRET_RES[2].sub(lambda m: m.group(1) + m.group(2) + "***", t)
     t = _SECRET_RES[3].sub("***", t)
     t = _SECRET_RES[6].sub(lambda m: m.group(1) + "***" + m.group(3), t)
-    paths = [m.span() for m in _PATH_RE.finditer(t)]
+    paths = [m.span() for m in _PATH_RE.finditer(t)]  # in text order, never overlapping
+    starts = [a for a, _ in paths]
 
     def word(m):
-        if any(a <= m.start() and m.end() <= b for a, b in paths):
+        i = bisect.bisect_right(starts, m.start()) - 1  # the last path starting at or before the word (C-21: no scan)
+        if i >= 0 and m.end() <= paths[i][1]:
             return m.group(0)  # a segment of a path
         return "***" if _random(m.group(0)) else m.group(0)
     t = _SECRET_RES[5].sub(word, t)
@@ -658,24 +663,39 @@ class AlertStore:
 
 LINE_MAX = 200
 
-# Characters an alert line never shows (design C-17): C0 controls, DEL, C1 controls, LINE SEPARATOR and PARAGRAPH
-# SEPARATOR. Alert keys, texts and commands can hold text an agent chose (a ticket's file name, a call's label); one
-# of these would break the line in two (a forged alert line) or drive the terminal.
-_CONTROLS = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
-CONTROL_STAND_IN = "?"  # what is shown in place of each of them (plain ASCII, safe on every terminal)
+# Cleaning of agent values (design C-17, C-20): mmtext, re-exported here for every output.
+CONTROL_STAND_IN, WITHHELD_COMMAND = mmtext.CONTROL_STAND_IN, mmtext.WITHHELD_COMMAND
+clean, clean_obj, quoted, has_controls = mmtext.clean, mmtext.clean_obj, mmtext.quoted, mmtext.has_controls
 
 
-def one_line(text):
-    """text with each control or line-break character (_CONTROLS) replaced by CONTROL_STAND_IN."""
-    return _CONTROLS.sub(CONTROL_STAND_IN, text)
+def shown_command(cmd):
+    """An alert's command as outputs may show it: None when there is none, or when it is withheld (WITHHELD_COMMAND,
+    or a command that holds a mmtext.BAD_CATEGORIES character, C-17)."""
+    if not cmd or cmd == WITHHELD_COMMAND or has_controls(str(cmd)):
+        return None
+    return str(cmd)
+
+
+def explain_hint(rec):
+    """`mm explain ID` for an alert, shell-safe (the id quoted when it holds a glob or shell character, C-20 (4))."""
+    return "mm explain " + shlex.quote(display_id(rec))
 
 
 def display_id(rec):
     """The alert id people and agents see: the rule name, plus the key's ':' part when the key has one
-    (MEM with name MEM_RED -> MEM_RED; QWAIT:x -> QWAIT:x), with no control character (one_line). `mm ack` and
-    `mm explain` accept it or the key."""
+    (MEM with name MEM_RED -> MEM_RED; QWAIT:x -> QWAIT:x), cleaned (clean). `mm ack` and `mm explain` accept it or
+    the key."""
     key, name = rec.get("key") or "", rec.get("name") or rec.get("key") or "?"
-    return one_line(name + key[key.index(":"):] if ":" in key else name)
+    return clean(name + key[key.index(":"):] if ":" in key else name)
+
+
+def shown_alert(rec):
+    """An alert record as JSON outputs give it: every string cleaned, the command as shown_command gives it (with
+    command_withheld when one was withheld), and the id."""
+    out = clean_obj(dict(rec))
+    cmd = shown_command(rec.get("command"))
+    out.update(id=display_id(rec), command=cmd, command_withheld=bool(rec.get("command")) and cmd is None)
+    return out
 
 
 def find_alert(active, ident):
@@ -689,21 +709,22 @@ def find_alert(active, ident):
 def alert_line(rec, max_len=LINE_MAX):
     """One alert as one line of at most max_len characters: `LEVEL KEY what/why | do: command`.
     The command is never cut: a command too long for the line becomes `mm explain KEY` (explain prints it whole).
-    The line holds no control or line-break character (C-17): white space in the text folds to one space, any other
-    such character in the head, key or text shows as CONTROL_STAND_IN, and a command that holds one becomes
-    `mm explain KEY`."""
-    level, key = one_line(str(rec.get("level") or "INFO")), display_id(rec)
+    No agent value reads as machine-manager's words (C-17, C-20): the id is cleaned, and JSON-quoted when it holds a
+    character outside mmtext.BARE; the text is cleaned (white space folds to one space); ` | do: ` comes only with the
+    alert's own command, and a withheld command (shown_command) shows as a shell-safe `mm explain KEY`."""
+    level, key = clean(rec.get("level") or "INFO"), display_id(rec)
     if rec.get("why") == "cleared":
         level = "CLEARED"
     count = rec.get("_count", 1)
-    head = "%s %s%s " % (level, key, " x%d" % count if count > 1 else "")
+    head = "%s %s%s " % (level, quoted(key), " x%d" % count if count > 1 else "")
     cmd = rec.get("command") if rec.get("why") != "cleared" else None
     tail = ""
     if cmd:
-        tail = " | do: " + str(cmd)
-        if one_line(tail) != tail or len(tail) > max_len // 2 or len(head) + len(tail) + 40 > max_len:
-            tail = " | do: mm explain " + key
-    text = one_line(" ".join(str(rec.get("text") or "").split()))
+        shown = shown_command(cmd)
+        tail = " | do: " + (shown or "")
+        if shown is None or len(tail) > max_len // 2 or len(head) + len(tail) + 40 > max_len:
+            tail = " | do: " + explain_hint(rec)
+    text = clean(" ".join(str(rec.get("text") or "").split()))
     room = max_len - len(head) - len(tail)
     if len(text) > room:
         text = text[:max(room - 3, 0)].rstrip() + "..."

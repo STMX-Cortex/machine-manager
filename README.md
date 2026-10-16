@@ -56,7 +56,7 @@ Code and live data are apart. The code folder is this repository. The live data 
 
 ```sh
 mm status        # at most 5 lines: state, mode, slots; readings; alert counts; why; staleness
-mm alerts        # one line per active alert: LEVEL NAME text | do: command
+mm alerts        # one line per active alert: LEVEL ID text | do: command (agent values cleaned and quoted)
 mm explain ID    # one alert in full, with its evidence folder
 mm place --kind go-test --shards 4      # place=MACHINE|POOL|WAIT, why= lines, do= lines (never run by the tool)
 ```
@@ -175,10 +175,15 @@ profile names:
    `DELETES_FAILED` names `deletes_job` and the error. The cleanup list's alerts (`CLEANUP_LIST`, its `LINK_SKIPPED`
    paths, `DELETES_FAILED` for `cleanup_list`) keep their state until the list runs again
    (`deletes.cleanup_list_hours`), not only until the next deletes pass.
-6. **Alert lines.** File names and call labels an agent chose reach alert keys, texts and commands. Every alert line
-   (the hook, `mm wait`, `mm alerts`, `mm status`) is one line with no control character: white space in a text folds
-   to one space, any other control character (C0, DEL, C1, U+2028, U+2029) shows as `?`, and a command that holds one
-   becomes `mm explain KEY`.
+6. **Outputs.** File, folder and ticket names, call labels, paths below agent folders and text read from such files
+   reach alert keys and texts, `mm cleanup` and `mm place`. In every output (alert lines, the hook, `mm wait`,
+   `mm alerts`, `mm status`, `mm explain`, `mm ack`, `mm cleanup`, `mm place`, each `--json` form) such a value shows
+   cleaned: each control, format or line-separator character (Unicode Cc, Cf, Zl, Zp) and each `|` shows as `?`
+   (`core/mmtext.py`). A plain `key=value` value, an alert id in a line, and such a value inside an alert's text are
+   JSON-quoted unless every character is a letter, a digit or one of `._/:@+,~-`. ` | do: ` comes only with the
+   alert's own command. A command that would name a value cleaning changes, or that holds a control character, is
+   withheld: a line shows `mm explain KEY` (the id shell-quoted when it needs it), `mm explain` shows
+   `command=withheld`, `mm cleanup` shows `do=withheld`, and `mm place` gives no commands.
 
 ## Glossary
 

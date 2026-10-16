@@ -152,7 +152,7 @@ def format_alerts(recs, max_lines=MAX_LINES):
     lines = []
     for r in recs[:max_lines]:
         if r.get("investigate") and r.get("why") != "cleared" and not r.get("command"):
-            r = dict(r, command="mm explain %s" % r.get("key"))
+            r = dict(r, command=mmcore.explain_hint(r))  # shell-safe: the id quoted when it needs it (C-20 (4))
         lines.append(mmcore.alert_line(r))
     if len(recs) > max_lines:
         lines.append("+%d more: mm alerts" % (len(recs) - max_lines))

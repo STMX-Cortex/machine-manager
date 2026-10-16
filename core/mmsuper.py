@@ -327,12 +327,15 @@ class Pauser:
         procs = mmread.read_ps() if launchers else []  # this moment's process tree, never an older reading
         if procs is None:
             out["failed"] = "ps failed"
-            out["refused"] = [pid for pid in openers if pid not in launchers]
+            out["refused"] = sorted(set(openers) - set(launchers))
             return out
-        tree = []  # each launcher, then its descendants (an opener among them inherited the file and goes with it)
+        tree, seen = [], set()  # each launcher, then its descendants (an opener among them inherited the file)
         for pid in launchers:
-            tree += [d for d in mmread.descendants(procs, pid) if d not in tree]
-        out["refused"] = [pid for pid in openers if pid not in tree]
+            for d in mmread.descendants(procs, pid):
+                if d not in seen:  # a set: a large process tree stays linear (C-21)
+                    seen.add(d)
+                    tree.append(d)
+        out["refused"] = [pid for pid in openers if pid not in seen]
         plan = {}
         for pid in tree:
             st = self.start_time(pid)
@@ -664,7 +667,8 @@ class Supervisor:
         if lst.get("cleanup"):
             snap["cleanup"] = lst["cleanup"]
         snap["link_skipped"] = list(dl.get("link_skipped") or [])
-        snap["link_skipped"] += [p for p in lst.get("link_skipped") or [] if p not in snap["link_skipped"]]
+        known = set(snap["link_skipped"])  # a set: many links stay linear (C-21)
+        snap["link_skipped"] += [p for p in lst.get("link_skipped") or [] if p not in known]
         snap["deletes_failed"] = list(dl.get("errors") or []) + list(lst.get("errors") or [])
         if self.deletes.error:  # the whole deletes job failed (outside any rule): no result of that pass
             snap["deletes_failed"].append(["deletes_job", self.deletes.error])

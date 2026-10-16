@@ -129,6 +129,7 @@ class Run:
         self.would = 0
         self.young = {}  # (rule, folder, minutes) -> count: young items get one summary line, not one line each
         self.link_skipped = []  # paths refused for a link (rule 48): the LINK_SKIPPED alerts
+        self._link_seen = set()
         self.errors = []  # [rule id, error] of each rule that failed (the DELETES_FAILED alerts); the others still run
 
     # ---- log
@@ -143,7 +144,8 @@ class Run:
         """A configured folder or an entry refused for a link (rule 48): a KEEP line with the reason, and the path for
         the LINK_SKIPPED alert."""
         self.log("KEEP", rule, p, guard=why)
-        if p not in self.link_skipped:
+        if p not in self._link_seen:  # a set: many links stay linear (C-21)
+            self._link_seen.add(p)
             self.link_skipped.append(p)
 
     # ---- facts

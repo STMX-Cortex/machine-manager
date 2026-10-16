@@ -6,7 +6,9 @@ bands, repeat, clear and ack (mmdecide.alert_raise / alert_absent). Pool (CI) co
 `names` gives the words a project wants in its texts: owner, recipient, trim_command, jobs_file.
 """
 import hashlib
-import shlex
+
+import mmtext
+from mmtext import quoted as _q  # an agent value in a text: cleaned, quoted unless bare (C-20 (2))
 
 # Paths QUEUE_FILE_UNREADABLE names (design C-14, C-15): exactly this many when more files cannot be read; the count in
 # its text covers the rest, so one alert stays short however many files an agent makes.
@@ -55,7 +57,7 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
     if st:
         state, reasons = st
         top = g("top_outside") or []
-        tops = ", ".join("%s %.0f MB" % (n, mb) for n, mb in top[:3])
+        tops = ", ".join("%s %.0f MB" % (_q(n), mb) for n, mb in top[:3])
         if state == "RED":
             out.append(_c("MEM", "MEM_RED", "ACTION",
                           "machine RED: %s; slots to the floor; hold launches and heavy calls; top outside queue: %s"
@@ -70,7 +72,8 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
         who = ev.get("process") or "the system"
         if ev.get("kind") == "suspending":
             text = ("macOS suspended %s [%s] at %s (%s); it stays stopped until %s resumes or quits it"
-                    % (who, ev.get("pid"), (ev.get("time") or "")[11:19], ev.get("why"), nm["owner"]))
+                    % (_q(who) if ev.get("process") else who, ev.get("pid"), (ev.get("time") or "")[11:19],
+                       ev.get("why"), nm["owner"]))
         else:
             text = "kernel: no paging space at %s (swap exhausted); hold every launch" % (ev.get("time") or "")[11:19]
         out.append(_c("KERNEL:%s:%s" % (ev.get("kind"), who), "KERNEL_SUSPEND", "ACTION", text,
@@ -79,7 +82,7 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
 
     for line in g("kills_new") or []:
         out.append(_c("KILL:" + _h(line), "GUARD_KILL", "ACTION",
-                      "memory guard killed a queue process: " + line[:160]))
+                      "memory guard killed a queue process: " + _q(line[:160])))
 
     # --- disk and cache
     disk = g("disk_gb")
@@ -130,10 +133,10 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
             out.append(_c("QWAIT:calls", "QWAIT", "ATTENTION",
                           "%d queue call(s) wait over %g min; the oldest waits %.0f min: %s"
                           % (len(waits), s["queue.wait_minutes"], oldest["age_s"] / 60,
-                             (oldest.get("label") or "")[:120]), value=oldest["age_s"] / 60, band=10))
+                             _q((oldest.get("label") or "")[:120])), value=oldest["age_s"] / 60, band=10))
         if tickets and tickets[0]["mode"] in ("W", "X") and (tickets[0].get("age_s") or 0) > s["queue.head_block_minutes"] * 60 \
                 and len(busy) < slots:
-            holders = ", ".join((b.get("label") or "?")[:40] for b in busy) or "none"
+            holders = ", ".join(_q((b.get("label") or "?")[:40]) for b in busy) or "none"
             out.append(_c("HEAD_BLOCK:" + tickets[0]["name"], "HEAD_BLOCK", "ATTENTION",
                           "%s call at the head waits %.0f min, %d of %d slots idle, %d behind; holders: %s"
                           % ("wide" if tickets[0]["mode"] == "W" else "exclusive", tickets[0]["age_s"] / 60,
@@ -141,7 +144,8 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
         for b in busy:
             if b.get("mode") == "S" and b.get("since") and now - b["since"] > s["queue.long_call_minutes"] * 60:
                 out.append(_c("LONG:%s:%s" % (b["slot"], b.get("pid")), "LONG_CALL", "ATTENTION",
-                              "shared call runs %.0f min (split it): %s" % ((now - b["since"]) / 60, (b.get("label") or "")[:120])))
+                              "shared call runs %.0f min (split it): %s"
+                              % ((now - b["since"]) / 60, _q((b.get("label") or "")[:120]))))
     hour = g("history_hour") or []
     long_waits = [c for c in hour if c.get("wait", 0) > 1200]
     if len(long_waits) >= s["queue.waits_over_20_per_hour"]:
@@ -151,7 +155,7 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
         why = "refused by placement" if c["mode"] == "P" else ("refused as too large for an agent" if c["mode"] == "A"
                                                                else "admitted without memory rules (mem=na)")
         out.append(_c("REFUSED:%s:%d" % (c["pid"], int(c["end"])), "REFUSED", "ATTENTION",
-                      "queue call %s: %s" % (why, (c.get("cmd") or "")[:120])))
+                      "queue call %s: %s" % (why, _q((c.get("cmd") or "")[:120]))))
     slot_cpu = g("slot_cpu") or {}
     if "queue" in snap:
         calls = {call: held for call, (_, held) in queue_calls((g("queue") or {}).get("busy", [])).items()}
@@ -211,15 +215,17 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
     cl = g("cleanup")
     if cl and cl.get("count"):
         level = "ATTENTION" if disk is not None and disk < s["disk.cache_action_disk_gb"] else "INFO"
-        top = "; ".join("%s %s (%s)" % (i["rule"], i["path"], _gb(i.get("bytes"))) for i in cl.get("top", [])[:3])
+        top = "; ".join("%s %s (%s)" % (_q(i["rule"]), _q(i["path"]), _gb(i.get("bytes")))
+                        for i in cl.get("top", [])[:3])
         out.append(_c("CLEANUP_LIST", "CLEANUP_LIST", level,
                       "%d delete candidates for %s, %s; largest: %s" % (cl["count"], nm["recipient"], _gb(cl.get("bytes")), top),
                       command="mm cleanup",
                       value=(cl.get("bytes") or 0) / 1e9, band=10))
     for p in g("link_skipped") or []:
         out.append(_c("LINK_SKIPPED:" + _h(p), "LINK_SKIPPED", "ATTENTION",
-                      "a configured delete or prune path goes through a link (or out of its folder); skipped: %s" % p,
-                      command="ls -ld " + shlex.quote(p)))
+                      "a configured delete or prune path goes through a link (or out of its folder); skipped: %s"
+                      % _q(p),
+                      command=mmtext.command_with("ls -ld %s", p)))
     for rid, err in g("deletes_failed") or []:
         if rid == "deletes_job":
             why = "the whole pass stopped: no rule or cleanup-list result this time"
@@ -228,19 +234,20 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
         else:
             why = "the other rules and the cleanup list still run"
         out.append(_c("DELETES_FAILED:" + str(rid), "DELETES_FAILED", "ATTENTION",
-                      "deletes: %s failed: %s (%s)" % (rid, err, why)))
+                      "deletes: %s failed: %s (%s)" % (_q(rid), _q(err), why)))
     # --- the queue's slot and ticket files: a path there that is not a regular file counts as not held
     bad = g("queue_unreadable") or []
     if bad:  # one key however many files (C-14): the count and the first UNREADABLE_NAMED paths
         named = bad[:UNREADABLE_NAMED]
         out.append(_c("QUEUE_FILE_UNREADABLE", "QUEUE_FILE_UNREADABLE", "ATTENTION",
                       "%d queue slot or ticket file(s) cannot be opened or read; counted as not held: %s%s"
-                      % (len(bad), ", ".join(named), ", and %d more" % (len(bad) - len(named)) if len(bad) > len(named)
-                         else ""), command="ls -l " + " ".join(shlex.quote(x) for x in named)))
+                      % (len(bad), ", ".join(_q(x) for x in named), ", and %d more" % (len(bad) - len(named))
+                         if len(bad) > len(named) else ""),
+                      command=mmtext.command_with("ls -l" + " %s" * len(named), *named)))
     for p in g("slot_not_a_file") or []:
         out.append(_c("SLOT_NOT_A_FILE:" + _h(p), "SLOT_NOT_A_FILE", "ATTENTION",
                       "a queue slot or ticket path is not a regular file; counted as not held, never paused "
-                      "through: %s" % p, command="ls -ld " + shlex.quote(p)))
+                      "through: %s" % _q(p), command=mmtext.command_with("ls -ld %s", p)))
     # --- the pause: a process that is not the queue launcher had the newest call's slot file open
     pr = g("pause_refused")
     if pr:

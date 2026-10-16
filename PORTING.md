@@ -7,7 +7,7 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 
 | Layer | Python modules | Port rule |
 | --- | --- | --- |
-| Pure decisions | `core/mmdecide.py`, `core/mmalerts.py`, `core/mmreplay.py`, parsers in `core/mmread.py` and `adapters/` | Same inputs, same outputs: pass the vectors |
+| Pure decisions | `core/mmdecide.py`, `core/mmalerts.py`, `core/mmreplay.py`, `core/mmtext.py`, parsers in `core/mmread.py` and `adapters/` | Same inputs, same outputs: pass the vectors |
 | Records and files | `core/mmcore.py` (settings, alert store, masking, atomic writes, line formats) | Match `schemas/`; atomic rename writes |
 | Readings | `core/mmread.py` (system calls; the macOS commands as a cross-check) | Any method; `mm check` compares with the commands |
 | Jobs and loop | `core/mmsuper.py`, `core/mmwatch.py`, `core/mmrecover.py`, `core/mmdelete.py`, `core/mmdrill.py`, `bin/cachetrim.py` | Same behaviour; tests in `tests/` describe it |
@@ -59,6 +59,7 @@ Several machines and pools are several status records; placement takes a list of
    Nothing an agent can write hangs or stops a tick: slot, ticket and marker files are opened without following a link
    and without waiting, only a regular file counts, and at most 4096 bytes are read; an error with one file costs only
    that file; one failing delete rule never stops the others. Waiting calls and unreadable queue files raise one alert
-   each (`QWAIT`, `QUEUE_FILE_UNREADABLE`), never one per file. Every alert line is one line with no control
-   character (C0, DEL, C1, U+2028, U+2029): such a character shows as `?`, and a command that holds one becomes
-   `mm explain KEY`.
+   each (`QWAIT`, `QUEUE_FILE_UNREADABLE`), never one per file. Every function a tick runs over agent-made input is
+   near-linear (O(n log n) at most). In every output an agent's value shows cleaned (Unicode Cc, Cf, Zl, Zp and `|` as
+   `?`, `core/mmtext.py`) and, in plain output and alert texts, JSON-quoted unless bare; a command that would name a
+   value cleaning changes, or that holds a control character, is withheld (README.md, "Agent-written files", item 6).

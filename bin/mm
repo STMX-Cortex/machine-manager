@@ -53,7 +53,8 @@ def err(code, what, fix, rc=2):
 
 
 def kv(d):
-    """`key=value` words; values with spaces are quoted."""
+    """`key=value` words; a value is JSON-quoted when it is empty or holds any character outside mmtext.BARE (C-20 (2)),
+    so a value never reads as words of its own."""
     out = []
     for k, v in d.items():
         if v is None:
@@ -63,7 +64,7 @@ def kv(d):
         elif isinstance(v, float):
             v = ("%.1f" % v).rstrip("0").rstrip(".")
         v = str(v)
-        out.append("%s=%s" % (k, json.dumps(v) if (" " in v or not v) else v))
+        out.append("%s=%s" % (k, v if mmcore.mmtext.BARE.fullmatch(v) else json.dumps(v)))
     return " ".join(out)
 
 
@@ -136,10 +137,10 @@ def cmd_status(args, as_json):
             "top": ",".join(obj["top"]) or "none"}),
     ]
     if st.get("reasons") and st.get("state") in ("RED", "AMBER", "STEADY"):
-        lines.append("why=" + json.dumps("; ".join(st["reasons"])[:160]))
+        lines.append("why=" + json.dumps(mmcore.clean("; ".join(st["reasons"])[:160])))
     if stale:
         lines.append("E_STALE status.json %.0f s old; fix: mm start; launch gate open" % age)
-    emit(as_json, obj, lines[:5])
+    emit(as_json, mmcore.clean_obj(obj), lines[:5])
     return 3 if stale else 0
 
 
@@ -153,7 +154,7 @@ def cmd_alerts(args, as_json):
     recs, acks = alert_recs()
     lines = [mmcore.alert_line(dict(a, text=(a.get("text") or "") + (" (acked)" if a["key"] in acks else "")))
              for a in recs]
-    emit(as_json, {"alerts": [dict(a, id=mmcore.display_id(a), acked=a["key"] in acks) for a in recs]},
+    emit(as_json, {"alerts": [dict(mmcore.shown_alert(a), acked=a["key"] in acks) for a in recs]},
          lines or ["alerts=none"])
     return 0 if recs else 1
 
@@ -164,24 +165,24 @@ def cmd_explain(args, as_json, profile):
     stt = mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}
     a = mmcore.find_alert(stt.get("active") or {}, args[0])
     if a is None:
-        print("alert=none id=%s" % args[0])
+        print(kv({"alert": "none", "id": mmcore.clean(args[0])}))
         return 1
     idx = mmcore.read_json(mmcore.path("state", "evidence-index.json"), {}) or {}
     ev = next((mmcore.path("evidence", v["slot"]) for v in idx.values() if v.get("key") == a["key"]), None)
     inv = (profile.get("delivery") or {}).get("investigator")
-    # C-17: the key, text and command can hold text an agent chose; no control character is shown, and a command that
-    # holds one is withheld (never run as shown)
-    cmd = a.get("command")
-    withheld = bool(cmd) and mmcore.one_line(str(cmd)) != str(cmd)
-    obj = {"id": mmcore.display_id(a), "key": mmcore.one_line(a["key"]), "level": mmcore.one_line(str(a["level"])),
-           "text": mmcore.one_line(str(a.get("text") or "")), "command": None if withheld else cmd,
-           "command_withheld": withheld, "since": mmcore.now_local(a.get("first")), "count": a.get("count"),
-           "acked": a["key"] in (stt.get("acks") or {}), "evidence": ev, "investigator": inv if ev else None}
+    # C-17, C-20: the key and text can hold values an agent chose: shown cleaned; a withheld command is never shown
+    shown = mmcore.shown_alert(a)
+    cmd, withheld = shown["command"], shown["command_withheld"]
+    obj = {"id": shown["id"], "key": shown["key"], "level": shown["level"], "text": shown.get("text") or "",
+           "command": cmd, "command_withheld": withheld, "since": mmcore.now_local(a.get("first")),
+           "count": a.get("count"), "acked": a["key"] in (stt.get("acks") or {}), "evidence": ev,
+           "investigator": inv if ev else None}
     lines = [kv({"id": obj["id"], "level": obj["level"], "since": obj["since"], "count": a.get("count"),
                  "acked": obj["acked"]}),
              "text=" + json.dumps(obj["text"])]
     if withheld:
-        lines.append("command=withheld reason=control_characters")
+        lines.append(kv({"command": "withheld", "reason": "agent_value" if a.get("command") == mmcore.WITHHELD_COMMAND
+                         else "control_characters"}))
     elif cmd:
         lines.append("command=" + json.dumps(cmd))
     if ev:
@@ -196,10 +197,10 @@ def cmd_ack(args, as_json):
     stt = mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}
     a = mmcore.find_alert(stt.get("active") or {}, args[0])
     if a is None:
-        print("acked=no id=%s reason=not_active" % args[0])
+        print(kv({"acked": "no", "id": mmcore.clean(args[0]), "reason": "not_active"}))
         return 1
     mmcore.AlertStore(settings()).ack(a["key"])
-    print("acked=yes id=%s" % mmcore.display_id(a))
+    print(kv({"acked": "yes", "id": mmcore.display_id(a)}))
     return 0
 
 
@@ -303,12 +304,21 @@ def cmd_cleanup(args, as_json):
     if not isinstance(d, dict):
         print("cleanup=none reason=no_list_yet")
         return 1
-    items = d.get("items") or []
+    raw = d.get("items") or []
+    # C-20: paths and branch names are values agents choose: shown cleaned (and quoted when not bare); an item whose
+    # path cleaning changes, or whose command holds a control character, has its command withheld
+    items = []
+    for i in raw:
+        cmd = i.get("command")
+        path = i.get("path") or ""
+        withheld = bool(cmd) and (mmcore.clean(path) != path or mmcore.has_controls(cmd))
+        items.append(dict(mmcore.clean_obj(i), command=None if withheld else cmd, command_withheld=withheld))
     # a KEEP item (a skipped tree or a link) has no command: its reason instead
     lines = [kv({"rule": i["rule"], "gb": None if i.get("bytes") is None else round(i["bytes"] / 1e9, 1),
-                 "path": i["path"]}) + (" do=" + json.dumps(i["command"]) if i.get("command") else
+                 "path": i["path"]}) + (" do=" + json.dumps(i["command"]) if i["command"] else
+                                        " do=withheld" if i["command_withheld"] else
                                         " keep=" + json.dumps(i.get("why") or "")) for i in items] or ["cleanup=none"]
-    emit(as_json, d, lines)
+    emit(as_json, dict(mmcore.clean_obj(d), items=items), lines)
     return 0 if items else 1
 
 

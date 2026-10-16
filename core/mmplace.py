@@ -31,6 +31,11 @@ def place(req, s, profile, queue=None, pool=None, now=None):
     """req: kind, shards, wide, agents, crate, diff_base, race, packages, sha, branch.
     Returns (answer dict, commands list)."""
     now = now or time.time()
+    # C-20: the request's words come from the caller (an agent): cleaned for every output; a request that cleaning
+    # changes gets no commands (they would name another value), and its kind shows quoted in the reasons
+    raw = req
+    req = {k: mmcore.clean(v) if isinstance(v, str) else v for k, v in raw.items()}
+    changed = req != raw
     mv = machine_view(now, s, queue, profile)
     q = None
     if queue is not None:
@@ -50,15 +55,18 @@ def place(req, s, profile, queue=None, pool=None, now=None):
                       "stop_active": "GUARD_STOP" in active})
     ctx = {"now": now, "kinds": {"machine_only": profile["kinds"].get("machine_only", {}), "pool": profile["kinds"].get("pool", {})},
            "wide_kind": profile["kinds"].get("wide") or None, "machine": machine, "pools": pools}
-    ans = mmdecide.place(req, ctx, s)
+    shown = dict(req, kind=mmcore.quoted(req["kind"]))  # a profile's kind is bare and stays as it is
+    ans = mmdecide.place(shown, ctx, s)
     if ans["need_guard"]:
         rc, line = pool.guard(gargs)
-        pools[0]["guard"] = {"rc": rc, "line": mmcore.mask(line)}
-        ans = mmdecide.place(req, ctx, s)
+        pools[0]["guard"] = {"rc": rc, "line": mmcore.clean(mmcore.mask(line))}
+        ans = mmdecide.place(shown, ctx, s)
     if mv["source"] != "supervisor":
         ans["reasons"].append("state source: " + mv["source"])
     cmds = []
-    if ans["place"] == "POOL":
+    if ans["place"] == "POOL" and changed:
+        ans["reasons"].append("commands withheld: a request word held a character outputs replace")
+    elif ans["place"] == "POOL":
         watch = "mm watch <run-id> --note %s" % shlex.quote(req["kind"])
         cmds = pool.commands(req, gargs or [], watch)
     rec = mmcore.stamp({"kind": "placement", "time": now, "request": req, "place": ans["place"], "candidate": ans["candidate"],
