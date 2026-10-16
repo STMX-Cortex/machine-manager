@@ -194,12 +194,13 @@ profile names:
    every value shown from them is cleaned.
 7. **Patterns.** Every regular expression the tool runs over text an agent can make (the mask, the log, ps and
    kernel-line parsers, the profile's patterns over labels, commands, process names and branch names) sees that text
-   split at its line feeds, each line cut to the profile's `text_line_max` characters, its end marked `[...cut]`. A
-   record ends only at a line feed: a LINE SEPARATOR, NEL or CR inside a name stays inside its record. A cut never
-   opens a gate: where a pattern decides a refusal or a guard, a line too long to see whole counts as a match (the
-   launch gate's `launch_bash_regex`: a launch while the machine is RED; `live_tools.path_regexes`: a live run, so a
-   delete or trim waits). Patterns that only show, sort or mask text use the cut line. In a kernel suspend line the
-   process name runs to the last ` [<pid>] due to `.
+   split at its line feeds, each line cut to the profile's `text_line_max` characters, its end marked `[...cut]`. A URL
+   password may hold `/` and `:`; it ends at its `@`, never past the next `://`. A record ends only at a line feed: a
+   LINE SEPARATOR, NEL or CR inside a name stays inside its record. A cut never opens a gate: where a pattern decides
+   a refusal or a guard, a line too long to see whole counts as a match (the launch gate's `launch_bash_regex`: a
+   launch while the machine is RED; `live_tools.path_regexes`: a live run, so a delete or trim waits). Patterns that
+   only show, sort or mask text use the cut line. In a kernel suspend line the process name runs to the last
+   ` [<pid>] due to `.
 
 ## Glossary
 
