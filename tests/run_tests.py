@@ -37,6 +37,7 @@ GROUPS = {
     "sandbox_holds_r3": ["test_sandbox_holds_r3"],  # C-17, C-19 (2): `mm explain` shows no control character
     "sandbox_holds_review4": ["test_sandbox_holds_review4"],  # review round 4, part C: R4C-1 to R4C-4
     "sandbox_holds_review5": ["test_sandbox_holds_review5"],  # review round 5, part C: R5C-1 to R5C-4
+    "sandbox_holds_review6": ["test_sandbox_holds_review6"],  # review round 6, part C: R6C-1, R6C-2
     "sandbox_holds_c20": ["test_sandbox_holds_c20"],  # C-20: agent values cleaned and quoted in every output
     "sandbox_holds_c22": ["test_sandbox_holds_c22"],  # C-22 bounded lines, C-23 files hold cleaned agent values
     "install": ["test_install"],      # install, stop, start, rollback, init, check (temporary HOME)
