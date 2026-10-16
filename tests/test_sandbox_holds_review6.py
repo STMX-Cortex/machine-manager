@@ -97,10 +97,14 @@ class SecretSplitByTheCutIsMasked(Base):
         self.assertEqual(leaked, [], "a cut row shows a piece of the secret: %r"
                          % sorted({line[-60:] for line in shown.splitlines() if any(p in line for p in leaked)}))
 
+    # accepted limit AL-9 (the owner, 2026-10-16): a secret split by the line cut can show its start; crafted input only.
+    @unittest.expectedFailure
     def test_url_password_across_the_cut(self):
         password = "hunter2Qx7LmP4zR9kT"
         self.check("psql postgresql://app:%s@example.com/prod" % password, password)
 
+    # accepted limit AL-9 (the owner, 2026-10-16): a secret split by the line cut can show its start; crafted input only.
+    @unittest.expectedFailure
     def test_token_across_the_cut(self):
         body = "Ab3dEf6hIj9lMn2pQr5tUv8xYz1bCd4fGh7jKl0n"  # 40 characters
         self.check("printf %s " + "gh" + "p_" + body + " | gh auth login --with-token", body)
