@@ -237,7 +237,7 @@ Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFI
 
 ## Roadmap
 
-Today the tool watches one machine and one CI pool (GitHub Actions). Three parts come next. The rule for each part:
+Today the tool watches one machine and one CI pool (GitHub Actions). Four parts come next. The rule for each part:
 you add any resource with a profile entry, and a new kind of resource needs one adapter file at most.
 
 1. **A list of pools.** The profile takes `[[pools]]` entries (each with an `id` and an `adapter`) in place of the
@@ -251,6 +251,11 @@ you add any resource with a profile entry, and a new kind of resource needs one 
 3. **Many machines.** Each machine runs its own `mm` and writes its `status.json`. A collector reads them over the
    network, and placement chooses across machines and pools. Safety actions stay local on each machine and never
    depend on the network. Estimate: 1 to 2 days.
+4. **At large scale, a monitor watches and `mm` controls.** When scale comes, connect `mm` to Prometheus and Grafana,
+   and grow only its control part, because large-scale monitoring is already solved for free, and control for AI-agent
+   fleets is not. `mm` exports its readings as Prometheus metrics. Prometheus stores them, and Grafana draws the graphs
+   and sends the alerts; each runs as its own program. `mm` keeps the decisions: the slots, the placement, the guards
+   and the usage meters, across the whole fleet. Estimate: none yet; this part starts only when scale comes.
 
 ## Tests
 
