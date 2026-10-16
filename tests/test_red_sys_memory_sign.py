@@ -71,8 +71,13 @@ class RedSysMemorySign(unittest.TestCase):
         for field, old, recent in (("swap_used_mb", 0, 500), ("comp_mb", 0, 600)):
             rows = window(**{field: (recent, recent)})
             rows.insert(0, dict(rows[0], t=NOW - 120, **{field: old}))
+            # R-1 item 4 preserves the independent AMBER rule for the older swap growth.
+            reasons = [NO_SIGN_REASON]
+            if field == "swap_used_mb":
+                reasons.append("swap +500 MB over its 30-min base")
+            reasons.append(AMBER_REASON)
             with self.subTest(field=field):
-                self.assertEqual(decide(rows), ["AMBER", [NO_SIGN_REASON, AMBER_REASON], True])
+                self.assertEqual(decide(rows), ["AMBER", reasons, True])
 
     def test_swap_growth_uses_recent_minimum_not_only_previous_sample(self):
         rows = window(swap_used_mb=(500, 501))

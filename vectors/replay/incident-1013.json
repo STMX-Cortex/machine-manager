@@ -67,10 +67,11 @@
    "i": 6,
    "pushed": [],
    "reasons": [
-    "system CPU > 40% in 2 samples"
+    "system CPU > 40% in 2 samples, no memory sign",
+    "system CPU > 30% in 2 samples"
    ],
    "slots": 3,
-   "state": "RED"
+   "state": "AMBER"
   },
   {
    "i": 7,
