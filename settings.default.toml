@@ -44,7 +44,7 @@ enabled = false  # bool
 max_minutes = 5  # min
 
 [pause_newest_call]
-# Stop (SIGSTOP) the newest queue call at a critical RED; continue it after GREEN.
+# Stop (SIGSTOP) the newest queue call at a critical RED; continue it after this long calm (GREEN or STEADY).
 enabled = false  # bool
 resume_after_green_s = 120  # s
 # The time limit of the lsof that finds the processes holding the newest call's slot file (a failed lsof pauses nothing).

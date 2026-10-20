@@ -269,7 +269,8 @@ class Trim:
 
 
 class Pauser:
-    """At a critical RED, SIGSTOP the newest queue call's process tree; SIGCONT it after GREEN.
+    """At a critical RED, SIGSTOP the newest queue call's process tree; SIGCONT it after a long calm (GREEN or STEADY),
+    or at once when pausing is turned off.
     The pids come from the processes that have the newest call's slot file open (lsof), never from its label text,
     which agents can write (rule 47): each opener whose argument list runs the queue's launcher is paused with its
     descendants; any other opener is never paused, and the result names it (the PAUSE_REFUSED alert).
@@ -923,6 +924,10 @@ class Supervisor:
             gate.pop("red_since", None)
         if not s["pause_newest_call.enabled"]:
             self.state["pause_refused"] = self.state["pause_not_a_file"] = None
+            self.state.pop("green_for_pause", None)  # no calm span carries across a disabled period
+            p = Pauser(self.state)
+            if p.st:  # turning pausing off releases what it paused (review F1, 2026-10-20)
+                self.log_decision("%s RESUME pids %s (pausing disabled)" % (mmcore.now_local(now), p.resume("pausing disabled")))
             return
         p = Pauser(self.state)
         q = self.cache.get("queue")
@@ -957,7 +962,7 @@ class Supervisor:
         elif not p.st:
             # no pause check and nothing paused: the refusal no longer holds
             self.state["pause_refused"] = self.state["pause_not_a_file"] = None
-        if mac_state == "GREEN":
+        if mac_state in ("GREEN", "STEADY"):  # calm: GREEN, or calm but busy (owner request, 2026-10-20)
             gs = self.state.setdefault("green_for_pause", now)
             if p.st and now - gs >= s["pause_newest_call.resume_after_green_s"]:
                 self.log_decision("%s RESUME pids %s" % (mmcore.now_local(now), p.resume()))

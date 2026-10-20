@@ -90,8 +90,9 @@ setting (`[self]`, `[safe_mode]`, `[heartbeat]`); every decision is a pure funct
    down after that. Readings, alerts and hooks go on. An ACTION alert `SAFE_MODE` names the reason. In safe mode the
    self-check never exits (it raises `SELF_CHECK`). Only `mm on` or `mm restart --clear-safe` ends it.
 4. **Paused processes** (`resume_targets`). The pause writes each pid and its start time to `state/paused.json`
-   before its SIGSTOP. Every start, safe mode, `mm stop`, `mm rollback` and the watchdog (when the supervisor is stale
-   over `self.resume_paused_after_s`) send SIGCONT to each recorded pid whose start time still matches.
+   before its SIGSTOP. Every start, safe mode, turning `pause_newest_call.enabled` off, `mm stop`, `mm rollback` and
+   the watchdog (when the supervisor is stale over `self.resume_paused_after_s`) send SIGCONT to each recorded pid
+   whose start time still matches. A paused call also continues after a long calm (GREEN or STEADY).
 5. **The watchdog is watched.** Each watchdog run writes `state/watchdog.stamp`; at `self.watchdog_stale_s` the
    supervisor raises `WATCHDOG_STALE` and restarts the watchdog (installed runs only, once per 10 min).
 6. **Mac reboot** (`reboot_check`). At start, a changed `kern.boottime` gives `MAC_REBOOTED`: the uptime, how long the

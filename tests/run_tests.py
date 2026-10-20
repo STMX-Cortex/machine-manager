@@ -26,6 +26,7 @@ GROUPS = {
         os.path.basename(path)[:-3]
         for path in sorted(glob.glob(os.path.join(HERE, "test_slot_trial*review*.py")))
     ],
+    "pause_resume_calm": ["test_pause_resume_calm"],  # pause-steady PR-1 to PR-3: a paused call resumes on GREEN or STEADY, and when pausing is turned off
     "watchdog": ["test_watchdog"],    # T5
     "hook": ["test_hook"],            # T9, the 3-line limit, fail-open
     "place": ["test_place"],          # T8
