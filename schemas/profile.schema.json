@@ -25,6 +25,9 @@
     "trim_command": {
      "type": "string"
     },
+    "disk_command": {
+     "type": "string"
+    },
     "jobs_file": {
      "type": "string"
     }

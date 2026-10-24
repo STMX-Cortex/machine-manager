@@ -9,6 +9,7 @@ name = "example"
 owner = "the owner"
 recipient = "the build agent"
 trim_command = "QUEUE_EXCLUSIVE_OK=1 /opt/example/queue/run-queued.py --exclusive -- /opt/example/bin/trim-cache 360"
+disk_command = "/opt/example/bin/disk-cleanup"   # DISK_LOW and CLEANUP_LIST name it (default: none; CLEANUP_LIST then says mm cleanup)
 jobs_file = "/opt/example/agent/state.md"
 
 [service]

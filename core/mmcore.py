@@ -96,7 +96,8 @@ def expand(p, extra=None):
 # no [queue] = no queue readings or slot control; no [ci] = no pool; no [delivery] = alerts only in files and `mm`).
 PROFILE_DEFAULTS = {
     "machine_id": "",
-    "names": {"owner": "the owner", "recipient": "the recipient", "trim_command": "", "jobs_file": "the job file"},
+    "names": {"owner": "the owner", "recipient": "the recipient", "trim_command": "", "disk_command": "",
+              "jobs_file": "the job file"},
     "service": {"label_prefix": DEFAULT_LABEL_PREFIX},
     "sizes": {},
     "live_tools": {"names": [], "suffixes": [], "path_regexes": []},
@@ -277,10 +278,16 @@ SCHEMA = {
     # Default 256 MB in 60 s; range 1-100000 MB; authority: the owner.
     "slots.red_sys_comp_growth_mb_60s": ("num", 1, 100000),
     "slots.red_load1_per_core": ("num", 0.1, 100), "slots.red_disk_gb": ("num", 0, 10000),
+    # Default 100000 MB (= off); range 1-100000 MB; authority: the owner. A compressor over it is a critical RED.
+    "slots.red_comp_mb": ("num", 1, 100000),
+    # Default 0 (= follow disk.recover_gb); range 0-10000 GB; authority: the owner. The free disk GREEN needs.
+    "slots.green_disk_gb": ("num", 0, 10000),
     "slots.sustain_samples": ("int", 1, 10), "slots.cores": ("int", 0, 512),
     "launch_gate.enabled": ("bool", None, None), "launch_gate.max_minutes": ("num", 0, 120),
     "pause_newest_call.enabled": ("bool", None, None), "pause_newest_call.resume_after_green_s": ("num", 10, 3600),
     "pause_newest_call.lsof_timeout_s": ("num", 1, 60),
+    # Default 0 (= no limit); range 0-1440 min; authority: the owner. Never ends a pause during a critical RED.
+    "pause_newest_call.max_minutes": ("num", 0, 1440),
     "banner.enabled": ("bool", None, None),
     "disk.low_gb": ("num", 1, 10000), "disk.recover_gb": ("num", 1, 10000), "disk.trend_hours": ("num", 0.5, 72),
     "disk.cache_attention_gb": ("num", 1, 10000), "disk.cache_action_gb": ("num", 1, 10000),
@@ -397,6 +404,8 @@ def validate(flat, real_slots=None):
             bad.append("usage.codex_attention_pct > usage.codex_action_pct")
         if flat["slots.red_free_pct"] > flat["slots.amber_free_pct"]:
             bad.append("slots.red_free_pct > slots.amber_free_pct")
+        if flat["slots.green_disk_gb"] and flat["slots.green_disk_gb"] < flat["slots.red_disk_gb"]:
+            bad.append("slots.green_disk_gb must be 0 or >= slots.red_disk_gb")
         if flat["github.near_minutes"] > flat["github.stop_minutes"]:
             bad.append("github.near_minutes > github.stop_minutes")
         if flat["heartbeat.url"] and not flat["heartbeat.url"].startswith(("https://", "http://")):

@@ -78,6 +78,9 @@ def classify(window, s, disk_gb=None, kernel_event=False):
         red.append("kernel memorystatus event (no paging space or suspending)")
     if disk_gb is not None and disk_gb < s["slots.red_disk_gb"]:
         red.append("disk %.0f GB < %g GB" % (disk_gb, s["slots.red_disk_gb"]))
+    comp_now = get(cur, "comp_mb")
+    if comp_now is not None and comp_now > s.get("slots.red_comp_mb", 100000):  # default 100000 MB: off
+        red.append("compressor at %.0f MB (near its ceiling)" % comp_now)
 
     if pressure is not None and pressure >= 2 and not red:
         amber.append("kernel pressure %d (warn)" % pressure)
@@ -114,8 +117,9 @@ def classify(window, s, disk_gb=None, kernel_event=False):
     sp = get(cur, "sys_pct")
     if sp is not None and sp >= s["slots.green_sys_pct"]:
         green_fail.append("system CPU not under %g%%" % s["slots.green_sys_pct"])
-    if disk_gb is not None and disk_gb < s["disk.recover_gb"]:
-        green_fail.append("disk under %g GB" % s["disk.recover_gb"])
+    green_disk = s.get("slots.green_disk_gb", 0) or s["disk.recover_gb"]  # 0 follows disk.recover_gb
+    if disk_gb is not None and disk_gb < green_disk:
+        green_fail.append("disk under %g GB" % green_disk)
     if green_fail or not complete:
         return ["STEADY", green_fail or ["readings incomplete"], complete]
     return ["GREEN", ["all readings in the green band"], complete]

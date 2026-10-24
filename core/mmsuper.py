@@ -361,7 +361,8 @@ class Pauser:
 
 
 def critical(reasons):
-    return any(r.startswith(("kernel pressure 4", "swap +", "compressor +")) for r in reasons)
+    """A RED reason that pauses the newest call, and during which pause_newest_call.max_minutes never ends a pause."""
+    return any(r.startswith(("kernel pressure 4", "swap +", "compressor +", "compressor at ")) for r in reasons)
 
 
 class Supervisor:
@@ -928,6 +929,8 @@ class Supervisor:
             p = Pauser(self.state)
             if p.st:  # turning pausing off releases what it paused (review F1, 2026-10-20)
                 self.log_decision("%s RESUME pids %s (pausing disabled)" % (mmcore.now_local(now), p.resume("pausing disabled")))
+            self.state.pop("paused_at", None)
+            self.state.pop("paused_call", None)
             return
         p = Pauser(self.state)
         q = self.cache.get("queue")
@@ -943,6 +946,8 @@ class Supervisor:
             else:
                 got = p.pause(q["busy"], self.queue, s["pause_newest_call.lsof_timeout_s"])
                 if got and got["paused"]:
+                    self.state["paused_at"] = now  # pause_newest_call.max_minutes counts from here
+                    self.state["paused_call"] = got["busy"].get("label") or ""
                     label = mmcore.quoted(got["busy"].get("label") or "")
                     self.log_decision("%s PAUSE %s pids %s" % (mmcore.now_local(now), label, got["paused"]))
                 if got and got["not_a_file"]:
@@ -968,9 +973,24 @@ class Supervisor:
                 self.log_decision("%s RESUME pids %s" % (mmcore.now_local(now), p.resume()))
         else:
             self.state.pop("green_for_pause", None)
+        cap = s.get("pause_newest_call.max_minutes", 0)  # 0: no limit
+        if cap and p.st and now - self.state.setdefault("paused_at", now) >= cap * 60 \
+                and not (mac_state == "RED" and critical(reasons)):
+            # no calm span came in time (the paused call's own memory can hold AMBER): continue it and say so;
+            # never while the reason that pauses still holds
+            call = self.state.get("paused_call") or ""
+            pids = p.resume("max pause time")
+            self.log_decision("%s RESUME pids %s (max %g min paused, state %s)" % (mmcore.now_local(now), pids, cap, mac_state))
+            self.hold("PAUSE_MAX", "PAUSE_MAX", "ATTENTION",
+                      "paused call %s continued after %g min paused with no calm span (pause_newest_call.max_minutes; "
+                      "state %s): pids %s" % (mmcore.quoted(call), cap, mac_state, pids), now + HELD_SELF_S,
+                      command="mm status")
         if p.st and (mmcore.off_state() or self.dry or safe):
             why = "safe mode" if safe else "off switch"
             self.log_decision("%s RESUME pids %s (%s)" % (mmcore.now_local(now), p.resume(why), why))
+        if not p.st:
+            self.state.pop("paused_at", None)
+            self.state.pop("paused_call", None)
 
     def _status(self, now, mac_state, reasons, q, sample, note, active=None, s=None, observe=None, off=None, safe=None):
         """status.json: the machine's status record and the heartbeat, every tick (schemas/status.schema.json)."""

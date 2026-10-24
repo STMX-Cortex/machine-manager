@@ -3,7 +3,7 @@
 
 Each condition: dict(key, name, level, text, value, band, worse, command, investigate). The AlertStore does dedupe,
 bands, repeat, clear and ack (mmdecide.alert_raise / alert_absent). Pool (CI) conditions come from the CI adapter.
-`names` gives the words a project wants in its texts: owner, recipient, trim_command, jobs_file.
+`names` gives the words a project wants in its texts: owner, recipient, trim_command, disk_command, jobs_file.
 """
 import hashlib
 
@@ -48,9 +48,10 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
     """Active conditions for one evaluation. `active` holds the keys active before (for hysteresis)."""
     out = []
     g = snap.get
-    nm = dict({"owner": "the owner", "recipient": "the recipient", "trim_command": None, "jobs_file": "the job file"},
-              **(names or {}))
+    nm = dict({"owner": "the owner", "recipient": "the recipient", "trim_command": None, "disk_command": None,
+               "jobs_file": "the job file"}, **(names or {}))
     TRIM_CMD = nm["trim_command"]
+    DISK_CMD = nm["disk_command"] or None  # the project's full clean-up step: DISK_LOW and CLEANUP_LIST name it
 
     # --- memory state (the controller acts on the same state)
     st = g("state")
@@ -90,7 +91,7 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
         low, rec = s["disk.low_gb"], s["disk.recover_gb"]
         if disk < low or ("DISK_LOW" in active and disk < rec):
             out.append(_c("DISK_LOW", "DISK_LOW", "ACTION", "disk %.1f GB free (alert < %g GB, clears > %g GB)"
-                          % (disk, low, rec), value=disk, band=10, worse="down"))
+                          % (disk, low, rec), value=disk, band=10, worse="down", command=DISK_CMD))
         rate = g("disk_rate_gb_h")
         if rate and rate > 0 and disk >= low and (disk - low) / rate < s["disk.trend_hours"]:
             out.append(_c("DISK_TREND", "DISK_TREND", "ATTENTION", "disk %.1f GB, falling %.1f GB/h: %g GB in %.1f h"
@@ -219,7 +220,7 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
                         for i in cl.get("top", [])[:3])
         out.append(_c("CLEANUP_LIST", "CLEANUP_LIST", level,
                       "%d delete candidates for %s, %s; largest: %s" % (cl["count"], nm["recipient"], _gb(cl.get("bytes")), top),
-                      command="mm cleanup",
+                      command=DISK_CMD or "mm cleanup",
                       value=(cl.get("bytes") or 0) / 1e9, band=10))
     for p in g("link_skipped") or []:
         out.append(_c("LINK_SKIPPED:" + _h(p), "LINK_SKIPPED", "ATTENTION",
