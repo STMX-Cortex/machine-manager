@@ -1,0 +1,16 @@
+{
+ "case": "metrics-over-window",
+ "expected": [
+  "W_SCHEDULE schedule.metrics_s 301 is over evidence.window_minutes 5 (300 s): an evidence bundle can hold no metrics.csv row; fix: set schedule.metrics_s to 300 or less"
+ ],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "evidence.window_minutes": 5,
+  "schedule.metrics_s": 301
+ }
+}

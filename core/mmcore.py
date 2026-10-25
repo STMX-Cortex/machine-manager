@@ -264,6 +264,13 @@ class Locked:
 SCHEMA = {
     "mode.slot_writes": ("choice:off|test|live", None, None),
     "mode.slots_file": ("str", None, None), "mode.observe": ("bool", None, None),
+    # The schedule (README.md, Schedules); each default is the interval the code had before it was a setting;
+    # authority: the owner. tick_s at most 30: at least 3 samples in classify's 60 s growth window. watchdog_s is an
+    # int (the LaunchAgent's StartInterval). Timings that do not fit are W_SCHEDULE lines (mmdecide.timing_warnings),
+    # never a problem here.
+    "schedule.tick_s": ("num", 5, 30), "schedule.disk_s": ("num", 60, 600), "schedule.ps_s": ("num", 10, 60),
+    "schedule.minute_s": ("num", 10, 300), "schedule.metrics_s": ("num", 10, 600),
+    "schedule.readings_check_hours": ("num", 1, 168), "schedule.watchdog_s": ("int", 10, 600),
     "slots.floor": ("int", 1, 16), "slots.ceiling": ("int", 1, 16),
     "slots.raise_green_minutes": ("num", 1, 240), "slots.raise_requires_waiting": ("int", 0, 100),
     "slots.hold_after_red_minutes": ("num", 0, 600), "slots.hold_after_trim_minutes": ("num", 0, 600),
@@ -309,7 +316,8 @@ SCHEMA = {
     "other.load_log_max_age_s": ("num", 30, 86400), "other.heartbeat_max_age_s": ("num", 20, 86400),
     "other.resume_gap_s": ("num", 30, 86400),
     # Default 60; range 15-3600 s; authority: the owner. mm place and the launch gate use status.json's state only
-    # when it is younger (the drill keeps its own stricter limit, mmdrill.STATUS_FRESH_S).
+    # when it is younger (the drill keeps its own stricter limit, mmdrill.STATUS_FRESH_S, and refuses while
+    # schedule.tick_s is over 20 s).
     "other.status_fresh_s": ("num", 15, 3600),
     "repeat.action_minutes": ("num", 1, 1440), "repeat.clear_after_minutes": ("num", 0, 1440), "repeat.attention_hours": ("num", 0.1, 168),
     "hook.log_input_keys": ("bool", None, None), "hook.remind_waiter_minutes": ("num", 1, 1440),
@@ -432,6 +440,7 @@ class Settings:
         self.real_slots = real_slots
         self.last_good_file = path("state", "settings.lastgood.json")
         self.values = None
+        self.flat = None  # the values before resolve (slots.cores 0 stays 0): `mm settings show`
         self.problem = None
         self.mtime = None
 
@@ -450,7 +459,7 @@ class Settings:
             bad = ["%s: unknown setting" % k for k in unknown] + validate(flat, self.real_slots)
             if bad:
                 raise ValueError("; ".join(bad[:5]))
-            self.values, self.problem, self.mtime = resolve(flat), None, mtime
+            self.values, self.flat, self.problem, self.mtime = resolve(flat), flat, None, mtime
             if save:
                 try:
                     write_atomic(self.last_good_file, json.dumps(flat, sort_keys=True))
@@ -464,7 +473,7 @@ class Settings:
                     restored = defaults()
                     restored.update(kept)
                     if not validate(restored, self.real_slots):
-                        self.values = resolve(restored)
+                        self.values, self.flat = resolve(restored), restored
         return self.values
 
     def peek(self):
@@ -476,7 +485,10 @@ class Settings:
 
 
 def settings_json_schema():
-    """The settings contract as a JSON Schema (schemas/settings.schema.json is this, written by tests/gen_schemas.py)."""
+    """The settings contract as a JSON Schema. schemas/settings.schema.json is this, indent 1 and a final line feed
+    (tests/test_vectors.py checks it); from the repository's root: python3 -I -c "import sys,json;
+    sys.path[:0]=['core']; import mmcore; print(json.dumps(mmcore.settings_json_schema(), indent=1))"
+    > schemas/settings.schema.json"""
     props = {}
     for key, (kind, lo, hi) in sorted(SCHEMA.items()):
         if kind == "bool":

@@ -36,6 +36,17 @@ def delivery(profile):
     return _make(DELIVERY, profile.get("delivery"), "delivery")
 
 
+def settings(profile):
+    """mmcore.Settings as the supervisor builds it (real_slots: the queue's slot file), so `mm check` and
+    `mm settings show` refuse what the supervisor refuses; without real_slots when the queue adapter cannot load."""
+    import mmcore
+    try:
+        q = queue(profile)
+    except Exception:  # an E_PROFILE line of its own elsewhere; the settings are still read
+        q = None
+    return mmcore.Settings(real_slots=q.slots_path() if q else None)
+
+
 def records(ad, read, s, now, part):
     """The resource records of one adapter (part: ci, delivery or queue) for resources.json: [] when ad is None or has
     no resources method; else its list cut to mmdecide.RECORDS_MAX records (each one's values to VALUES_MAX), masked,

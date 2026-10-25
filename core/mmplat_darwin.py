@@ -154,7 +154,7 @@ def ps_lstart_argv(pid):
 
 LSOF = "/usr/sbin/lsof"
 DATA_VOLUME = "/System/Volumes/Data"  # free disk (statvfs)
-COMMAND_READINGS = True  # memory_pressure, sysctl and vm_stat: the daily cross-check and the fallback sampler
+COMMAND_READINGS = True  # memory_pressure, sysctl and vm_stat: the readings check and the fallback sampler
 KERNEL_LOG = "/usr/bin/log"  # `log stream`: kernel memorystatus events
 PMSET = "/usr/bin/pmset"  # power: AC or battery
 PANIC_DIR = "/Library/Logs/DiagnosticReports"  # kernel panic reports (names only)

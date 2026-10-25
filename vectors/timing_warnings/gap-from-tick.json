@@ -1,0 +1,17 @@
+{
+ "case": "gap-from-tick",
+ "expected": [
+  "W_SCHEDULE other.heartbeat_max_age_s 44 is under 45 s, the longest status.json gap at schedule.tick_s 30 and self.max_tick_s 5: a working supervisor reads as stale; fix: set other.heartbeat_max_age_s to 45 or more"
+ ],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "other.heartbeat_max_age_s": 44,
+  "schedule.tick_s": 30,
+  "self.max_tick_s": 5
+ }
+}

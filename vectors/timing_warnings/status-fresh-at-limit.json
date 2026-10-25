@@ -1,0 +1,14 @@
+{
+ "case": "status-fresh-at-limit",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "other.status_fresh_s": 18.75,
+  "schedule.tick_s": 12.5
+ }
+}

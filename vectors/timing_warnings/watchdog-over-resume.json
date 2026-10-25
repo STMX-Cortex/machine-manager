@@ -1,0 +1,16 @@
+{
+ "case": "watchdog-over-resume",
+ "expected": [
+  "W_SCHEDULE schedule.watchdog_s 90 is over self.resume_paused_after_s 89: a paused call can stay stopped up to 179 s after the supervisor's last status; fix: set schedule.watchdog_s to 89 or less"
+ ],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "schedule.watchdog_s": 90,
+  "self.resume_paused_after_s": 89
+ }
+}

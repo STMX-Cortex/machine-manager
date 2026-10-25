@@ -11,6 +11,7 @@ Each text file is cleaned line by line as it is written (mmtext.log_text: cut li
 C-22, C-23); each JSON file holds masked and cleaned strings (agent values are text an agent can make).
 """
 import json
+import math
 import os
 import shutil
 import time
@@ -87,8 +88,10 @@ def bundle(rec, s, now, queue=None, slot=None, extra=None, usage_file=None):
     # the command as every output shows it (mmcore.shown_command: none when withheld or controlled); its own `|` kept
     doc["alert"]["command"] = mmcore.shown_command(rec.get("command"))
     put_json("alert.json", doc, cleaned=True)
-    # metrics of the window
-    rows = _tail_lines(mmcore.path("metrics.csv"), 400)
+    # metrics of the window: a row every schedule.metrics_s, so as many lines as its shortest setting writes (rows of an
+    # earlier, shorter interval may still fill the window); at least the last 400 lines are read
+    rows = _tail_lines(mmcore.path("metrics.csv"),
+                       max(400, math.ceil(win / mmcore.SCHEMA["schedule.metrics_s"][1]) + 5))
     head = rows[:1] if rows and rows[0].startswith("time,") else ["time,..."]
     keep = [r for r in rows if r[:19] >= mmcore.now_local(now - win)[:19]]
     put("metrics.csv", "\n".join(head + keep))

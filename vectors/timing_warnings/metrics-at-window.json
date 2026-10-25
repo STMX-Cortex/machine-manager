@@ -1,0 +1,14 @@
+{
+ "case": "metrics-at-window",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "evidence.window_minutes": 5,
+  "schedule.metrics_s": 300
+ }
+}

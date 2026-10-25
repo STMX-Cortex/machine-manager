@@ -57,6 +57,7 @@ GROUPS = {
     "recovery": ["test_recovery"],    # R1-R8: restart, self-check, safe mode, paused processes, reboot, ping
     "resources": ["test_resources"],  # mm resources: rows, files only, facts, cpu_pct, runners, the idle rule, schemas
     "platform": ["test_platform"],    # the platform layer, the Linux path (MM_PLATFORM=linux), fail closed without ps or lsof
+    "schedule": ["test_schedule"],    # [schedule]: intervals, the loop's wait, the watchdog plist, W_SCHEDULE, mm settings show
     "live": ["test_live"],            # T13: the fast readings agree with the macOS commands, here and now
 }
 SLOW = ("live", "drill")

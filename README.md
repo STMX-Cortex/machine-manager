@@ -4,10 +4,12 @@
 
 machine-manager watches one build machine (macOS; Linux in a reduced form, see Platforms) and keeps it safe and busy:
 
-1. It reads memory, swap, compressor, load and CPU every 10 s by system calls (sysctl and Mach), with no fork. Free
-   disk comes every 5 min (statvfs), `ps` and the queue every 30 s, and power every minute (`pmset`, a child process).
-   Kernel memory events come from one long-running `log stream` child. After a `READINGS_MISMATCH`, the fallback
-   sampler runs the macOS commands each tick.
+1. It reads memory, swap, compressor, load and CPU each tick, every `schedule.tick_s` (10 s), by system calls (sysctl
+   and Mach), with no fork. Free disk comes every `schedule.disk_s` (5 min, statvfs), `ps` and the queue every
+   `schedule.ps_s` (30 s), and power with the minute tasks every `schedule.minute_s` (1 min; `pmset`, a child process).
+   Kernel memory events come from one long-running `log stream` child. The readings are checked against the macOS
+   commands at start and every `schedule.readings_check_hours` (24 h); after a `READINGS_MISMATCH`, the fallback
+   sampler runs the macOS commands each tick. Each interval is a setting (Settings, Schedules).
 2. It classifies the machine as `GREEN`, `STEADY`, `AMBER` or `RED`, and lowers or raises the slot count of a job queue.
 3. It answers "where should this job run?" (`mm place`): this machine, a CI pool (GitHub Actions), or wait.
 4. It raises one-line alerts and delivers them into one Claude Code session through hooks.
@@ -33,8 +35,9 @@ bin/mm install --profile ~/mm-profiles/lab1.toml [--settings my-settings.toml]
 on your PATH, records it in `install.json`, and gives the LaunchAgents a PATH of those folders plus the system folders.
 `mm check` proves each one resolves there (`E_COMMAND`); `mm check --online` also reads GitHub once with gh (`E_GH`).
 `mm install` writes two LaunchAgents (`<label_prefix>`: the supervisor, kept alive; `<label_prefix>-watchdog`: every
-60 s), adds hook entries to the Claude Code settings file named in the profile (a backup first), and records the
+`schedule.watchdog_s`, 60 s; a change takes effect at the next `mm install`), adds hook entries to the Claude Code settings file named in the profile (a backup first), and records the
 install in `~/Library/Application Support/machine-manager/install.json`. It refuses unless `mode.observe = true`.
+After its own line it prints `mm check`'s `W_SCHEDULE` timing lines (Settings, Schedules); they never stop it.
 
 ### Python upgrade
 
@@ -64,9 +67,9 @@ Code and live data are apart. The code folder is this repository. The live data 
    from `/proc/cpuinfo` (`model name`, else `Hardware` or `Processor`) and `/proc/meminfo` (`MemTotal`); there is no
    P and E core split (none). After `self.bad_reading_ticks` ticks with
    missing readings the self-check turns safe mode on, so no automatic action runs.
-2. The macOS-only parts are skipped: the kernel `log stream`, `pmset` (power unknown), the daily readings check and the
-   fallback sampler (no `READINGS_MISMATCH`), the evidence bundle's macOS commands (its `readings.txt` says so), the
-   banner, the panic report names. `{user_tmp}` is the system temp folder.
+2. The macOS-only parts are skipped: the kernel `log stream`, `pmset` (power unknown), the readings check
+   (`schedule.readings_check_hours`) and the fallback sampler (no `READINGS_MISMATCH`), the evidence bundle's macOS
+   commands (its `readings.txt` says so), the banner, the panic report names. `{user_tmp}` is the system temp folder.
 3. `mm install`, `mm rollback`, `mm stop`, `mm start`, `mm restart` and `mm drill` refuse with one `E_PLATFORM` line.
    Run `mm run` in the foreground. The watchdog restarts nothing. `mm check` prints `W_PLATFORM` and skips the
    LaunchAgent checks.
@@ -216,6 +219,15 @@ overrides only the keys it names; an unknown key or a bad value is a problem (`S
 values stay in force. The public defaults are safe: `mode.observe = true`, `mode.slot_writes = "off"`,
 `deletes.enabled = false`, `launch_gate.enabled = false`, `pause_newest_call.enabled = false`, `banner.enabled = false`.
 
+`mm settings show [KEY|SECTION]` prints the settings in force, one line per key in `settings.default.toml`'s order:
+`key=value default=value differs=yes|no`. A bool shows as `true` or `false`; a text setting (`mode.slots_file`,
+`heartbeat.url`) is always JSON-quoted, masked and cleaned, and `heartbeat.url` shows only as `<scheme>://<host>/...`;
+a choice (`mode.slot_writes`) shows as its bare word; values are as written (`slots.cores=0`, not the core count). A section name shows its keys. It only reads: no file is written and no supervisor is needed. When
+`settings.toml` is bad, the first line is its `SETTINGS_BAD` alert line, the values shown are the ones in force (the
+last good values, else the defaults), and the exit code is 1. `--json` gives one object, its keys sorted:
+`{"in_force": "current"|"last_good"|"none", "problem", "settings": {key: {"value", "default", "differs"}}}`. An
+unknown key or section is one `E_USAGE` line (exit 2).
+
 `deletes.cleanup_list_hours` controls how often the clean-up list is refreshed (default 24 h).
 `deletes.cleanup_attention_gb` makes `CLEANUP_LIST` ATTENTION when candidate bytes reach that many GB
 (10^9 bytes; default 10, range 0-10000, 0 = off; authority: the owner). Unknown sizes count as zero.
@@ -233,13 +245,79 @@ ceiling)`, a critical reason (it pauses the newest call).
 status.json older than `other.heartbeat_max_age_s` (default 90 s) is stale: `mm status` says `E_STALE` (it uses 90 s
 when it cannot read the settings), the hook says `SELF_STALE`. `mm place` and the launch gate use status.json's state
 only while it is younger than `other.status_fresh_s` (default 60 s, range 15-3600); else `mm place` takes one sample
-and the gate stays open. `mm drill` keeps its own stricter 30 s.
+and the gate stays open. `mm drill` keeps its own stricter 30 s, and refuses while `schedule.tick_s` is over 20 s.
 
 GREEN needs load1 strictly below `slots.green_load1_per_core` times the core count (default 0.8, range 0.1-4), as well
 as the load5 band. A slot raise needs `slots.raise_green_minutes` of GREEN while enough calls wait and all slots stay
 busy. GREEN also needs free disk of at least `slots.green_disk_gb` (default 0 = follow `disk.recover_gb`; else at
 least `slots.red_disk_gb`). `queue.slot_cpu_cores` is the CPU cap per held slot: each call's process tree is counted
 once, with one alert per call after two readings over its cap.
+
+### Schedules
+
+Every timing in the tool. The supervisor runs one tick every `schedule.tick_s`; each other job runs on the first tick
+at or after its interval, so an interval rounds up to whole ticks (at `tick_s` 7, `ps_s` 30 runs every 35 s). Every
+span checked once per tick rounds up the same way (`slots.amber_step_interval_s`,
+`pause_newest_call.resume_after_green_s`, `slots.raise_green_minutes`, the alert repeats). A changed `settings.toml`
+counts from the next tick, the tick's own length from the next wait; no restart is needed, except for
+`schedule.watchdog_s`, which takes effect at `mm install`.
+
+| What runs | Setting | Default | Notes |
+| --- | --- | --- | --- |
+| The tick: memory, swap, compressor, load and CPU readings, the state, the slot controller, the alerts, the pause, the trim's step, the usage state, `status.json`, `resources.json`, the pool's status file, the self-check | `schedule.tick_s` | 10 s | Range 5-30 s (at least 3 samples in the 60 s growth window). Read before each wait. `mm run --tick-seconds N` overrides it (tests; the LaunchAgent does not pass it). |
+| Free disk (statvfs) and its trend | `schedule.disk_s` | 300 s | Range 60-600 s. `DISK_LOW` and the RED disk reason wait for it. |
+| `ps` and the queue read | `schedule.ps_s` | 30 s | Range 10-60 s. Feeds the slot controller, the pause's newest call, `IDLE_ROOM`, `SLOT_CPU` (two reads over the cap: 2 x `ps_s`) and the trim's drained test (`trim.drained_minutes` rests on these reads). |
+| The minute tasks: the queue's history, the memory guard's kills, `mm event` events, power (`pmset`), source ages (`SOURCE_STALE`), the recipient's open tool call, the listed jobs | `schedule.minute_s` | 60 s | Range 10-300 s. |
+| A `metrics.csv` row, and `state/counts.json` saved with it | `schedule.metrics_s` | 60 s | Range 10-600 s. An evidence bundle copies the rows of its `evidence.window_minutes`. |
+| The readings check: the fast readings against the macOS commands (`READINGS_MISMATCH`) | `schedule.readings_check_hours` | 24 h | Range 1-168 h. Also at each start. macOS only. |
+| The watchdog (`mm watchdog`: `SELF_STALE`, the supervisor's restart, the resume of paused calls) | `schedule.watchdog_s` | 60 s | Range 10-600 s, whole seconds: the LaunchAgent's `StartInterval`, written by `mm install`. `mm check` warns when the installed one differs. |
+| Folder sizes (`du` of the profile's `[sizes]`) and the `CACHE_5M` share | `disk.sizes_interval_minutes` | 30 min | In a worker thread. |
+| The pool read (gh) | `github.read_interval_s` | 600 s | In a worker thread. Its read rule is `github.stale_minutes` (30 min). |
+| The watched runs (`mm watch`) | `github.watch_interval_s` | 120 s | Only while a watch is pending. |
+| The deletes pass (`WOULD-DELETE` unless deletes are on) | `deletes.interval_minutes` | 180 min | In a worker thread. |
+| The cleanup list | `deletes.cleanup_list_hours` | 24 h | With a deletes pass; at most hourly while free disk is under `disk.cache_action_disk_gb`. |
+| The dead-man ping | `heartbeat.every_min` | 5 min | Only with `heartbeat.url`. |
+| The hook's `INFO WAITER` line (no waiter is live) | `hook.remind_waiter_minutes` | 60 min | Per session. |
+| An active alert repeats | `repeat.action_minutes`, `repeat.attention_hours` | 30 min, 3 h | It clears after `repeat.clear_after_minutes` (5 min) absent. |
+| The hook | fixed | each event | On each Claude Code event it is entered for (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `PreToolUse`); 2 s limit. |
+| The kernel `log stream` restart | fixed | 60 s | At most once per 60 s (macOS). Kernel events count 30 min for the alert, 2 min for RED. |
+| The supervisor's restart of a stale watchdog | fixed | 10 min | At most once per 10 min (installed runs only). |
+| `WOULD-PAUSE` and unreadable-slots decision lines; `WOULD-TRIM` | fixed | 10 min; 1 h | At most once per span. |
+| The growth windows | fixed | 60 s; 30 min; 6 h | Swap and compressor growth, the memory sign and the pause's readings: 60 s. The swap base: 30 min (samples kept 1900 s). The disk trend: 6 h, from readings at least 30 min apart. |
+| The queue sampler's system CPU | fixed | 150 s | Used while its last line is under 150 s old. |
+| launchd | fixed | 10 s; 20 s | `ThrottleInterval` (the supervisor's restart) and `ExitTimeOut` (from SIGTERM to the kill). |
+| `mm drill memory` | fixed | 30 s; 25 s; 60 s | It trusts status.json up to 30 s old (and refuses while `schedule.tick_s` is over 20 s); 25 s per step; 60 s after its stop. |
+| `mm wait`, `mm restart` | fixed | 5 s; 0.25 s | `mm wait --poll` (5 s); `mm restart` polls every 0.25 s within `self.restart_wait_s`. |
+| Staleness without settings | fixed | 90 s | `mm status` and the hook use 90 s when they cannot read `other.heartbeat_max_age_s`. |
+
+Counts of ticks, not seconds, so their time scales with `schedule.tick_s`: `self.slow_ticks`, `self.bad_reading_ticks`
+(6 ticks: 1 min at 10 s, 3 min at 30 s), the pause cap's `slots.sustain_samples` clear ticks, `SUPERVISOR_ERROR` after
+3 failed ticks in a row, and the ticks per state in `state/counts.json`.
+
+`mm check` prints one `W_SCHEDULE <what>; fix: <how>` line for each timing that does not fit
+(`mmdecide.timing_warnings`, with vectors). It is a warning like `W_PYTHON`: it never fails the check (with no
+problem, `check=ok` follows and the exit code is 0), it is never `SETTINGS_BAD`, and it never stops the last good
+values. The defaults give none. It reads the settings, not a `--tick-seconds` override. G is the longest status.json
+gap of a working supervisor: max(`schedule.tick_s`, `self.max_tick_s`) + `self.max_tick_s`, and at least 1.5 x
+`schedule.tick_s` (60 s at the defaults; a tick writes status.json with the time of its start, and the next one starts
+after the wait or after a long tick). The checks, in order:
+
+1. `other.heartbeat_max_age_s` under G: a working supervisor reads as stale (`E_STALE`, `SELF_STALE`, a restart).
+2. `other.status_fresh_s` under 1.5 x `schedule.tick_s`: `mm place` and the launch gate find status.json old between
+   two ticks. Only 1.5 x the tick on purpose: both fail open.
+3. With the services (macOS): `self.resume_paused_after_s` under G: the watchdog continues calls a working
+   supervisor paused.
+4. With the services: `schedule.watchdog_s` over `self.resume_paused_after_s`: a paused call can stay stopped up to
+   their sum after the supervisor's last status. The fix names whole seconds (`schedule.watchdog_s` is an int).
+5. With the services: `self.watchdog_stale_s` under 1.5 x `schedule.watchdog_s`: `WATCHDOG_STALE` for a watchdog that
+   runs on time.
+6. With a CI pool: `github.stale_minutes` under 1.5 x `github.read_interval_s`: the pool reads as stale between reads.
+   Over 57600 s no `github.stale_minutes` fits (its maximum is 1440), so the fix lowers `github.read_interval_s`.
+7. `schedule.ps_s`, `schedule.minute_s` or `schedule.metrics_s` under `schedule.tick_s`: it runs once per tick only.
+8. `schedule.metrics_s` over `evidence.window_minutes`: an evidence bundle can hold no metrics row.
+
+On macOS it also says when the installed watchdog's `StartInterval` is not `schedule.watchdog_s` (`mm install` again,
+with `mode.observe = true`).
 
 ## Agent-written files
 

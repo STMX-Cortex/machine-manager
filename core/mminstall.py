@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """machine-manager setup: init, check, install, stop, start, rollback.
 
-install writes two LaunchAgents (the supervisor, KeepAlive; the watchdog, every 60 s), adds the hook entries to the
+install writes two LaunchAgents (the supervisor, KeepAlive; the watchdog, every schedule.watchdog_s, default 60 s:
+the setting takes effect at the next install), adds the hook entries to the
 Claude Code settings file the profile names (delivery.settings_file), and records everything in base_dir()/install.json.
 Before it changes a file it keeps a copy `<file>.bak-before-machine-manager-<time>`. Rollback undoes all of it.
 MM_LAUNCHCTL replaces launchctl and HOME moves ~/Library/LaunchAgents (tests use both; they never touch the real ones).
@@ -17,6 +18,7 @@ import sys
 import time
 
 import mmcore
+import mmdecide
 import mmread
 
 HOOK_EVENTS = (("SessionStart", "*"), ("UserPromptSubmit", "*"), ("PostToolUse", "*"),
@@ -181,7 +183,9 @@ def mm_argv(*args):
 EXIT_TIMEOUT_S = 20  # launchd's wait from SIGTERM to its forced kill; over self.stop_deadline_s (at most 15)
 
 
-def plist(label, args, env, keepalive):
+def plist(label, args, env, keepalive, start_interval=60):
+    """One LaunchAgent: KeepAlive (the supervisor), or a run every start_interval s (the watchdog,
+    schedule.watchdog_s; an int, so the plist keeps <integer>)."""
     d = {"Label": label, "ProgramArguments": mm_argv(*args), "EnvironmentVariables": env, "RunAtLoad": True,
          "ExitTimeOut": EXIT_TIMEOUT_S,
          "ProcessType": "Interactive", "StandardOutPath": os.path.join(env["MM_DATA"], "state", label + ".out"),
@@ -189,7 +193,7 @@ def plist(label, args, env, keepalive):
     if keepalive:
         d.update(KeepAlive=True, ThrottleInterval=10)
     else:
-        d["StartInterval"] = 60
+        d["StartInterval"] = start_interval
     return plistlib.dumps(d)
 
 
@@ -304,13 +308,40 @@ def check(profile_file=None, online=False):
     q = prof.get("queue") or {}
     if q.get("dir") and not os.path.isdir(mmcore.expand(q["dir"])):
         out.append("E_PROFILE queue.dir not found: %s; fix: correct the path" % q["dir"])
-    st = mmcore.Settings()
-    if st.load() is None or st.problem:
+    st = mmadapters.settings(prof)  # as the supervisor reads them (the real slot file)
+    s = st.load()
+    if s is None or st.problem:
         out.append("E_SETTINGS %s; fix: correct %s" % (st.problem, st.file))
+    else:  # timings that do not fit: warnings only, never a problem (fix the settings file first)
+        out += mmdecide.timing_warnings(timing_context(prof), s) + watchdog_interval_lines(prof, s)
     bad, _, _ = mmread.check_readings()
     for b in bad:
         out.append("E_READINGS %s; fix: the tool uses the command readings; report the macOS version" % b)
     return out
+
+
+def timing_context(profile):
+    """mmdecide.timing_warnings's ctx: the platform runs the services (the watchdog's checks), the profile names a CI
+    pool (the pool's check)."""
+    return {"service": bool(mmread.plat.SERVICE), "pool": bool((profile.get("ci") or {}).get("adapter"))}
+
+
+def watchdog_interval_lines(profile, s):
+    """W_SCHEDULE when the installed watchdog's StartInterval is not schedule.watchdog_s (the setting takes effect at
+    mm install). launchd only; no line when the plist is missing or cannot be read."""
+    if mmread.plat.SERVICE != "launchd":
+        return []
+    try:
+        with open(os.path.join(agents_dir(), labels(profile)[1] + ".plist"), "rb") as f:
+            pl = plistlib.load(f)
+    except Exception:  # not installed, or not a plist: nothing to compare
+        return []
+    got = pl.get("StartInterval") if isinstance(pl, dict) else None
+    if isinstance(got, int) and not isinstance(got, bool) and got == s["schedule.watchdog_s"]:
+        return []
+    return ["W_SCHEDULE the installed watchdog's StartInterval is %s, schedule.watchdog_s is %d; fix: mm install again "
+            "(with mode.observe = true)" % ("unset" if got is None else mmcore.clean(str(got))[:40],
+                                            s["schedule.watchdog_s"])]
 
 
 def install(profile, settings_src=None, observe_only=True):
@@ -342,6 +373,7 @@ def install(profile, settings_src=None, observe_only=True):
     rec["commands"] = found
     rec["warnings"] += ["W_COMMAND %s not found on PATH; fix: install it, or add its folder to service.path_extra" % n
                         for n, p in sorted(found.items()) if not p]
+    rec["warnings"] += mmdecide.timing_warnings(timing_context(profile), s)  # none at the defaults
     env = {"MM_PROFILE": profile["_file"], "MM_DATA": data, "PATH": path_}
     os.makedirs(agents_dir(), exist_ok=True)
     sup, wd = labels(profile)
@@ -353,7 +385,7 @@ def install(profile, settings_src=None, observe_only=True):
         if b:
             rec["backups"].append([f, b])
         with open(f + ".new", "wb") as fh:
-            fh.write(plist(label, args, env, keep))
+            fh.write(plist(label, args, env, keep, s["schedule.watchdog_s"]))  # the interval: the watchdog only
         os.replace(f + ".new", f)
         rec["plists"].append(f)
     hf = mmcore.expand((profile.get("delivery") or {}).get("settings_file") or "")

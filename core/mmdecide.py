@@ -579,6 +579,79 @@ def reboot_check(prev, cur):
     return {"level": level, "text": "; ".join(parts), "uptime_s": up, "down_s": down, "new_panics": new}
 
 
+# ------------------------------------------------------------------------------------------- the schedule (mm check)
+
+# The schedule's intervals that may be set below schedule.tick_s, each with what then runs once per tick only.
+UNDER_TICK = (("schedule.ps_s", "ps and the queue read run"), ("schedule.minute_s", "the minute tasks run"),
+              ("schedule.metrics_s", "the metrics.csv row is written"))
+# The settings table's maximum of github.stale_minutes (mmcore.SCHEMA; tests/test_schedule.py checks they agree): a fix
+# never names a value the settings refuse.
+GITHUB_STALE_MINUTES_MAX = 1440
+
+
+def status_gap_s(s):
+    """The longest status.json gap of a working supervisor. A tick writes status.json with the time of its own start;
+    the next tick starts schedule.tick_s after that start, or when a longer tick ends. With every tick within
+    self.max_tick_s (a longer one is a slow tick), that is max(tick_s, max_tick_s) + max_tick_s, and never under
+    1.5 x tick_s (half a tick of margin)."""
+    t, m = s["schedule.tick_s"], s["self.max_tick_s"]
+    return max(max(t, m) + m, 1.5 * t)
+
+
+def timing_warnings(ctx, s):
+    """`mm check`'s W_SCHEDULE lines, in this order: settings whose timings do not fit together. Never part of
+    validate, so a warning never makes the settings bad and never stops the last good values. The defaults give none.
+    ctx: {"service": the supervisor and the watchdog run as services (the watchdog's checks), "pool": the profile names
+    a CI pool (the pool's check)}. It reads schedule.tick_s, not a `mm run --tick-seconds` override."""
+    out = []
+    t, gap = s["schedule.tick_s"], status_gap_s(s)
+    gap_why = "the longest status.json gap at schedule.tick_s %g and self.max_tick_s %g" % (t, s["self.max_tick_s"])
+    hb = s["other.heartbeat_max_age_s"]
+    if hb < gap:
+        out.append("W_SCHEDULE other.heartbeat_max_age_s %g is under %g s, %s: a working supervisor reads as stale; "
+                   "fix: set other.heartbeat_max_age_s to %g or more" % (hb, gap, gap_why, gap))
+    fresh = s["other.status_fresh_s"]
+    if fresh < 1.5 * t:
+        out.append("W_SCHEDULE other.status_fresh_s %g is under %g s (1.5 x schedule.tick_s %g): mm place and the launch "
+                   "gate find status.json old between two ticks; fix: set other.status_fresh_s to %g or more"
+                   % (fresh, 1.5 * t, t, 1.5 * t))
+    if ctx.get("service"):
+        resume, wd = s["self.resume_paused_after_s"], s["schedule.watchdog_s"]
+        if resume < gap:
+            out.append("W_SCHEDULE self.resume_paused_after_s %g is under %g s, %s: the watchdog continues calls a "
+                       "working supervisor paused; fix: set self.resume_paused_after_s to %g or more"
+                       % (resume, gap, gap_why, gap))
+        if wd > resume:  # the fix in whole seconds: schedule.watchdog_s is an int (30 to 599 here, inside its range)
+            out.append("W_SCHEDULE schedule.watchdog_s %g is over self.resume_paused_after_s %g: a paused call can stay "
+                       "stopped up to %g s after the supervisor's last status; fix: set schedule.watchdog_s to %d or less"
+                       % (wd, resume, wd + resume, math.floor(resume)))
+        stale = s["self.watchdog_stale_s"]
+        if stale < 1.5 * wd:
+            out.append("W_SCHEDULE self.watchdog_stale_s %g is under %g s (1.5 x schedule.watchdog_s %g): the supervisor "
+                       "raises WATCHDOG_STALE for a watchdog that runs on time; fix: set self.watchdog_stale_s to %g or "
+                       "more" % (stale, 1.5 * wd, wd, 1.5 * wd))
+    if ctx.get("pool"):
+        stale_min, read = s["github.stale_minutes"], s["github.read_interval_s"]
+        if stale_min * 60 < 1.5 * read:
+            need = 1.5 * read / 60
+            # over the maximum of github.stale_minutes, only a shorter read interval fits
+            fix = ("set github.stale_minutes to %g or more" % need if need <= GITHUB_STALE_MINUTES_MAX else
+                   "set github.read_interval_s to %g or less (github.stale_minutes is at most %g)"
+                   % (stale_min * 60 / 1.5, GITHUB_STALE_MINUTES_MAX))
+            out.append("W_SCHEDULE github.stale_minutes %g is under %g min (1.5 x github.read_interval_s %g s): the pool "
+                       "reads as stale between two reads; fix: %s" % (stale_min, need, read, fix))
+    for key, what in UNDER_TICK:
+        if s[key] < t:
+            out.append("W_SCHEDULE %s %g is under schedule.tick_s %g: %s once per tick, not every %g s; fix: set %s to "
+                       "%g or more" % (key, s[key], t, what, s[key], key, t))
+    window = s["evidence.window_minutes"] * 60
+    if s["schedule.metrics_s"] > window:
+        out.append("W_SCHEDULE schedule.metrics_s %g is over evidence.window_minutes %g (%g s): an evidence bundle can "
+                   "hold no metrics.csv row; fix: set schedule.metrics_s to %g or less"
+                   % (s["schedule.metrics_s"], s["evidence.window_minutes"], window, window))
+    return out
+
+
 # ------------------------------------------------------------------------------------------- resources (mm resources)
 
 def queue_idle(slots, busy, waiting, state):

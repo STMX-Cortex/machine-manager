@@ -1,0 +1,13 @@
+{
+ "case": "github-read-1200",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "github.read_interval_s": 1200
+ }
+}

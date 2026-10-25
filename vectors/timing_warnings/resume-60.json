@@ -1,0 +1,13 @@
+{
+ "case": "resume-60",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "self.resume_paused_after_s": 60
+ }
+}

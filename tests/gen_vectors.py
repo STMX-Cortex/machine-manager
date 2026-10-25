@@ -532,6 +532,50 @@ row_case("text-cut", dict(REC, id="i" * 300, read_time=NOW - 1000, why="w" * 500
                           values=[{"key": "note", "value": "n" * 300}]))
 row_case("not-a-record", None)
 
+# ---- timing_warnings: mm check's W_SCHEDULE lines; input: what is in use (the watchdog service, a CI pool)
+IN_USE = {"service": True, "pool": True}
+
+
+def timing_case(name, over, ctx=IN_USE):
+    case("timing_warnings", name, ctx, over)
+
+
+timing_case("defaults", {})  # the defaults give no warning
+timing_case("tick-30", {"schedule.tick_s": 30})  # the longest tick fits every other default
+timing_case("heartbeat-60", {"other.heartbeat_max_age_s": 60})  # max(10, 30) + 30
+timing_case("heartbeat-59", {"other.heartbeat_max_age_s": 59})
+timing_case("max-tick-120", {"self.max_tick_s": 120})  # the gap 240: heartbeat and resume
+timing_case("max-tick-120-no-service", {"self.max_tick_s": 120}, {"service": False, "pool": True})
+timing_case("gap-from-tick", {"schedule.tick_s": 30, "self.max_tick_s": 5, "other.heartbeat_max_age_s": 44})  # 1.5 x 30
+timing_case("status-fresh-fraction", {"schedule.tick_s": 12.5, "other.status_fresh_s": 18})  # 18.75
+timing_case("status-fresh-at-limit", {"schedule.tick_s": 12.5, "other.status_fresh_s": 18.75})
+timing_case("resume-60", {"self.resume_paused_after_s": 60})
+timing_case("resume-59", {"self.resume_paused_after_s": 59})  # also under the watchdog's 60 s
+timing_case("watchdog-over-resume", {"schedule.watchdog_s": 90, "self.resume_paused_after_s": 89})
+# the fix in whole seconds (schedule.watchdog_s is an int): 89
+timing_case("watchdog-over-fractional-resume", {"schedule.watchdog_s": 90, "self.resume_paused_after_s": 89.5})
+timing_case("watchdog-120", {"schedule.watchdog_s": 120})
+timing_case("watchdog-121", {"schedule.watchdog_s": 121, "self.resume_paused_after_s": 600})  # watchdog_stale 180
+timing_case("watchdog-no-service", {"schedule.watchdog_s": 600}, {"service": False, "pool": True})
+timing_case("github-read-1200", {"github.read_interval_s": 1200})
+timing_case("github-read-1201", {"github.read_interval_s": 1201})  # 30.025 min
+timing_case("github-no-pool", {"github.read_interval_s": 1201}, {"service": True, "pool": False})
+timing_case("github-read-57600", {"github.read_interval_s": 57600})  # 1440 min: github.stale_minutes' maximum still fits
+# 2160 min is over github.stale_minutes' maximum (1440): the fix lowers github.read_interval_s instead (30 x 40 s)
+timing_case("github-read-86400", {"github.read_interval_s": 86400})
+timing_case("intervals-under-tick", {"schedule.tick_s": 15, "schedule.ps_s": 10, "schedule.minute_s": 14,
+                                     "schedule.metrics_s": 10})
+timing_case("intervals-at-tick", {"schedule.tick_s": 15, "schedule.ps_s": 15, "schedule.minute_s": 15,
+                                  "schedule.metrics_s": 15})
+timing_case("metrics-over-window", {"schedule.metrics_s": 301, "evidence.window_minutes": 5})
+timing_case("metrics-at-window", {"schedule.metrics_s": 300, "evidence.window_minutes": 5})
+timing_case("nothing-in-use", {"self.max_tick_s": 120, "schedule.watchdog_s": 600, "github.read_interval_s": 3600}, {})
+# every check at once (the gap 60 s at tick 15): the expected list pins the order of the lines, checks 1 to 8
+timing_case("every-check", {"schedule.tick_s": 15, "other.heartbeat_max_age_s": 59, "other.status_fresh_s": 15,
+                            "self.resume_paused_after_s": 59, "schedule.watchdog_s": 61, "self.watchdog_stale_s": 90,
+                            "github.read_interval_s": 1201, "schedule.ps_s": 10, "schedule.metrics_s": 600,
+                            "evidence.window_minutes": 5})
+
 
 def write_settings():
     """vectors/_settings/base.json from the code's settings table (mmtest.base_settings); test_vectors checks it."""

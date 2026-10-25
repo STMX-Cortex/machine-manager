@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """`mm drill memory`: a controlled memory load that tests the AMBER response and the alert path. It never aims at RED.
 
-Preconditions (else one refusal line): the queue has 0 busy and 0 waiting; the memory guard is alive; the supervisor's
-status is fresh; no other drill runs (a lock). It fills memory in steps inside ONE child process (random bytes in every page, so the compressor cannot shrink them),
+Preconditions (else one refusal line): schedule.tick_s is at most 20 s (status.json then stays within STATUS_FRESH_S
+between two ticks); the queue has 0 busy and 0 waiting; the memory guard is alive; the supervisor's status is fresh; no
+other drill runs (a lock). It fills memory in steps inside ONE child process (random bytes in every page, so the compressor cannot shrink them),
 reads after each step, and stops at the first of: the supervisor reports AMBER (or RED), the floor (RED free line + 10
 points, also predicted one step ahead), the cap (never more than the room above the floor at the start plus one step),
 memory not used (3 steps add memory but free falls under 1 point or under a quarter of the added share), swap growth over the AMBER line, the time limit,
@@ -24,7 +25,8 @@ import mmread
 
 MB = 1 << 20
 # A drill safety limit, kept stricter than other.status_fresh_s: the drill starts, and trusts the supervisor's state
-# (its AMBER stop), only while status.json is at most 30 s (3 ticks) old.
+# (its AMBER stop), only while status.json is at most 30 s (3 ticks at the default schedule.tick_s) old. A tick of
+# more than STATUS_FRESH_S / 1.5 (20 s) can leave status.json older than that between two ticks: the drill refuses.
 STATUS_FRESH_S = 30
 
 
@@ -83,8 +85,12 @@ def live_reader(now):
             "state": st.get("state") if fresh else None, "status_fresh": fresh}
 
 
-def preconditions(profile, queue, now):
+def preconditions(profile, queue, now, s=None):
     """None when the drill may start; else the refusal line."""
+    most = STATUS_FRESH_S / 1.5
+    if s is not None and s["schedule.tick_s"] > most:
+        return ("E_DRILL schedule.tick_s %g is over %g s: the drill trusts status.json only up to %g s old; fix: set "
+                "schedule.tick_s to %g or less for the drill" % (s["schedule.tick_s"], most, STATUS_FRESH_S, most))
     if queue is not None:
         try:
             q = queue.read(now)
@@ -121,7 +127,7 @@ def run(profile, s, queue=None, step_mb=512, settle_s=25, time_limit_s=900, read
 
 def _run_locked(profile, s, queue, step_mb, settle_s, time_limit_s, reader, child_factory, clock, sleep, total, after_s,
                 probe, now):
-    why = preconditions(profile, queue, now)
+    why = preconditions(profile, queue, now, s)
     if why:
         return {"refused": why}
     total = total or total_mb()

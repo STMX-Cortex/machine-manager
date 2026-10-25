@@ -73,4 +73,5 @@ FUNCTIONS = {
     "pool_resources": lambda i, s: ad_ci_github.pool_resources(i["gh"], s, i["now"], i["pool_id"]),
     "usage_resources": lambda i, s: ad_deliver_claude.usage_resources(i["usage"], i["resets"], i["now"], s),
     "cap_records": lambda i, s: mmdecide.cap_records(i["recs"], i["t"]),
+    "timing_warnings": lambda i, s: mmdecide.timing_warnings(i, s),
 }

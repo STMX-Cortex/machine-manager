@@ -1,0 +1,31 @@
+{
+ "case": "every-check",
+ "expected": [
+  "W_SCHEDULE other.heartbeat_max_age_s 59 is under 60 s, the longest status.json gap at schedule.tick_s 15 and self.max_tick_s 30: a working supervisor reads as stale; fix: set other.heartbeat_max_age_s to 60 or more",
+  "W_SCHEDULE other.status_fresh_s 15 is under 22.5 s (1.5 x schedule.tick_s 15): mm place and the launch gate find status.json old between two ticks; fix: set other.status_fresh_s to 22.5 or more",
+  "W_SCHEDULE self.resume_paused_after_s 59 is under 60 s, the longest status.json gap at schedule.tick_s 15 and self.max_tick_s 30: the watchdog continues calls a working supervisor paused; fix: set self.resume_paused_after_s to 60 or more",
+  "W_SCHEDULE schedule.watchdog_s 61 is over self.resume_paused_after_s 59: a paused call can stay stopped up to 120 s after the supervisor's last status; fix: set schedule.watchdog_s to 59 or less",
+  "W_SCHEDULE self.watchdog_stale_s 90 is under 91.5 s (1.5 x schedule.watchdog_s 61): the supervisor raises WATCHDOG_STALE for a watchdog that runs on time; fix: set self.watchdog_stale_s to 91.5 or more",
+  "W_SCHEDULE github.stale_minutes 30 is under 30.025 min (1.5 x github.read_interval_s 1201 s): the pool reads as stale between two reads; fix: set github.stale_minutes to 30.025 or more",
+  "W_SCHEDULE schedule.ps_s 10 is under schedule.tick_s 15: ps and the queue read run once per tick, not every 10 s; fix: set schedule.ps_s to 15 or more",
+  "W_SCHEDULE schedule.metrics_s 600 is over evidence.window_minutes 5 (300 s): an evidence bundle can hold no metrics.csv row; fix: set schedule.metrics_s to 300 or less"
+ ],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "evidence.window_minutes": 5,
+  "github.read_interval_s": 1201,
+  "other.heartbeat_max_age_s": 59,
+  "other.status_fresh_s": 15,
+  "schedule.metrics_s": 600,
+  "schedule.ps_s": 10,
+  "schedule.tick_s": 15,
+  "schedule.watchdog_s": 61,
+  "self.resume_paused_after_s": 59,
+  "self.watchdog_stale_s": 90
+ }
+}

@@ -1,0 +1,16 @@
+{
+ "case": "watchdog-121",
+ "expected": [
+  "W_SCHEDULE self.watchdog_stale_s 180 is under 181.5 s (1.5 x schedule.watchdog_s 121): the supervisor raises WATCHDOG_STALE for a watchdog that runs on time; fix: set self.watchdog_stale_s to 181.5 or more"
+ ],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "schedule.watchdog_s": 121,
+  "self.resume_paused_after_s": 600
+ }
+}

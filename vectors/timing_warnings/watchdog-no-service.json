@@ -1,0 +1,13 @@
+{
+ "case": "watchdog-no-service",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": false
+ },
+ "settings": "base",
+ "settings_over": {
+  "schedule.watchdog_s": 600
+ }
+}

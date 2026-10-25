@@ -1,0 +1,11 @@
+{
+ "case": "defaults",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {}
+}

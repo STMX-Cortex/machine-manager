@@ -1,0 +1,20 @@
+{
+ "case": "intervals-under-tick",
+ "expected": [
+  "W_SCHEDULE schedule.ps_s 10 is under schedule.tick_s 15: ps and the queue read run once per tick, not every 10 s; fix: set schedule.ps_s to 15 or more",
+  "W_SCHEDULE schedule.minute_s 14 is under schedule.tick_s 15: the minute tasks run once per tick, not every 14 s; fix: set schedule.minute_s to 15 or more",
+  "W_SCHEDULE schedule.metrics_s 10 is under schedule.tick_s 15: the metrics.csv row is written once per tick, not every 10 s; fix: set schedule.metrics_s to 15 or more"
+ ],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "schedule.metrics_s": 10,
+  "schedule.minute_s": 14,
+  "schedule.ps_s": 10,
+  "schedule.tick_s": 15
+ }
+}

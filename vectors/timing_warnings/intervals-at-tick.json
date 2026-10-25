@@ -1,0 +1,16 @@
+{
+ "case": "intervals-at-tick",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "schedule.metrics_s": 15,
+  "schedule.minute_s": 15,
+  "schedule.ps_s": 15,
+  "schedule.tick_s": 15
+ }
+}

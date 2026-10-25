@@ -11,7 +11,7 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Records and files | `core/mmcore.py` (settings, alert store, atomic writes, line formats), `core/mmadapters.py` (`records`: each adapter's resource records, cut, masked, cleaned, strict JSON; a failure is one `UNKNOWN` record) | Match `schemas/`; atomic rename writes; `resources.json` written every good tick, even empty |
 | Readings | `core/mmread.py` (system calls; the macOS commands as a cross-check) | Any method; `mm check` compares with the commands |
 | Platform | `core/mmplat.py` (the choice; `MM_PLATFORM` overrides it), `core/mmplat_darwin.py`, `core/mmplat_linux.py` | One backend per platform, the same names (readings, `machine_facts` for the static facts, command paths); a reading it cannot take is None, a command it lacks is None and skipped |
-| Jobs and loop | `core/mmsuper.py`, `core/mmwatch.py`, `core/mmrecover.py`, `core/mmdelete.py`, `core/mmdrill.py`, `bin/cachetrim.py` | Same behaviour; tests in `tests/` describe it |
+| Jobs and loop | `core/mmsuper.py`, `core/mmwatch.py`, `core/mmrecover.py`, `core/mmdelete.py`, `core/mmdrill.py`, `bin/cachetrim.py` | Same behaviour; tests in `tests/` describe it. The tick and the job intervals come from `[schedule]` (README.md, Schedules); the tick is read before each wait |
 | Adapters | `adapters/ad_queue_fifo.py`, `adapters/ad_ci_github.py`, `adapters/ad_deliver_claude.py` | One per kind; chosen by the profile's `adapter` value. Optional `resources(read, s, now)`: resource records (`schemas/resource.schema.json`, without `time`) from the adapter's last read and its own small files only (no command, no network, no waiting) |
 | Command line | `bin/mm`, `core/mminstall.py`, `core/mmplace.py` | Same verbs, output lines and exit codes (`tests/test_cli.py`) |
 
@@ -38,7 +38,8 @@ Functions with vectors: `classify`, `slot_decide`, `alert_raise`, `alert_absent`
 minute), `mask`, `compare_readings`, `parse_load_line`, `parse_history_line`, `parse_kernel_line`, `parse_billing`,
 `parse_delete_line`, `read_usage` (row freshness, percentages and weekly projection), and for self-recovery
 `sample_problems`, `self_check`, `crash_loop`, `resume_targets`,
-`reboot_check`, and for `mm resources` `resource_row` (one row per record: freshness, state, words, groups and values;
+`reboot_check`, for the schedule `timing_warnings` (`mm check`'s `W_SCHEDULE` lines, in order; the input says what is
+in use: `service` and `pool`), and for `mm resources` `resource_row` (one row per record: freshness, state, words, groups and values;
 the expected row is a list of `[key, value]` pairs, so the key order is part of the contract), `machine_resource`
 (status.json as a record), `pool_resources` and `usage_resources` (the writers' records) and `cap_records` (the record
 cap). In `machine_resource`, `pool_resources` and `usage_resources`, and in `resource_row`'s `running`, `queued` and

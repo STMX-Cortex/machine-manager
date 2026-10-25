@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """machine-manager supervisor: readings, the machine state, the slot controller, the alerts, the deletes, the trim.
 
-One tick every 10 s (`mm run`). Each tick writes status.json (the machine's status record and heartbeat) atomically.
+One tick every schedule.tick_s (default 10 s; `mm run`), read before each wait, so a changed settings.toml counts from
+the next wait; `mm run --tick-seconds` overrides it. The slower jobs run on the first tick at or after their
+[schedule] interval. Each tick writes status.json (the machine's status record and heartbeat) atomically.
 Safety actions are local and never wait on the network; slow reads (sizes, the pool, the delete scan) run in threads.
 Modes: observe (settings mode.observe) and the off switch (`mm off`) turn every action into a logged WOULD line;
 --dry-run reads live data and writes only into its data folder.
@@ -32,7 +34,6 @@ KERNEL_PREDICATE = ('sender == "kernel" AND eventMessage CONTAINS "memorystatus"
                     '(eventMessage CONTAINS "suspending" OR eventMessage CONTAINS "no paging space")')
 TICK_ERRORS_ALERT = 3
 FALLBACK_REPEAT = {"repeat.action_minutes": 30, "repeat.attention_hours": 3, "repeat.clear_after_minutes": 5}
-CHECK_EVERY_S = 86400
 EXIT_RESTART = 75  # a self-check restart: launchd starts the supervisor again (KeepAlive)
 STOP_DEADLINE_S = 8  # without settings: s from a SIGTERM to the forced end (under the plist's ExitTimeOut)
 HELD_REBOOT_S = 3600
@@ -550,6 +551,7 @@ class Supervisor:
         return r
 
     def due(self, name, every, now):
+        """True on the first tick at or after `every` s since the job last ran (always on its first tick)."""
         if now - self.last.get(name, -1e18) >= every:
             self.last[name] = now
             return True
@@ -588,8 +590,8 @@ class Supervisor:
         if self.cache["resumed"] and now - self.cache["resumed"][0] < 1800:
             snap["resumed_gap_s"] = self.cache["resumed"][1]
 
-        # the macOS change check: at start and daily
-        if self.check_on and self.due("readings_check", CHECK_EVERY_S, now):
+        # the macOS change check: at start and every schedule.readings_check_hours (default daily)
+        if self.check_on and self.due("readings_check", s["schedule.readings_check_hours"] * 3600, now):
             try:
                 bad, _, _ = mmread.check_readings(now)
             except Exception as e:  # the check must never stop the loop
@@ -628,8 +630,8 @@ class Supervisor:
         snap["kernel_events"] = self.cache["kernel_events"]
         recent_kernel = any(now - e["seen"] < 120 for e in self.cache["kernel_events"])
 
-        # disk every 5 min (trend over 6 h)
-        if self.due("disk", 300, now) or "disk" not in self.cache:
+        # free disk every schedule.disk_s (default 5 min; the trend over 6 h)
+        if self.due("disk", s["schedule.disk_s"], now) or "disk" not in self.cache:
             d = mmread.disk_free_gb()
             self.cache["disk"] = d
             hist = self.state.setdefault("disk_hist", [])
@@ -647,8 +649,8 @@ class Supervisor:
                                                          "alt_state": alt_state})
         self.free_pct = sample.get("free_pct")
 
-        # every 30 s: ps and the queue
-        if self.due("ps", 30, now) or "procs" not in self.cache:
+        # every schedule.ps_s (default 30 s): ps and the queue
+        if self.due("ps", s["schedule.ps_s"], now) or "procs" not in self.cache:
             self.cache["procs"] = mmread.read_ps()
             try:
                 self.cache["queue"] = self.queue.read(now) if self.queue else None
@@ -659,9 +661,9 @@ class Supervisor:
         snap["queue"] = q
         snap.update({k: self.cache.get(k) for k in ("top_outside", "slot_cpu", "fsev_mb")})
 
-        # every 60 s: history, kills, events, power, sources, the recipient
+        # every schedule.minute_s (default 60 s): history, kills, events, power, sources, the recipient
         events = []
-        if self.due("minute", 60, now):
+        if self.due("minute", s["schedule.minute_s"], now):
             self._minute(now, s, events)
         # Usage rows may expire or become current between minute checks.
         if self.delivery and self.delivery.usage_file():
@@ -789,7 +791,7 @@ class Supervisor:
         if self.pool:
             self._pool_status(now, s, gh, active)
         self._resources(now, s, gh, q)
-        if self.due("metrics", 60, now):
+        if self.due("metrics", s["schedule.metrics_s"], now):  # a metrics.csv row and counts.json
             self._metrics(now, sample, mac_state, q)
             mmcore.write_atomic(mmcore.path("state", "counts.json"), json.dumps(self.counts, sort_keys=True))
         self.state["offsets"] = {"history": self.hist.offset, "kills": self.kills.offset, "events": self.events.offset}
@@ -1163,9 +1165,18 @@ def _stop_deadline(stop):
         os._exit(0)
 
 
-def run_loop(profile, dry_run=False, ticks=0, duration=0, tick_seconds=10, kernel=True, allow_live_slots=False):
+def tick_wait_s(tick_seconds, sup, fallback):
+    """The time from one tick's start to the next: `mm run --tick-seconds` when given (0 stays 0: tests), else
+    schedule.tick_s of the settings in force (the tick just run read a changed settings.toml), else fallback's (the
+    settings at start, or the defaults)."""
+    if tick_seconds is not None:
+        return tick_seconds
+    return ((sup.settings.values if sup is not None else None) or fallback)["schedule.tick_s"]
+
+
+def run_loop(profile, dry_run=False, ticks=0, duration=0, tick_seconds=None, kernel=True, allow_live_slots=False):
     """The supervisor's life. At start: the unclean-start count (mmrecover.note_start); at 3 in 15 min, safe mode.
-    Each tick: the tick, then the self-check. Ends with 0 when stopped (SIGTERM) or done, and with EXIT_RESTART when the
+    Each tick: the tick, then the self-check, then the wait to tick_wait_s after the tick's start. Ends with 0 when stopped (SIGTERM) or done, and with EXIT_RESTART when the
     self-check asks for a restart (launchd starts it again; that start counts as unclean).
     A SIGTERM is a planned stop, so it is clean whatever comes next: the handler marks the run clean at once, the wait
     between ticks ends at once, and a tick that does not end in self.stop_deadline_s is cut: its commands are killed,
@@ -1229,7 +1240,7 @@ def run_loop(profile, dry_run=False, ticks=0, duration=0, tick_seconds=10, kerne
             n += 1
             if ticks and n >= ticks or duration and time.monotonic() - t0 >= duration:
                 break
-            end = start + tick_seconds
+            end = start + tick_wait_s(tick_seconds, sup, st0)
             while not stop["now"] and time.monotonic() < end:  # a SIGTERM ends the wait at once
                 time.sleep(min(0.2, max(0.0, end - time.monotonic())))
         ended = True

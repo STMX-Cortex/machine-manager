@@ -1,0 +1,13 @@
+{
+ "case": "github-no-pool",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": false,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "github.read_interval_s": 1201
+ }
+}

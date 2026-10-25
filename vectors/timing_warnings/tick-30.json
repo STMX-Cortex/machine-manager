@@ -1,0 +1,13 @@
+{
+ "case": "tick-30",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "schedule.tick_s": 30
+ }
+}

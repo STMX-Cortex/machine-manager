@@ -1,0 +1,16 @@
+{
+ "case": "status-fresh-fraction",
+ "expected": [
+  "W_SCHEDULE other.status_fresh_s 18 is under 18.75 s (1.5 x schedule.tick_s 12.5): mm place and the launch gate find status.json old between two ticks; fix: set other.status_fresh_s to 18.75 or more"
+ ],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "other.status_fresh_s": 18,
+  "schedule.tick_s": 12.5
+ }
+}

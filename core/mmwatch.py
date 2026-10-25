@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""machine-manager watchdog: one shot, every 60 s from launchd (`mm watchdog`).
+"""machine-manager watchdog: one shot, every schedule.watchdog_s (default 60 s) from launchd (`mm watchdog`).
 
 It checks the supervisor's status.json age, the memory guard's heartbeat and the queue sampler's age. A stale
 supervisor gives an ACTION alert SELF_STALE and a restart of the supervisor's LaunchAgent (launchctl kickstart -k;

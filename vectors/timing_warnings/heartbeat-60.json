@@ -1,0 +1,13 @@
+{
+ "case": "heartbeat-60",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "other.heartbeat_max_age_s": 60
+ }
+}

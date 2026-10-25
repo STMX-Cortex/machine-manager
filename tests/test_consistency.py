@@ -159,7 +159,7 @@ class RunArgs(SetupBase):
         for args in lists:
             if args[0] == "run":
                 got = cli.run_options(mmcore.take_data_arg(args[1:]))
-                self.assertEqual(got["tick_seconds"], 10)
+                self.assertIsNone(got["tick_seconds"], "the installed supervisor follows schedule.tick_s")
                 self.assertTrue(got["allow_live_slots"])
                 self.assertFalse(got["dry_run"])
 
@@ -169,6 +169,10 @@ class RunArgs(SetupBase):
                                "--duration", "5"])
         self.assertEqual(got, {"dry_run": True, "ticks": 2, "duration": 5.0, "tick_seconds": 0.2, "kernel": False,
                                "allow_live_slots": False})
+        got = cli.run_options([])  # no --tick-seconds: the loop waits schedule.tick_s (the installed form's case)
+        self.assertEqual(got, {"dry_run": False, "ticks": 0, "duration": 0, "tick_seconds": None, "kernel": True,
+                               "allow_live_slots": False})
+        self.assertIsNone(cli.run_options(["--allow-live-slots"])["tick_seconds"])
 
     def test_bad_ticks_and_unknown_words_are_refused(self):
         for bad in ("0", "-1", "nan", "inf", "-inf"):

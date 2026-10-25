@@ -7,6 +7,17 @@ slot_writes = "off"  # off|test|live
 slots_file = ""  # path
 observe = true  # bool
 
+[schedule]
+# How often the supervisor's jobs run. A job runs on the first tick at or after its interval, so an interval rounds up
+# to whole ticks (README.md, Schedules). `mm check` warns (W_SCHEDULE) about timings that do not fit together.
+tick_s = 10  # s from one tick's start to the next; read before each wait; `mm run --tick-seconds` overrides it; default 10; range 5-30; authority: the owner
+disk_s = 300  # s between two free disk reads; default 300; range 60-600; authority: the owner
+ps_s = 30  # s between two reads of ps and the queue; default 30; range 10-60; authority: the owner
+minute_s = 60  # s between two runs of the minute tasks (history, kills, events, power, sources); default 60; range 10-300; authority: the owner
+metrics_s = 60  # s between two metrics.csv rows (counts.json is saved with each); default 60; range 10-600; authority: the owner
+readings_check_hours = 24  # h between two checks of the readings against the macOS commands (also at start); default 24; range 1-168; authority: the owner
+watchdog_s = 60  # s between two watchdog runs (whole seconds; takes effect at `mm install`); default 60; range 10-600; authority: the owner
+
 [slots]
 # The machine state (GREEN, STEADY, AMBER, RED) and the slot controller of the job queue.
 floor = 2  # slots

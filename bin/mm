@@ -33,6 +33,7 @@ Agents:
                             where a job should run: MACHINE, POOL or WAIT
   mm wait [--min-level attention|action]   block until an unseen alert (run it under a monitor)
   mm resources              one line per resource: machine, pools, runners, services (files only)
+  mm settings show [KEY|SECTION]   the settings in force, each with its default (read-only)
 Owner:
   mm off [--reason TEXT] | mm on      every automatic action off or on; on also ends safe mode
   mm slots pin N --minutes M [--reason TEXT] | mm slots unpin
@@ -306,6 +307,71 @@ def cmd_wait(args, as_json, profile):
         time.sleep(poll)
 
 
+def setting_value(key, v):
+    """A setting's value as `mm settings show` gives it: a string masked and cleaned, heartbeat.url as
+    `<scheme>://<host>/...` only (its ping log names only the host); any other value as it is."""
+    if not isinstance(v, str):
+        return v
+    if key == "heartbeat.url" and v:
+        import urllib.parse
+        try:
+            u = urllib.parse.urlsplit(v)
+            v = "%s://%s/..." % (u.scheme, u.hostname or "?")
+        except ValueError:
+            v = "?"
+    return mmcore.mask(mmcore.clean(v))
+
+
+def setting_word(key, v):
+    """The same value as one plain word: a bool as its TOML word, a string setting always JSON-quoted (so "true" or
+    "none" never reads as a word of the tool's own), a number exact as kv gives it."""
+    v = setting_value(key, v)
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, float):
+        return repr(v)[:-2] if repr(v).endswith(".0") else repr(v)
+    v = str(v)
+    return v if mmcore.SCHEMA.get(key, ("str",))[0] != "str" and mmcore.mmtext.BARE.fullmatch(v) else json.dumps(v)
+
+
+def cmd_settings(args, as_json, profile):
+    """`mm settings show [KEY|SECTION]`: the settings in force, one line per key in settings.default.toml's order, each
+    with its default and whether it differs. Read-only (Settings.peek: no file written, no supervisor needed). A bad
+    settings.toml: first its SETTINGS_BAD line, then the values in force (the last good ones, else the defaults); exit 1.
+    --json: {"in_force": "current"|"last_good"|"none", "problem", "settings": {key: {"value", "default", "differs"}}}."""
+    import mmadapters
+    if args[:1] != ["show"] or len(args) > 2:
+        return err("E_USAGE", "settings show [KEY|SECTION]", "mm help")
+    defaults = mmcore.defaults()
+    keys = list(defaults)
+    if len(args) == 2:
+        keys = [k for k in keys if args[1] in (k, k.split(".", 1)[0])]
+        if not keys:
+            return err("E_USAGE", "no setting or section %s" % mmcore.quoted(args[1]),
+                       "mm settings show, or mm settings show SECTION")
+    st = mmadapters.settings(profile)
+    try:
+        st.peek()
+    except Exception as e:  # a file the reader cannot take at all: a problem, never a traceback
+        st.problem = "settings unreadable: %s" % type(e).__name__
+    values, in_force, text = st.flat, "current", None
+    if st.problem is not None and values is not None:
+        in_force, text = "last_good", "settings invalid; the last good values stay: " + st.problem
+    elif st.problem is not None or values is None:
+        values, in_force = defaults, "none"
+        text = ("settings invalid and no last good values: the tool reads and controls nothing (shown: the defaults): "
+                + str(st.problem))
+    lines = [mmcore.alert_line({"level": "ACTION", "key": "SETTINGS_BAD", "name": "SETTINGS_BAD",
+                                "text": mmcore.mask_keep_quotes(text), "command": "mm check"})] if text else []
+    lines += ["%s=%s default=%s differs=%s" % (k, setting_word(k, values[k]), setting_word(k, defaults[k]),
+                                                "yes" if values[k] != defaults[k] else "no") for k in keys]
+    problem = None if st.problem is None else mmcore.clean(mmcore.mask_keep_quotes(st.problem))
+    emit(as_json, {"in_force": in_force, "problem": problem,
+                   "settings": {k: {"value": setting_value(k, values[k]), "default": setting_value(k, defaults[k]),
+                                    "differs": values[k] != defaults[k]} for k in keys}}, lines)
+    return 0 if in_force == "current" else 1
+
+
 # ------------------------------------------------------------------------------------------- owner verbs
 
 def cmd_off(args, as_json, on, profile):
@@ -479,14 +545,15 @@ def cmd_restart(args, as_json, profile):
 
 
 def run_options(args):
-    """`mm run` options as run_loop's keywords. A tick that is not a finite number above 0 (a busy loop or a hang) is
-    E_RANGE, and any other word is E_USAGE. mminstall writes `run --allow-live-slots` into the supervisor's plist."""
+    """`mm run` options as run_loop's keywords. Without --tick-seconds (None) the loop waits schedule.tick_s, read
+    before each wait; a --tick-seconds that is not a finite number above 0 (a busy loop or a hang) is E_RANGE, and any
+    other word is E_USAGE. mminstall writes `run --allow-live-slots` into the supervisor's plist."""
     out = {"dry_run": flag(args, "--dry-run"), "ticks": opt(args, "--ticks", 0, int),
-           "duration": opt(args, "--duration", 0, float), "tick_seconds": opt(args, "--tick-seconds", 10, float),
+           "duration": opt(args, "--duration", 0, float), "tick_seconds": opt(args, "--tick-seconds", None, float),
            "kernel": not flag(args, "--no-kernel-stream"), "allow_live_slots": flag(args, "--allow-live-slots")}
-    if not math.isfinite(out["tick_seconds"]) or out["tick_seconds"] <= 0:
+    if out["tick_seconds"] is not None and (not math.isfinite(out["tick_seconds"]) or out["tick_seconds"] <= 0):
         raise mmcore.MMError("E_RANGE", "--tick-seconds %r is not a finite number above 0" % out["tick_seconds"],
-                             "give a number of seconds above 0 (default 10)")
+                             "give a number of seconds above 0, or leave it out (schedule.tick_s)")
     if args:
         raise mmcore.MMError("E_USAGE", "mm run does not take %s" % " ".join(mmcore.quoted(a) for a in args), "mm help")
     return out
@@ -524,6 +591,8 @@ def main(argv):
         print(refused)
         return 2
     profile = mmcore.load_profile()
+    if verb == "settings":  # read-only: before the state folder is made, so it creates nothing
+        return cmd_settings(args, as_json, profile)
     os.makedirs(mmcore.path("state"), exist_ok=True)
     if verb == "status":
         return cmd_status(args, as_json)

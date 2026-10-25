@@ -29,7 +29,7 @@ class Vectors(unittest.TestCase):
         for fn in ("classify", "slot_decide", "alert_raise", "alert_absent", "conditions", "delete_guard", "place",
                    "drill_stop", "replay", "parse_billing", "mask", "sample_problems", "self_check", "crash_loop",
                    "resume_targets", "reboot_check", "resource_row", "machine_resource", "pool_resources",
-                   "usage_resources", "cap_records"):
+                   "usage_resources", "cap_records", "timing_warnings"):
             self.assertGreaterEqual(counts.get(fn, 0), 3 if fn != "alert_absent" else 3, fn)
         mmtest.write_result("vector-counts.txt", ["%s=%d" % kv for kv in sorted(counts.items())])
 
@@ -100,6 +100,31 @@ class Vectors(unittest.TestCase):
         for fn, case, v, s in run_vectors.load_all():
             if fn == "alert_line":
                 self.assertLessEqual(len(v["expected"]), 200)
+
+    def test_meaning_of_timing_vectors(self):
+        """Pinned by hand: the defaults and the longest tick warn about nothing; every line is one W_SCHEDULE line with
+        its fix; the status.json gap is max(tick_s, max_tick_s) + max_tick_s (60 at the defaults)."""
+        self.assertEqual(vec("timing_warnings", "defaults")["expected"], [])
+        self.assertEqual(vec("timing_warnings", "defaults")["settings_over"], {})
+        self.assertEqual(vec("timing_warnings", "tick-30")["expected"], [])
+        self.assertEqual(vec("timing_warnings", "heartbeat-60")["expected"], [])
+        self.assertTrue(vec("timing_warnings", "heartbeat-59")["expected"][0].startswith(
+            "W_SCHEDULE other.heartbeat_max_age_s 59 is under 60 s"))
+        self.assertTrue(all("240 or more" in x for x in vec("timing_warnings", "max-tick-120")["expected"]))
+        self.assertEqual(len(vec("timing_warnings", "max-tick-120")["expected"]), 2)
+        for c in ("watchdog-no-service", "github-no-pool"):
+            self.assertEqual(vec("timing_warnings", c)["expected"], [], c)
+        self.assertEqual([x.split(" ")[1] for x in vec("timing_warnings", "every-check")["expected"]], [
+            "other.heartbeat_max_age_s", "other.status_fresh_s", "self.resume_paused_after_s", "schedule.watchdog_s",
+            "self.watchdog_stale_s", "github.stale_minutes", "schedule.ps_s", "schedule.metrics_s"], "checks 1 to 8")
+        self.assertTrue(vec("timing_warnings", "github-read-86400")["expected"][0].endswith(
+            "; fix: set github.read_interval_s to 1200 or less (github.stale_minutes is at most 1440)"))
+        for fn, case, v, s in run_vectors.load_all():
+            if fn == "timing_warnings":
+                self.assertEqual(sorted(v["input"]), ["pool", "service"] if v["input"] else [], case)
+                for line in v["expected"]:
+                    self.assertRegex(line, r"^W_SCHEDULE \S+ .+; fix: .+$", case)
+                    self.assertEqual(line.count("; fix: "), 1, case)
 
 
 class Schemas(unittest.TestCase):

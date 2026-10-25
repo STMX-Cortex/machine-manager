@@ -1,0 +1,15 @@
+{
+ "case": "github-read-1201",
+ "expected": [
+  "W_SCHEDULE github.stale_minutes 30 is under 30.025 min (1.5 x github.read_interval_s 1201 s): the pool reads as stale between two reads; fix: set github.stale_minutes to 30.025 or more"
+ ],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "github.read_interval_s": 1201
+ }
+}

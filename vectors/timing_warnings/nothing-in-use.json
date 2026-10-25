@@ -1,0 +1,14 @@
+{
+ "case": "nothing-in-use",
+ "expected": [
+  "W_SCHEDULE other.heartbeat_max_age_s 90 is under 240 s, the longest status.json gap at schedule.tick_s 10 and self.max_tick_s 120: a working supervisor reads as stale; fix: set other.heartbeat_max_age_s to 240 or more"
+ ],
+ "function": "timing_warnings",
+ "input": {},
+ "settings": "base",
+ "settings_over": {
+  "github.read_interval_s": 3600,
+  "schedule.watchdog_s": 600,
+  "self.max_tick_s": 120
+ }
+}

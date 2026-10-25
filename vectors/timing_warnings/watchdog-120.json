@@ -1,0 +1,13 @@
+{
+ "case": "watchdog-120",
+ "expected": [],
+ "function": "timing_warnings",
+ "input": {
+  "pool": true,
+  "service": true
+ },
+ "settings": "base",
+ "settings_over": {
+  "schedule.watchdog_s": 120
+ }
+}
