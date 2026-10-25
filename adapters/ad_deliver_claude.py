@@ -4,7 +4,8 @@
 the supervisor reads from Claude Code (usage-watch state, the recipient's open tool calls, its job lines, cache writes).
 
 Interface (PORTING.md, "Adapters"): recipient(); hook(argv, stdin) (the hook process); take_unseen(session, level, now);
-format_alerts(records); banner(text, enabled); usage(now, s); open_tool_call(now); jobs(); cache_5m(now).
+format_alerts(records); banner(text, enabled); usage(now, s); resources(usage, s, now) -> resource records (the usage
+services, for resources.json; mmadapters.records); open_tool_call(now); jobs(); cache_5m(now).
 
 The hook prints unseen ATTENTION and ACTION alerts as additional context, only in the recipient's main session:
 - session_id must equal the id the profile's recipient_regex finds in recipient_file;
@@ -30,8 +31,7 @@ import time
 import mmcore  # noqa: E402
 import mmtext  # noqa: E402
 
-# mmread (and its platform backend, ctypes on macOS) loads only where a function needs it, so `mm resources` can read
-# the usage state without it.
+# mmread (and its platform backend, ctypes on macOS) loads only where a function needs it.
 
 EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "PreToolUse")
 LIMIT = 1 << 20
@@ -411,6 +411,50 @@ def usage_resets(file):
     return out
 
 
+# the usage services as resource records: (short name, usage level, read_usage key) per window
+SERVICES = {"claude": (("5h", "claude_5h", "claude_5h"), ("week", "claude_weekly", "claude_week")),
+            "codex": (("5h", "codex_5h", "codex_5h"), ("week", "codex_weekly", "codex_week"))}
+
+
+def _finite(v):
+    """A finite int or float, not a bool."""
+    try:
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    except OverflowError:  # an int too large for a float
+        return False
+
+
+def usage_resources(usage, resets, now, s):
+    """The usage services' resource records (claude, then codex) for resources.json. usage: read_usage's result (None:
+    the state is unreadable); resets: usage_resets's result. read_time is now - age_s; the read rule is the file's own
+    max_age_s, else usage.watch_state_max_age_s. Per offered window: used_<w>_pct and reset_<w> (None when the usage
+    rules reject the value). state is None when a value is known (no usage thresholds here), else UNKNOWN. Pure."""
+    u = usage if isinstance(usage, dict) else None
+    resets = resets if isinstance(resets, dict) else {}
+    g = u or {}
+    stale = g.get("stale_levels") if isinstance(g.get("stale_levels"), dict) else {}
+    out = []
+    for sid, windows in SERVICES.items():
+        values, known, why = [], False, []
+        for short, level, key in windows:
+            lv = resets.get(level) if isinstance(resets.get(level), dict) else {}
+            if lv.get("not_offered") is True:
+                continue  # a window the plan does not offer: no values
+            used = round(g[key], 1) if _finite(g.get(key)) else None
+            reset = lv.get("reset_at")
+            values += [{"key": "used_%s_pct" % short, "value": used},
+                       {"key": "reset_%s" % short, "value": int(reset) if used is not None and _finite(reset) else None}]
+            known = known or used is not None
+            if isinstance(stale.get(level), str):
+                why.append("%s: %s" % (level, stale[level][:80]))
+        out.append({"resource": "service", "id": sid, "location": "cloud",
+                    "read_time": now - g["age_s"] if u is not None and _finite(g.get("age_s")) else None,
+                    "stale_after_s": g["max_age_s"] if _finite(g.get("max_age_s")) else s["usage.watch_state_max_age_s"],
+                    "state": None if known else "UNKNOWN",
+                    "why": "usage state unreadable" if u is None else ("; ".join(why) or None), "values": values})
+    return out
+
+
 def jobs(cfg, base=None):
     """(pid, rc_path) pairs from 'pid=N ... rc=PATH' tokens in the recipient's job file, above its end marker."""
     out = []
@@ -579,6 +623,10 @@ class Delivery:
     def usage_file(self):
         f = self.cfg.get("usage_state")
         return mmcore.expand(f) if f else None
+
+    def resources(self, usage, s, now):
+        f = self.usage_file()
+        return [] if f is None else usage_resources(usage, usage_resets(f), now, s)
 
     def open_tool_call(self, now):
         sid = self.recipient()

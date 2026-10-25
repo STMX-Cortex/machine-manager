@@ -28,7 +28,8 @@ class Vectors(unittest.TestCase):
             self.assertEqual(v["function"], fn)
         for fn in ("classify", "slot_decide", "alert_raise", "alert_absent", "conditions", "delete_guard", "place",
                    "drill_stop", "replay", "parse_billing", "mask", "sample_problems", "self_check", "crash_loop",
-                   "resume_targets", "reboot_check"):
+                   "resume_targets", "reboot_check", "resource_row", "machine_resource", "pool_resources",
+                   "usage_resources", "cap_records"):
             self.assertGreaterEqual(counts.get(fn, 0), 3 if fn != "alert_absent" else 3, fn)
         mmtest.write_result("vector-counts.txt", ["%s=%d" % kv for kv in sorted(counts.items())])
 
@@ -127,7 +128,7 @@ class Schemas(unittest.TestCase):
     def test_schema_files_load_and_settings_schema_matches_code(self):
         names = sorted(f[:-12] for f in os.listdir(mmschema.SCHEMAS) if f.endswith(".schema.json"))
         self.assertEqual(names, ["alert", "delete-line", "off", "override", "placement", "placement-request", "profile",
-                                 "reading", "settings", "status"])
+                                 "reading", "resource", "settings", "status"])
         self.assertEqual(mmschema.load("settings"), mmcore.settings_json_schema(), "regenerate schemas/settings.schema.json")
         self.assertEqual(mmschema.validate(mmcore.defaults(), mmschema.load("settings")), [])
         self.assertTrue(mmschema.validate(dict(mmcore.defaults(), **{"slots.floor": 0}), mmschema.load("settings")))

@@ -1,0 +1,13 @@
+{
+ "case": "not-a-list",
+ "expected": [],
+ "function": "cap_records",
+ "input": {
+  "recs": {
+   "resource": "pool"
+  },
+  "t": 1800000000.0
+ },
+ "settings": "base",
+ "settings_over": {}
+}

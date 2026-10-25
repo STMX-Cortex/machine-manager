@@ -200,63 +200,6 @@
     "null"
    ],
    "description": "machine: minutes the queue has been idle (the IDLE_ROOM span), or null when it is not idle"
-  },
-  "money": {
-   "type": "object",
-   "description": "pool: money used and allowed this month",
-   "properties": {
-    "used_usd": {
-     "type": [
-      "number",
-      "null"
-     ]
-    },
-    "allowed_usd": {
-     "type": [
-      "number",
-      "null"
-     ]
-    }
-   },
-   "additionalProperties": false
-  },
-  "runners": {
-   "type": "array",
-   "description": "pool: the self-hosted runners that carry every ci.runner_labels label",
-   "items": {
-    "type": "object",
-    "required": [
-     "name",
-     "online",
-     "busy",
-     "labels"
-    ],
-    "properties": {
-     "name": {
-      "type": "string"
-     },
-     "online": {
-      "type": "boolean"
-     },
-     "busy": {
-      "type": "boolean"
-     },
-     "labels": {
-      "type": "array",
-      "items": {
-       "type": "string"
-      }
-     }
-    },
-    "additionalProperties": false
-   }
-  },
-  "runners_error": {
-   "type": [
-    "string",
-    "null"
-   ],
-   "description": "pool: why the runner list could not be read (masked); no runners then"
   }
  },
  "additionalProperties": false

@@ -788,6 +788,7 @@ class Supervisor:
                      idle_minutes=snap.get("idle_minutes"))
         if self.pool:
             self._pool_status(now, s, gh, active)
+        self._resources(now, s, gh, q)
         if self.due("metrics", 60, now):
             self._metrics(now, sample, mac_state, q)
             mmcore.write_atomic(mmcore.path("state", "counts.json"), json.dumps(self.counts, sort_keys=True))
@@ -1108,6 +1109,24 @@ class Supervisor:
         rec = self.pool.status(gh, s, now, keys)
         safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in self.pool.id)
         mmcore.write_atomic(mmcore.path("pools", safe + ".json"), json.dumps(rec, sort_keys=True))
+
+    def _resources(self, now, s, gh, q):
+        """resources.json: every adapter's resource records (mmadapters.records: ci, delivery, queue), capped
+        (mmdecide.cap_records), each with this tick's time (schemas/resource.schema.json). Written on every good tick,
+        even when empty; a failure costs one errors.log line, never the rest of the tick."""
+        try:
+            recs = (mmadapters.records(self.pool, gh, s, now, "ci")
+                    + mmadapters.records(self.delivery, self.cache.get("usage"), s, now, "delivery")
+                    + mmadapters.records(self.queue, q, s, now, "queue"))
+            recs = [dict(r, time=now) for r in mmdecide.cap_records(recs, now)]
+            doc = mmcore.stamp({"kind": "resources", "time": now, "resources": recs}, mid=self.mid)
+            mmcore.write_atomic(mmcore.path("resources.json"), json.dumps(doc, sort_keys=True, allow_nan=False))
+        except Exception as e:  # resources.json is a view for agents, never a reason to stop the tick
+            try:
+                mmcore.append_line(mmcore.path("state", "errors.log"),
+                                   mmcore.mask("%s resources.json %r" % (mmcore.now_local(now), e)))
+            except Exception:  # nor is its log line (errors.log unwritable too)
+                pass
 
     def _metrics(self, now, sample, mac_state, q):
         f = mmcore.path("metrics.csv")

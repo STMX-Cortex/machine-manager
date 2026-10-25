@@ -1,0 +1,169 @@
+{
+ "case": "machine-from-status",
+ "expected": [
+  [
+   "resource",
+   "machine"
+  ],
+  [
+   "id",
+   "lab1"
+  ],
+  [
+   "location",
+   "local"
+  ],
+  [
+   "state",
+   "GREEN"
+  ],
+  [
+   "unit",
+   "slots"
+  ],
+  [
+   "total",
+   6
+  ],
+  [
+   "left",
+   3
+  ],
+  [
+   "reserve",
+   null
+  ],
+  [
+   "running",
+   2
+  ],
+  [
+   "queued",
+   0
+  ],
+  [
+   "cores",
+   12
+  ],
+  [
+   "p_cores",
+   8
+  ],
+  [
+   "e_cores",
+   4
+  ],
+  [
+   "cpu_model",
+   "Example M1 Pro"
+  ],
+  [
+   "ram_mb",
+   32768
+  ],
+  [
+   "ram_avail_mb",
+   19661
+  ],
+  [
+   "disk_gb_total",
+   994.7
+  ],
+  [
+   "disk_free_gb",
+   210.4
+  ],
+  [
+   "cpu_pct",
+   41.3
+  ],
+  [
+   "idle",
+   true
+  ],
+  [
+   "idle_min",
+   12
+  ],
+  [
+   "age_s",
+   5
+  ],
+  [
+   "fresh",
+   true
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "capacity": {
+    "left": 3,
+    "reserve": null,
+    "total": 6,
+    "unit": "slots"
+   },
+   "id": "lab1",
+   "load": {
+    "queued": 0,
+    "running": 2
+   },
+   "location": "local",
+   "read_time": 1799999995.0,
+   "resource": "machine",
+   "stale_after_s": null,
+   "state": "GREEN",
+   "time": 1799999995.0,
+   "values": [
+    {
+     "key": "cores",
+     "value": 12
+    },
+    {
+     "key": "p_cores",
+     "value": 8
+    },
+    {
+     "key": "e_cores",
+     "value": 4
+    },
+    {
+     "key": "cpu_model",
+     "value": "Example M1 Pro"
+    },
+    {
+     "key": "ram_mb",
+     "value": 32768
+    },
+    {
+     "key": "ram_avail_mb",
+     "value": 19661
+    },
+    {
+     "key": "disk_gb_total",
+     "value": 994.7
+    },
+    {
+     "key": "disk_free_gb",
+     "value": 210.4
+    },
+    {
+     "key": "cpu_pct",
+     "value": 41.3
+    },
+    {
+     "key": "idle",
+     "value": true
+    },
+    {
+     "key": "idle_min",
+     "value": 12
+    }
+   ],
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,78 @@
+{
+ "case": "groups-partial-and-wrong",
+ "expected": [
+  [
+   "resource",
+   "agent-service"
+  ],
+  [
+   "id",
+   "svc-1"
+  ],
+  [
+   "location",
+   "cloud"
+  ],
+  [
+   "state",
+   "GREEN"
+  ],
+  [
+   "unit",
+   null
+  ],
+  [
+   "total",
+   null
+  ],
+  [
+   "left",
+   null
+  ],
+  [
+   "reserve",
+   null
+  ],
+  [
+   "running",
+   3
+  ],
+  [
+   "queued",
+   null
+  ],
+  [
+   "age_s",
+   60
+  ],
+  [
+   "fresh",
+   true
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "capacity": {
+    "left": true,
+    "total": "x",
+    "unit": "Minutes"
+   },
+   "id": "svc-1",
+   "load": {
+    "queued": "1",
+    "running": 2.6
+   },
+   "location": "cloud",
+   "read_time": 1799999940.0,
+   "resource": "agent-service",
+   "stale_after_s": 900,
+   "state": "GREEN",
+   "time": 1799999995.0,
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

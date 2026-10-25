@@ -1,0 +1,67 @@
+{
+ "case": "unreadable",
+ "expected": [
+  {
+   "id": "claude",
+   "location": "cloud",
+   "read_time": null,
+   "resource": "service",
+   "stale_after_s": 1800,
+   "state": "UNKNOWN",
+   "values": [
+    {
+     "key": "used_5h_pct",
+     "value": null
+    },
+    {
+     "key": "reset_5h",
+     "value": null
+    },
+    {
+     "key": "used_week_pct",
+     "value": null
+    },
+    {
+     "key": "reset_week",
+     "value": null
+    }
+   ],
+   "why": "usage state unreadable"
+  },
+  {
+   "id": "codex",
+   "location": "cloud",
+   "read_time": null,
+   "resource": "service",
+   "stale_after_s": 1800,
+   "state": "UNKNOWN",
+   "values": [
+    {
+     "key": "used_5h_pct",
+     "value": null
+    },
+    {
+     "key": "reset_5h",
+     "value": null
+    },
+    {
+     "key": "used_week_pct",
+     "value": null
+    },
+    {
+     "key": "reset_week",
+     "value": null
+    }
+   ],
+   "why": "usage state unreadable"
+  }
+ ],
+ "function": "usage_resources",
+ "input": {
+  "now": 1800000000.0,
+  "resets": {},
+  "usage": null
+ },
+ "settings": "base",
+ "settings_over": {}
+}

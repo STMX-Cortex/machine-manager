@@ -1,0 +1,45 @@
+{
+ "case": "read-at-limit",
+ "expected": [
+  [
+   "resource",
+   "agent-service"
+  ],
+  [
+   "id",
+   "svc-1"
+  ],
+  [
+   "location",
+   "cloud"
+  ],
+  [
+   "state",
+   "GREEN"
+  ],
+  [
+   "age_s",
+   900
+  ],
+  [
+   "fresh",
+   true
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "id": "svc-1",
+   "location": "cloud",
+   "read_time": 1799999100.0,
+   "resource": "agent-service",
+   "stale_after_s": 900,
+   "state": "GREEN",
+   "time": 1799999995.0,
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

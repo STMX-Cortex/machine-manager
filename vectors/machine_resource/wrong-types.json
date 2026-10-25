@@ -1,0 +1,113 @@
+{
+ "case": "wrong-types",
+ "expected": {
+  "capacity": {
+   "left": null,
+   "reserve": null,
+   "total": null,
+   "unit": "slots"
+  },
+  "id": "lab1",
+  "load": {
+   "queued": 0,
+   "running": null
+  },
+  "location": "local",
+  "read_time": 1799999995.0,
+  "resource": "machine",
+  "stale_after_s": null,
+  "state": "PURPLE",
+  "time": 1799999995.0,
+  "values": [
+   {
+    "key": "cores",
+    "value": null
+   },
+   {
+    "key": "p_cores",
+    "value": null
+   },
+   {
+    "key": "e_cores",
+    "value": null
+   },
+   {
+    "key": "cpu_model",
+    "value": null
+   },
+   {
+    "key": "ram_mb",
+    "value": null
+   },
+   {
+    "key": "ram_avail_mb",
+    "value": null
+   },
+   {
+    "key": "disk_gb_total",
+    "value": null
+   },
+   {
+    "key": "disk_free_gb",
+    "value": null
+   },
+   {
+    "key": "cpu_pct",
+    "value": null
+   },
+   {
+    "key": "idle",
+    "value": false
+   },
+   {
+    "key": "idle_min",
+    "value": null
+   }
+  ],
+  "why": null
+ },
+ "function": "machine_resource",
+ "input": {
+  "mid": "lab1",
+  "now": 1800000000.0,
+  "st": {
+   "alerts": {
+    "ACTION": 0,
+    "ATTENTION": 0,
+    "INFO": 0
+   },
+   "busy": true,
+   "calls": [
+    1
+   ],
+   "disk_gb": {
+    "a": 1
+   },
+   "facts": "none",
+   "heartbeat": {
+    "note": "ok",
+    "pid": 100,
+    "tick": 7
+   },
+   "idle_minutes": "12",
+   "kind": "machine",
+   "machine_id": 7,
+   "mode": "observe",
+   "readings": [
+    1,
+    2
+   ],
+   "reasons": "busy",
+   "red_since": null,
+   "sampler": "fast",
+   "schema_version": 1,
+   "slots": "6",
+   "slots_would": 6,
+   "state": "PURPLE",
+   "time": 1799999995.0,
+   "waiting": 0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

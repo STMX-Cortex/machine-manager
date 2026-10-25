@@ -1,0 +1,49 @@
+{
+ "case": "record-old-bad-stale-after",
+ "expected": [
+  [
+   "resource",
+   "agent-service"
+  ],
+  [
+   "id",
+   "svc-1"
+  ],
+  [
+   "location",
+   "cloud"
+  ],
+  [
+   "state",
+   "UNKNOWN"
+  ],
+  [
+   "age_s",
+   null
+  ],
+  [
+   "fresh",
+   false
+  ],
+  [
+   "why",
+   "record 600 s old"
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "id": "svc-1",
+   "location": "cloud",
+   "read_time": null,
+   "resource": "agent-service",
+   "stale_after_s": -1,
+   "state": "GREEN",
+   "time": 1799999400.0,
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

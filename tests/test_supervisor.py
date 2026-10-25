@@ -351,6 +351,9 @@ class Records(Base):
         pool = json.load(open(os.path.join(self.data, "pools", "ci_example_project.json")))
         self.assertEqual(mmschema.validate(pool, mmschema.load("status")), [])
         self.assertEqual((pool["kind"], pool["machine_id"], pool["state"]), ("pool", "ci:example/project", "UNKNOWN"))
+        res = json.load(open(os.path.join(self.data, "resources.json")))
+        self.assertEqual(mmschema.validate(res, mmschema.load("resource")), [])
+        self.assertEqual([r["resource"] for r in res["resources"]], ["pool", "service", "service"])
         for r in self.pushed():
             self.assertEqual(mmschema.validate(r, mmschema.load("alert")), [], r)
         head = open(os.path.join(self.data, "metrics.csv")).readline()

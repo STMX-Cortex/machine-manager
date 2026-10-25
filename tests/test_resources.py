@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""`mm resources` and what it reads: the verb on a temporary data folder (lines, --json, exits 0, 2 and 3), files only
-(no child process, no fork, fast, no mmread), the tick-error status.json, the static facts (the Linux parsers on
-fixtures, macOS machine_facts on a patched sysctl), cpu_pct, the runner list and its safe failure (a fake gh), the
-pool record's alerts, queue_idle as the IDLE_ROOM rule, and the schemas of the new status and pool fields."""
+"""`mm resources` and the resource records: the verb on a temporary data folder (status.json and resources.json; lines,
+--json, exits 0, 2 and 3, the file's versions, the caps), files only (no child process, no fork, fast, no mmread and no
+adapter), the writer (resources.json each tick, mmadapters.records on bad adapters, hostile text), a seeded fuzz of
+the readers, the tick-error status.json, the static facts (the Linux parsers on fixtures, macOS machine_facts on a
+patched sysctl), cpu_pct, the runner list and its safe failure (a fake gh), the pool file as in Part 1, queue_idle as
+the IDLE_ROOM rule, and the schemas."""
 import contextlib
 import importlib.util
 import io
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -20,6 +23,8 @@ import mmtest
 from mmtest import TempData, base_settings, mmcore, mmread
 import ad_ci_github
 import ad_deliver_claude
+import ad_queue_fifo
+import mmadapters
 import mmalerts
 import mmdecide
 import mmplat_linux
@@ -57,16 +62,18 @@ def status_rec(now, **over):
     return rec
 
 
-def pool_rec(now, **over):
-    rec = mmcore.stamp({
-        "kind": "pool", "time": now, "state": "GREEN", "reasons": ["budget and queue fine"],
-        "capacity": {"minutes_left": 1234.5, "reserve_minutes": 300, "unit": "minutes"},
-        "money": {"used_usd": 0.0, "allowed_usd": 0}, "load": {"running": 2, "queued": 1}, "alerts": [],
-        "read_time": now - 60,
-        "runners": [{"name": "build-1", "online": True, "busy": False, "labels": ["self-hosted", "lab"]},
-                    {"name": "build 2\x07", "online": True, "busy": True, "labels": ["self-hosted", "lab"]},
-                    {"name": "build-3", "online": False, "busy": False, "labels": ["self-hosted", "lab"]}]},
-        mid="ci:example/project")
+RUNNERS_READ = [{"name": "build-1", "online": True, "busy": False, "labels": ["self-hosted", "lab"]},
+                {"name": "build 2\x07", "online": True, "busy": True, "labels": ["self-hosted", "lab"]},
+                {"name": "build-3", "online": False, "busy": False, "labels": ["self-hosted", "lab"]}]
+
+
+def gh_read(now, **over):
+    """A GitHub read as state/github.json holds it (ad_ci_github.read_all), with runner labels."""
+    rec = {"time": now - 60, "errors": {}, "pool_id": "ci:example/project",
+           "runs": {"in_progress": 2, "queued": 1, "running": [11, 12], "failed_1h": [], "oldest_queued_min": 0,
+                    "oldest_queued_job_min": 0, "longest_running_min": 5},
+           "billing": {"minutes": 1265.5, "gross": 0.04, "net": 0.0}, "watched": {},
+           "runners": RUNNERS_READ, "runners_error": None}
     rec.update(over)
     return rec
 
@@ -80,75 +87,137 @@ def usage_state(now):
                        "codex_weekly": {"used_percent": 20, "status": "error", "read_at": now - 60}}}
 
 
-class Verb(TempData):
-    def write(self, name, obj):
+def resources_doc(now, recs, **over):
+    doc = mmcore.stamp({"kind": "resources", "time": now, "resources": [dict(r, time=now) for r in recs]}, mid="lab1")
+    doc.update(over)
+    return doc
+
+
+def no_nan(text):
+    def refuse(c):
+        raise ValueError("not strict JSON: %s" % c)
+    return json.loads(text, parse_constant=refuse)
+
+
+TOKEN = "gh" + "p_" + "A" * 36  # built here: no token shape in the tree (test_public)
+POOL_KEYS_PART1 = {"kind", "time", "state", "reasons", "capacity", "load", "alerts", "read_time", "machine_id",
+                   "schema_version"}  # Pool.status at 39f7800 (Part 1), as on origin/main
+
+
+class Files(TempData):
+    """A data folder with status.json and resources.json."""
+    settings_over = {"github.allowed_gross_usd": 5}  # paid use allowed: the pool is GREEN with a small gross
+
+    def write(self, name, obj, raw=None):
         os.makedirs(os.path.dirname(os.path.join(self.data, name)), exist_ok=True)
         with open(os.path.join(self.data, name), "w") as f:
-            json.dump(obj, f)
+            f.write(raw if raw is not None else json.dumps(obj))
 
-    def files(self, now, **status):
-        self.write("status.json", status_rec(now, **status))
-        self.write("pools/ci_example_project.json", pool_rec(now))
+    def records(self, now):
+        """The writers' records as the supervisor's last tick gave them: the pool, its runners, the services."""
+        s = self.s()
         self.write("usage.json", usage_state(now))
+        f = os.path.join(self.data, "usage.json")
+        return (ad_ci_github.pool_resources(gh_read(now), s, now, "ci:example/project")
+                + ad_deliver_claude.usage_resources(ad_deliver_claude.read_usage(f, now, s),
+                                                    ad_deliver_claude.usage_resets(f), now, s))
+
+
+class Verb(Files):
+    def files(self, now, res_time=None, **status):
+        self.write("status.json", status_rec(now, **status))
+        t = now if res_time is None else res_time
+        self.write("resources.json", resources_doc(t, self.records(t)))
+
+    def lines(self, *args, rc=0):
+        r = self.mm("resources", *args)
+        self.assertEqual((r.returncode, r.stderr), (rc, ""), r.stdout)
+        return r.stdout.splitlines()
 
     def test_lines_json_and_exit_codes(self):
         now = time.time()
         self.files(now)
-        r = self.mm("resources")
-        self.assertEqual((r.returncode, r.stderr), (0, ""), r.stdout)
-        lines = r.stdout.splitlines()
+        lines = self.lines()
         self.assertEqual([l.split()[0] for l in lines], ["resource=machine", "resource=pool"] + ["resource=runner"] * 3 +
                          ["resource=service"] * 2)
-        self.assertTrue(lines[0].startswith("resource=machine id=lab1 location=local state=GREEN cores=12 p_cores=8 "
-                                            'e_cores=4 cpu_model="Example M1 Pro" ram_mb=32768 ram_avail_mb=16384 '
-                                            "disk_gb_total=994.7 disk_free_gb=210.4 cpu_pct=41.3 slots=6 busy=3 calls=2 "
-                                            "waiting=0 idle=no idle_min=none age_s="), lines[0])
-        self.assertTrue(lines[1].startswith("resource=pool id=ci:example/project location=cloud state=GREEN unit=minutes "
-                                            "minutes_left=1234.5 reserve_minutes=300 used_usd=0 allowed_usd=0 running=2 "
-                                            "queued=1 read_age_s=6"), lines[1])
-        self.assertIn("id=build-1 pool=ci:example/project location=self-hosted state=GREEN online=yes busy=no", lines[2])
-        self.assertIn('id="build 2?" pool=ci:example/project location=self-hosted state=STEADY', lines[3],
-                      "an outside name shows cleaned and quoted")
-        self.assertIn("id=build-3 pool=ci:example/project location=self-hosted state=RED online=no", lines[4])
-        self.assertRegex(lines[5], r"^resource=service id=claude location=cloud used_5h_pct=41 reset_5h=\d+ "
-                                   r"used_week_pct=63.5 reset_week=\d+ age_s=6\d fresh=yes state=none$")
-        self.assertRegex(lines[6], r'^resource=service id=codex location=cloud used_week_pct=none reset_week=none '
-                                   r'age_s=6\d fresh=yes state=UNKNOWN why="codex_weekly: status error"$')
-        self.assertNotIn("used_5h_pct", lines[6], "a level the plan does not offer is left out")
+        self.assertTrue(lines[0].startswith(
+            "resource=machine id=lab1 location=local state=GREEN unit=slots total=6 left=3 reserve=none running=2 "
+            'queued=0 cores=12 p_cores=8 e_cores=4 cpu_model="Example M1 Pro" ram_mb=32768 ram_avail_mb=16384 '
+            "disk_gb_total=994.7 disk_free_gb=210.4 cpu_pct=41.3 idle=no idle_min=none age_s="), lines[0])
+        self.assertRegex(lines[0], r" age_s=\d fresh=yes$")
+        self.assertRegex(lines[1], r"^resource=pool id=ci:example/project location=cloud state=GREEN unit=minutes "
+                                   r"total=3000 left=1734.5 reserve=300 running=2 queued=1 used_usd=0.04 allowed_usd=5 "
+                                   r"age_s=6\d fresh=yes$")
+        self.assertRegex(lines[2], r"^resource=runner id=build-1 parent=ci:example/project location=self-hosted "
+                                   r"state=GREEN online=yes busy=no age_s=6\d fresh=yes$")
+        self.assertRegex(lines[3], r'^resource=runner id="build 2\?" parent=ci:example/project location=self-hosted '
+                                   r"state=STEADY online=yes busy=yes age_s=6\d fresh=yes$")
+        self.assertRegex(lines[4], r"^resource=runner id=build-3 parent=ci:example/project location=self-hosted "
+                                   r"state=RED online=no busy=no age_s=6\d fresh=yes$")
+        self.assertRegex(lines[5], r"^resource=service id=claude location=cloud state=none used_5h_pct=41 reset_5h=\d+ "
+                                   r"used_week_pct=63.5 reset_week=\d+ age_s=6\d fresh=yes$")
+        self.assertRegex(lines[6], r'^resource=service id=codex location=cloud state=UNKNOWN used_week_pct=none '
+                                   r'reset_week=none age_s=6\d fresh=yes why="codex_weekly: status error"$')
+        self.assertNotIn("used_5h_pct", lines[6], "a window the plan does not offer is left out")
         for line in lines:
             self.assertNotIn("\x07", line)
         j = self.mm("resources", "--json")
-        self.assertEqual(j.returncode, 0)
-        self.assertEqual(len(j.stdout.strip().splitlines()), 1)
-        obj = json.loads(j.stdout)
+        self.assertEqual((j.returncode, len(j.stdout.strip().splitlines())), (0, 1))
+        obj = no_nan(j.stdout)
         self.assertEqual(list(obj), ["resources"])
         self.assertEqual([x["resource"] for x in obj["resources"]], [l.split()[0][9:] for l in lines])
         self.assertEqual(obj["resources"][3]["id"], "build 2?")
+        self.assertEqual(obj["resources"][1]["used_usd"], 0.04)
         self.assertIsNone(obj["resources"][5]["state"])
 
     def test_stale_and_missing_status_exit_3_with_rows(self):
         now = time.time()
         self.files(now - 600)
-        r = self.mm("resources")
-        self.assertEqual(r.returncode, 3, r.stdout)
-        lines = r.stdout.splitlines()
-        self.assertIn("state=UNKNOWN", lines[0])
-        self.assertIn('why="status 6', lines[0])
-        self.assertIn("idle=none", lines[0])
-        self.assertIn("resource=pool", lines[1])
-        self.assertIn("state=UNKNOWN", lines[1], "the pool file is old too: the supervisor is gone")
+        lines = self.lines(rc=3)
+        self.assertRegex(lines[0], r' state=UNKNOWN .* idle=none idle_min=none age_s=60\d fresh=no why="record 60\d s old"$')
+        self.assertEqual(len(lines), 7, "the rows are still printed")
+        for line in lines[1:]:
+            self.assertRegex(line, r' state=UNKNOWN .*fresh=no why="record 60\d s old', "an old file: the supervisor is gone")
         os.remove(os.path.join(self.data, "status.json"))
+        lines = self.lines(rc=3)
+        self.assertTrue(lines[0].startswith("resource=machine id=test-machine location=local state=UNKNOWN unit=slots "
+                                            "total=none left=none reserve=none running=none queued=none"), lines[0])
+        self.assertTrue(lines[0].endswith(' idle=none idle_min=none age_s=none fresh=no why="no record time; no status.json"'),
+                        lines[0])
+        self.assertEqual(len(lines), 7)
+
+    def test_resources_file_cases(self):
+        now = time.time()
+        self.files(now, res_time=now - 600)
+        lines = self.lines()
+        self.assertEqual(len(lines), 7)
+        self.assertIn("state=GREEN", lines[0], "a fresh machine with an old resources.json")
+        self.assertTrue(all('state=UNKNOWN' in l and 'why="record 60' in l for l in lines[1:]), lines)
+        f = os.path.join(self.data, "resources.json")
+        os.remove(f)
+        self.assertEqual([l.split()[0] for l in self.lines()], ["resource=machine"], "a missing file: the machine only")
+        self.write("resources.json", resources_doc(now, self.records(now), schema_version=2))
+        lines = self.lines()
+        self.assertEqual(lines[1:], ["resource=file id=resources.json location=none state=UNKNOWN age_s=none fresh=yes "
+                                     'why="schema_version 2 not known"'])
+        for v in (True, 1.0, "1", None):
+            self.write("resources.json", resources_doc(now, self.records(now), schema_version=v))
+            self.assertEqual(self.lines()[1].split()[0], "resource=file", v)
+        self.write("resources.json", resources_doc(now, self.records(now), kind="pool"))
+        self.assertEqual(len(self.lines()), 1, "a wrong kind is ignored")
+        self.write("resources.json", None, raw="[" * 100000 + "]" * 100000)
         r = self.mm("resources")
-        self.assertEqual(r.returncode, 3)
-        self.assertTrue(r.stdout.startswith("resource=machine id=test-machine location=local state=UNKNOWN"), r.stdout)
-        self.assertIn('why="no status.json"', r.stdout.splitlines()[0])
+        self.assertEqual((r.returncode, r.stderr, len(r.stdout.splitlines())), (0, "", 1), "nested too deep: no file")
+        self.write("resources.json", None, raw='{"kind": "resources", "resources": ' + "[" * 100000 + "]" * 100000 + "}")
+        r = self.mm("resources")
+        self.assertEqual((r.returncode, r.stderr, len(r.stdout.splitlines())), (0, "", 1))
 
     def test_tick_error_status_is_fresh_unknown(self):
         now = time.time()
         self.files(now, state="UNKNOWN", reasons=["tick error"])
-        r = self.mm("resources")
-        self.assertEqual(r.returncode, 0, "a fresh status.json, though its state is UNKNOWN")
-        self.assertIn("state=UNKNOWN", r.stdout.splitlines()[0])
+        lines = self.lines()
+        self.assertIn("state=UNKNOWN", lines[0], "a fresh status.json, though its state is UNKNOWN")
+        self.assertTrue(lines[0].endswith('fresh=yes why="tick error"'), lines[0])
 
     def test_usage_errors(self):
         for args in (["resources", "extra"], ["resources", "--bogus"]):
@@ -158,36 +227,81 @@ class Verb(TempData):
             self.assertTrue(r.stdout.startswith("E_USAGE unknown words: "), r.stdout)
             self.assertTrue(r.stdout.rstrip().endswith("; fix: mm help"), r.stdout)
 
-    def test_runner_error_row_and_no_service_rows_without_a_usage_file(self):
+    def test_runner_error_row(self):
         now = time.time()
-        self.files(now)
-        self.write("pools/ci_example_project.json", pool_rec(now, runners=[], runners_error="gh api runners rc=1"))
-        prof = os.path.join(self.root, "no-usage.toml")
-        with open(mmtest.PROFILE) as f:
-            text = f.read()
-        with open(prof, "w") as f:
-            f.write(text.replace('usage_state = "{data}/usage.json"\n', ""))
-        r = self.mm("resources", env={"MM_PROFILE": prof})
-        self.assertEqual(r.returncode, 0, r.stdout)
-        lines = r.stdout.splitlines()
+        self.write("status.json", status_rec(now))
+        recs = ad_ci_github.pool_resources(gh_read(now, runners=[], runners_error="gh api runners rc=1"), self.s(), now,
+                                           "ci:example/project")
+        self.write("resources.json", resources_doc(now, recs))
+        lines = self.lines()
         self.assertEqual(len(lines), 3, lines)
-        self.assertEqual(lines[2], 'resource=runner id=runners pool=ci:example/project location=self-hosted '
-                                   'state=UNKNOWN why="gh api runners rc=1"')
+        self.assertRegex(lines[2], r'^resource=runner id=runners parent=ci:example/project location=self-hosted '
+                                   r'state=UNKNOWN age_s=6\d fresh=yes why="gh api runners rc=1"$')
+        self.assertIn("state=GREEN", lines[1], "a failed runner read never changes the pool")
+
+    def test_any_resource_without_a_code_change(self):
+        now = time.time()
+        self.write("status.json", status_rec(now))
+        rec = {"resource": "agent-service", "id": "tasks-1", "location": "cloud", "read_time": now - 30,
+               "stale_after_s": 600, "state": "GREEN", "why": None,
+               "capacity": {"unit": "tasks", "total": 20, "left": 7, "reserve": 2},
+               "load": {"running": 3, "queued": 0}, "values": [{"key": "credits_left", "value": 12.5}]}
+        doc = resources_doc(now, [rec])
+        self.assertEqual(mmschema.validate(doc, mmschema.load("resource")), [])
+        self.write("resources.json", doc)
+        self.assertRegex(self.lines()[1], r"^resource=agent-service id=tasks-1 location=cloud state=GREEN unit=tasks "
+                                          r"total=20 left=7 reserve=2 running=3 queued=0 credits_left=12.5 age_s=3\d "
+                                          r"fresh=yes$")
+
+    def test_hostile_text_cleaned_quoted_and_masked(self):
+        now = time.time()
+        self.write("status.json", status_rec(now))
+        bad = "x|y\x07z\u2028 " + TOKEN
+        rec = {"resource": "runner", "id": bad, "parent": bad, "location": "self-hosted", "read_time": now - 30,
+               "stale_after_s": 600, "state": "GREEN", "why": bad, "values": [{"key": "note", "value": bad}]}
+        self.write("resources.json", resources_doc(now, [rec]))
+        line = self.lines()[1]
+        want = json.dumps("x?y?z? ***")
+        self.assertRegex(line, "^%s age_s=3\\d %s$" % (
+            re.escape("resource=runner id=%s parent=%s location=self-hosted state=GREEN note=%s" % (want, want, want)),
+            re.escape("fresh=yes why=%s" % want)))
+        row = no_nan(self.mm("resources", "--json").stdout)["resources"][1]
+        self.assertEqual([row[k] for k in ("id", "parent", "note", "why")], ["x?y?z? ***"] * 4)
 
     def test_help_and_agents_name_the_verb(self):
         self.assertIn("mm resources", self.mm("help").stdout)
         self.assertIn("| `mm resources` |", open(os.path.join(mmtest.CODE, "AGENTS.md")).read())
 
 
-class FilesOnly(TempData):
-    """No reading, no child process, no fork: patched to fail, the verb runs in this process, and fast."""
+class Caps(Files):
+    def test_5000_records_read_in_time(self):
+        now = time.time()
+        self.write("status.json", status_rec(now))
+        recs = [{"resource": "runner", "id": "build-%d" % k, "parent": "ci:example/project", "location": "self-hosted",
+                 "read_time": now, "stale_after_s": 1800, "state": "GREEN", "why": None,
+                 "values": [{"key": "online", "value": True}, {"key": "busy", "value": False}]} for k in range(5000)]
+        self.write("resources.json", resources_doc(now, recs))
+        cli, out = load_cli(), io.StringIO()
+        with contextlib.redirect_stdout(out):
+            t0 = time.monotonic()
+            rc = cli.main(["resources"])
+            took = time.monotonic() - t0
+        lines = out.getvalue().splitlines()
+        self.assertEqual((rc, len(lines)), (0, 1001))
+        self.assertEqual(lines[999].split()[1], "id=build-998")
+        self.assertEqual(lines[1000], 'resource=file id=resources.json location=none state=UNKNOWN age_s=none fresh=yes '
+                                      'why="4001 records left out"')
+        self.assertLess(took, 0.5, "1000 rows at most, fast")
+
+
+class FilesOnly(Files):
+    """No reading, no child process, no fork, no adapter: patched to fail, the verb runs in this process, and fast."""
 
     def setUp(self):
         super().setUp()
         now = time.time()
-        Verb.write(self, "status.json", status_rec(now))
-        Verb.write(self, "pools/ci_example_project.json", pool_rec(now))
-        Verb.write(self, "usage.json", usage_state(now))
+        self.write("status.json", status_rec(now))
+        self.write("resources.json", resources_doc(now, self.records(now)))
         self.cli = load_cli()
 
     def test_no_subprocess_no_fork_and_fast(self):
@@ -205,12 +319,12 @@ class FilesOnly(TempData):
         self.assertEqual(len(out.getvalue().splitlines()), 7)
         self.assertLess(took, 0.3, "fast enough for a launch hook")
 
-    def test_a_fresh_process_loads_no_reading_module(self):
+    def test_a_fresh_process_loads_no_reading_module_and_no_adapter(self):
         code = ("import runpy, sys\nsys.argv = ['mm', 'resources']\n"
                 "try:\n    runpy.run_path(%r, run_name='__main__')\nexcept SystemExit as e:\n    rc = e.code\n"
-                "bad = sorted(m for m in ('mmread', 'mmsuper', 'ctypes', 'mmplat_darwin', 'mmplat_linux', 'subprocess')"
-                " if m in sys.modules)\nprint('rc=%%s loaded=%%s' %% (rc, ','.join(bad) or 'none'))\n"
-                % os.path.join(mmtest.BIN, "mm"))
+                "bad = sorted(m for m in ('mmread', 'mmsuper', 'ctypes', 'mmplat_darwin', 'mmplat_linux', 'subprocess',"
+                " 'mmadapters', 'ad_ci_github', 'ad_deliver_claude') if m in sys.modules)\n"
+                "print('rc=%%s loaded=%%s' %% (rc, ','.join(bad) or 'none'))\n" % os.path.join(mmtest.BIN, "mm"))
         for plat in ("linux", "darwin") if sys.platform == "darwin" else ("linux",):
             r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=60,
                                env=dict(os.environ, MM_PLATFORM=plat))
@@ -228,9 +342,203 @@ class TickErrorStatus(TempData):
         self.assertEqual((st["calls"], st["idle_minutes"]), (None, None))
         self.assertIsNone(st["readings"]["cpu_pct"])
         self.assertEqual(set(st["facts"]), {"cores", "p_cores", "e_cores", "cpu_model", "ram_mb", "disk_gb_total"})
-        row = mmdecide.resource_row("machine", st, time.time(), self.s())
-        self.assertEqual((row["state"], row["calls"], row["idle"], row["busy"]), ("UNKNOWN", None, False, 0))
+        now = time.time()
+        row = mmdecide.resource_row(mmdecide.machine_resource(st, "test-machine", now, self.s()), now, self.s())
+        self.assertEqual((row["state"], row["running"], row["idle"], row["left"], row["why"]),
+                         ("UNKNOWN", None, False, None, "tick error"))
         self.assertEqual(self.mm("resources").returncode, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.data, "resources.json")), "the tick-error path writes none")
+
+
+# ------------------------------------------------------------------------------------------------ the writer
+
+def calm(now, ticks):
+    return {"t": now, "free_pct": 80, "swap_used_mb": 100, "swap_total_mb": 2048, "comp_mb": 300, "pressure": 1,
+            "seg_pct": 1, "load1": 1, "load5": 1, "sys_pct": None, "sys_pct_fixture": 10, "cpu_pct": 12.5}, ticks
+
+
+class Tick(TempData):
+    def setUp(self):
+        super().setUp()
+        self.queue_dir(slots=5)
+        self.now = time.time()
+        mmcore.write_atomic(os.path.join(self.data, "state", "github.json"), json.dumps(gh_read(self.now)))
+        with open(os.path.join(self.data, "usage.json"), "w") as f:
+            json.dump(usage_state(self.now), f)
+        self.clock = {"t": self.now}
+
+    def sup(self, profile=None):
+        with mock.patch.object(mmread, "disk_free_gb", lambda *a: 500.0):
+            return mmsuper.Supervisor(profile or self.profile(), kernel=False, clock=lambda: self.clock["t"],
+                                      sampler=calm, sizes=False, slow_jobs=False, check_readings=False)
+
+    def tick(self, sup):
+        with mock.patch.object(mmread, "disk_free_gb", lambda *a: 500.0):
+            t0 = time.monotonic()
+            sup.tick()
+            took = time.monotonic() - t0
+        self.clock["t"] += 10
+        with open(os.path.join(self.data, "resources.json")) as f:
+            return no_nan(f.read()), took
+
+    def errors(self):
+        try:
+            with open(os.path.join(self.data, "state", "errors.log")) as f:
+                return f.read().splitlines()
+        except OSError:
+            return []
+
+    def test_the_file_its_order_times_and_schema(self):
+        doc, _ = self.tick(self.sup())
+        schema = mmschema.load("resource")
+        self.assertEqual(mmschema.validate(doc, schema), [])
+        self.assertEqual((doc["kind"], doc["time"], doc["machine_id"], doc["schema_version"]),
+                         ("resources", self.now, "test-machine", 1))
+        recs = doc["resources"]
+        self.assertEqual([(r["resource"], r["id"]) for r in recs],
+                         [("pool", "ci:example/project"), ("runner", "build-1"), ("runner", "build 2?"),
+                          ("runner", "build-3"), ("service", "claude"), ("service", "codex")])
+        self.assertEqual({r["time"] for r in recs}, {self.now}, "every record carries the tick's time")
+        self.assertTrue(all(r.get("parent") == "ci:example/project" for r in recs[1:4]))
+        pool = json.load(open(os.path.join(self.data, "pools", "ci_example_project.json")))
+        self.assertEqual(set(pool), POOL_KEYS_PART1)
+        self.assertEqual(set(pool["capacity"]), {"minutes_left", "reserve_minutes"})
+        self.assertEqual(mmschema.validate(pool, mmschema.load("status")), [])
+        st = json.load(open(os.path.join(self.data, "status.json")))
+        rec = mmdecide.machine_resource(st, "test-machine", self.now, self.s())
+        self.assertEqual(mmschema.validate(rec, schema["$defs"]["record"], schema), [])
+        self.assertEqual(self.errors(), [])
+
+    def test_other_profiles(self):
+        p = self.profile()
+        p.pop("ci")
+        doc, _ = self.tick(self.sup(p))
+        self.assertEqual([r["id"] for r in doc["resources"]], ["claude", "codex"])
+        p.pop("delivery")
+        doc, _ = self.tick(self.sup(p))
+        self.assertEqual(doc["resources"], [], "the file is written even when empty")
+        self.assertEqual(mmschema.validate(doc, mmschema.load("resource")), [])
+
+    def test_a_write_failure_costs_one_line(self):
+        os.makedirs(os.path.join(self.data, "resources.json"))
+        sup = self.sup()
+        for n in (1, 2):
+            with mock.patch.object(mmread, "disk_free_gb", lambda *a: 500.0):
+                sup.tick()
+            self.clock["t"] += 10
+            self.assertEqual(len([l for l in self.errors() if " resources.json " in l]), n, self.errors())
+            st = json.load(open(os.path.join(self.data, "status.json")))
+            self.assertEqual((st["heartbeat"]["tick"], st["heartbeat"]["note"]), (n, "ok"))
+            ctl = json.load(open(os.path.join(self.data, "state", "controller.json")))
+            self.assertIn("offsets", ctl)
+
+    def test_a_write_failure_without_errors_log_ends_the_tick(self):
+        os.makedirs(os.path.join(self.data, "resources.json"))
+        os.makedirs(os.path.join(self.data, "state", "errors.log"))
+        sup = self.sup()
+        for n in (1, 2):
+            with mock.patch.object(mmread, "disk_free_gb", lambda *a: 500.0):
+                sup.tick()
+            self.clock["t"] += 10
+            st = json.load(open(os.path.join(self.data, "status.json")))
+            self.assertEqual((st["heartbeat"]["tick"], st["heartbeat"]["note"]), (n, "ok"), "never a tick error")
+            self.assertIn("offsets", json.load(open(os.path.join(self.data, "state", "controller.json"))))
+
+    def adapter_case(self, fake):
+        """One tick with the pool adapter's resources() replaced: the tick ends, the file is strict JSON."""
+        with mock.patch.object(ad_ci_github.Pool, "resources", fake):
+            doc, took = self.tick(self.sup())
+        self.assertEqual(mmschema.validate(doc, mmschema.load("resource")), [])
+        self.assertLess(took, 5.0)
+        return doc["resources"]
+
+    def test_records_turns_a_bad_adapter_into_one_unknown_record(self):
+        def raises(self_, gh, s, now):
+            raise RuntimeError("boom " + TOKEN)
+        nested = []
+        for _ in range(100000):
+            nested = [nested]
+        for name, fake in (("raises", raises), ("not a list", lambda *a: {"resource": "pool"}),
+                           ("nan", lambda *a: [{"resource": "pool", "id": "p", "read_time": None, "stale_after_s": None,
+                                                "state": None, "values": [{"key": "v", "value": float("nan")}]}]),
+                           ("nested", lambda *a: [{"resource": "pool", "id": "p", "values": nested}]),
+                           ("keys that do not sort", lambda *a: [{"resource": "pool", "id": "p", "read_time": None,
+                                                                  "stale_after_s": None, "state": None,
+                                                                  "extra": {1: "a", "b": 2}}])):
+            recs = self.adapter_case(fake)
+            self.assertEqual([r["resource"] for r in recs], ["adapter", "service", "service"], name)
+            self.assertEqual((recs[0]["id"], recs[0]["state"]), ("ci", "UNKNOWN"), name)
+            self.assertTrue(recs[0]["why"].startswith("ci.resources failed: "), recs[0]["why"])
+            self.assertNotIn(TOKEN, recs[0]["why"])
+        log = [l for l in self.errors() if " resources ci " in l]
+        self.assertEqual(len(log), 5, self.errors())
+        self.assertTrue(all(TOKEN not in l for l in log))
+        self.assertIn("RuntimeError", log[0])
+
+    def test_records_cuts_a_long_list_before_its_work(self):
+        one = {"resource": "runner", "id": "r", "read_time": None, "stale_after_s": None, "state": None,
+               "values": [{"key": "v%d" % j, "value": "x%d" % j} for j in range(100)]}
+        recs = self.adapter_case(lambda *a: [one] * 10000)
+        self.assertEqual(len(recs), mmdecide.RECORDS_MAX)
+        self.assertEqual(recs[-1]["why"], "3 records left out", "1000 from ci and 2 services: 999 kept")
+        self.assertEqual(len(recs[0]["values"]), mmdecide.VALUES_MAX)
+
+    def test_records_without_the_method(self):
+        class Bare:
+            pass
+        for ad in (None, Bare(), ad_queue_fifo.Queue(self.profile()["queue"])):
+            self.assertEqual(mmadapters.records(ad, {}, self.s(), self.now, "queue"), [])
+        self.assertEqual(self.errors(), [])
+
+    def test_hostile_text_in_the_file(self):
+        bad = "x|y\x07z\u2028 " + TOKEN
+        recs = self.adapter_case(lambda *a: [{"resource": "runner", "id": bad, "parent": bad, "location": "self-hosted",
+                                              "read_time": self.now, "stale_after_s": 60, "state": "GREEN", "why": bad,
+                                              "values": [{"key": "note", "value": bad}]}])
+        self.assertEqual([recs[0][k] for k in ("id", "parent", "why")], ["x?y?z? ***"] * 3)
+        self.assertEqual(recs[0]["values"], [{"key": "note", "value": "x?y?z? ***"}])
+        with open(os.path.join(self.data, "resources.json")) as f:
+            text = f.read()
+        self.assertNotIn(TOKEN, text)
+        self.assertNotIn("\\u0007", text)
+
+
+class Fuzz(unittest.TestCase):
+    """Seeded odd values in every field: the readers never raise, and every row is strict JSON."""
+
+    def test_rows_never_raise(self):
+        import random
+        rnd = random.Random(20261025)
+        s, now = base_settings(), 1_800_000_000.0
+        deep = []
+        for _ in range(50):
+            deep = [deep]
+        odd = [float("nan"), float("inf"), -float("inf"), [], "x", {}, None, True, False, deep, "y" * 5000, -1, 0,
+               10 ** 30, 10 ** 400, 1.5, now, now - 30, "GREEN", "Pool", {"unit": "x"},
+               [{"key": "a", "value": float("nan")}]]
+        keys = ["resource", "id", "parent", "location", "time", "read_time", "stale_after_s", "state", "why", "capacity",
+                "load", "values"]
+
+        def pick():
+            return rnd.choice(odd)
+        for n in range(2000):
+            rec = {k: pick() for k in keys if rnd.random() < 0.8}
+            rec["capacity"] = {k: pick() for k in ("unit", "total", "left", "reserve")} if rnd.random() < 0.5 else pick()
+            rec["load"] = {k: pick() for k in ("running", "queued")} if rnd.random() < 0.5 else pick()
+            rec["values"] = [rnd.choice([{"key": rnd.choice(["a", "b_1", "state", "Bad", pick()]), "value": pick()},
+                                         pick()]) for _ in range(rnd.randrange(0, 80))]
+            st = {k: pick() for k in ("time", "state", "reasons", "slots", "busy", "calls", "waiting", "disk_gb",
+                                      "idle_minutes", "machine_id")}
+            st["facts"] = {k: pick() for k in mmsuper.FACT_KEYS + ("disk_gb_total",)} if n % 2 else pick()
+            st["readings"] = {k: pick() for k in ("free_pct", "cpu_pct")} if n % 3 else pick()
+            usage = {k: pick() for k in ("age_s", "max_age_s", "stale_levels", "claude_5h", "claude_week", "codex_5h",
+                                         "codex_week")} if n % 4 else pick()
+            resets = {lv: {"reset_at": pick(), "not_offered": pick()} for lv in ad_deliver_claude.USAGE_LEVELS} \
+                if n % 5 else pick()
+            recs = [rec, pick(), mmdecide.machine_resource(st if n % 7 else pick(), pick(), now, s)]
+            recs += ad_deliver_claude.usage_resources(usage, resets, now, s)
+            for r in recs:
+                json.dumps(mmdecide.resource_row(r, now, s), allow_nan=False)
 
 
 # ------------------------------------------------------------------------------------------------ static facts
@@ -348,8 +656,13 @@ class Runners(TempData):
         for bad in ("", "nope", "[]", '{"runners": 3}', "{}"):
             with self.assertRaises(ValueError, msg=bad):
                 ad_ci_github.parse_runners(bad, ["self-hosted"])
-        for r in got:
-            self.assertEqual(mmschema.validate(r, mmschema.load("status")["properties"]["runners"]["items"]), [])
+        schema = mmschema.load("resource")
+        odd = [7, None, {"online": True, "busy": False}, {"name": "", "online": True}, {"name": 5, "online": False}]
+        recs = ad_ci_github.pool_resources({"time": time.time(), "errors": {}, "runners": got + odd}, self.s(),
+                                           time.time(), "ci:example/project")
+        self.assertEqual([r["id"] for r in recs[1:]], ["build-1", "build-2", "build?-4"], "no name: no record")
+        for r in recs:
+            self.assertEqual(mmschema.validate(r, schema["$defs"]["record"], schema), [], r)
 
     def runner_gh(self, runners):
         """A gh that answers the run list and billing; the runner list from a file, else rc 1 (a 403)."""
@@ -397,9 +710,14 @@ class Runners(TempData):
         self.assertEqual(got["errors"], {})
         self.assertEqual(self.facts(got), self.facts(plain), "errors, state, good keys, conditions and alerts unchanged")
         self.assertEqual(self.facts(got)["state"][0], "GREEN")
-        rec = ad_ci_github.Pool(self.profile()["ci"]).status(got, self.s(), time.time())
-        self.assertEqual((rec["runners"], rec["runners_error"][:16]), ([], "gh api runners r"))
+        now = time.time()
+        rec = ad_ci_github.Pool(self.profile()["ci"]).status(got, self.s(), now)
+        self.assertEqual(set(rec), POOL_KEYS_PART1, "the pool file holds no runners")
         self.assertEqual(mmschema.validate(rec, mmschema.load("status")), [])
+        recs = ad_ci_github.pool_resources(got, self.s(), now, "ci:example/project")
+        self.assertEqual([(r["resource"], r["id"], r["state"]) for r in recs],
+                         [("pool", "ci:example/project", "GREEN"), ("runner", "runners", "UNKNOWN")])
+        self.assertTrue(recs[1]["why"].startswith("gh api runners rc=1"), recs[1]["why"])
 
     def test_text_that_does_not_parse_fails_safe(self):
         self.runner_gh("<html>not json</html>")
@@ -413,10 +731,16 @@ class Runners(TempData):
         got = self.read(["self-hosted", "lab"])
         self.assertIsNone(got["runners_error"])
         self.assertEqual([r["name"] for r in got["runners"]], ["build-1", "build-2", "build?-4"])
-        rec = ad_ci_github.Pool(self.profile()["ci"]).status(got, self.s(), time.time())
+        now = time.time()
+        rec = ad_ci_github.Pool(self.profile()["ci"]).status(got, self.s(), now)
         self.assertEqual(mmschema.validate(rec, mmschema.load("status")), [])
-        self.assertEqual(rec["capacity"]["unit"], "minutes")
-        self.assertEqual(rec["money"], {"used_usd": 0.0, "allowed_usd": 0})
+        self.assertEqual((set(rec), set(rec["capacity"])), (POOL_KEYS_PART1, {"minutes_left", "reserve_minutes"}),
+                         "no runners, money or unit in the pool file")
+        recs = ad_ci_github.pool_resources(got, self.s(), now, "ci:example/project")
+        self.assertEqual([(r["id"], r["state"]) for r in recs[1:]],
+                         [("build-1", "GREEN"), ("build-2", "STEADY"), ("build?-4", "RED")])
+        self.assertEqual((recs[0]["capacity"]["unit"], recs[0]["values"]),
+                         ("minutes", [{"key": "used_usd", "value": 0.0}, {"key": "allowed_usd", "value": 0}]))
 
 
 class PoolRecord(TempData):
@@ -426,9 +750,11 @@ class PoolRecord(TempData):
         active = ["SOURCE_STALE:gh", "SOURCE_STALE:gh-runs", "GH_FAIL:1", "GUARD", "MEM_RED", "GUARD_KILL", "QWAIT"]
         keys = [k for k in active if pool.owns(k)]
         self.assertEqual(keys, ["SOURCE_STALE:gh", "SOURCE_STALE:gh-runs", "GH_FAIL:1", "GUARD"])
-        for gh in (None, {"time": now, "errors": {}, "runners": [], "runners_error": "gh api runners rc=1"}):
+        for gh in (None, {"time": now, "errors": {}, "runners": [], "runners_error": "gh api runners rc=1"},
+                   {"time": now, "errors": {}, "runners": RUNNERS_READ, "runners_error": None}):
             rec = pool.status(gh, s, now, keys)
             self.assertEqual(rec["alerts"], keys)
+            self.assertEqual(set(rec), POOL_KEYS_PART1, "a read with runners gives a pool file without them")
             self.assertFalse(any(pool.owns(k) for k in ("RUNNERS", "SOURCE_STALE:runners")))
             self.assertEqual(mmschema.validate(rec, mmschema.load("status")), [])
 
@@ -436,7 +762,7 @@ class PoolRecord(TempData):
         st = status_rec(time.time())
         self.assertEqual(mmschema.validate(st, mmschema.load("status")), [])
         for bad in ({"facts": {"cores": "12"}}, {"facts": {"gpu": 1}}, {"calls": 1.5}, {"idle_minutes": "3"},
-                    {"money": {"used_usd": "1"}}, {"runners": [{"name": "a"}]}, {"runners_error": 3}):
+                    {"money": {"used_usd": 1}}, {"runners": []}, {"runners_error": None}):
             self.assertTrue(mmschema.validate(dict(st, **bad), mmschema.load("status")), bad)
 
 
@@ -483,8 +809,11 @@ class QueueIdle(TempData):
         self.assertEqual(got[6], ("GREEN", 1.0, True), got)
         self.assertEqual((st["readings"]["cpu_pct"], st["calls"]), (12.5, 0))
         self.assertEqual(mmschema.validate(st, mmschema.load("status")), [])
-        row = mmdecide.resource_row("machine", st, clock["t"] - 10, self.s())
+        now = clock["t"] - 10
+        row = mmdecide.resource_row(mmdecide.machine_resource(st, "test-machine", now, self.s()), now, self.s())
         self.assertEqual((row["idle"], row["idle_min"], row["state"]), (True, 1, "GREEN"))
+        row = mmdecide.resource_row(mmdecide.machine_resource(st, "test-machine", now + 60, self.s()), now + 60, self.s())
+        self.assertEqual((row["idle"], row["idle_min"], row["state"]), (None, None, "UNKNOWN"), "never idle when stale")
 
 
 class UsageResets(TempData):

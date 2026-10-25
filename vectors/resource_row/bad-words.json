@@ -1,0 +1,50 @@
+{
+ "case": "bad-words",
+ "expected": [
+  [
+   "resource",
+   null
+  ],
+  [
+   "id",
+   null
+  ],
+  [
+   "parent",
+   null
+  ],
+  [
+   "location",
+   null
+  ],
+  [
+   "state",
+   "GREEN"
+  ],
+  [
+   "age_s",
+   60
+  ],
+  [
+   "fresh",
+   true
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "id": 7,
+   "location": "us east",
+   "parent": [],
+   "read_time": 1799999940.0,
+   "resource": "Pool",
+   "stale_after_s": 900,
+   "state": "GREEN",
+   "time": 1799999995.0,
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

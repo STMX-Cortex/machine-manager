@@ -1,0 +1,49 @@
+{
+ "case": "bad-state-word",
+ "expected": [
+  [
+   "resource",
+   "agent-service"
+  ],
+  [
+   "id",
+   "svc-1"
+  ],
+  [
+   "location",
+   "cloud"
+  ],
+  [
+   "state",
+   "UNKNOWN"
+  ],
+  [
+   "age_s",
+   60
+  ],
+  [
+   "fresh",
+   true
+  ],
+  [
+   "why",
+   "state word not known"
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "id": "svc-1",
+   "location": "cloud",
+   "read_time": 1799999940.0,
+   "resource": "agent-service",
+   "stale_after_s": 900,
+   "state": "PURPLE",
+   "time": 1799999995.0,
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

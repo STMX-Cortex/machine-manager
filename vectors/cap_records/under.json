@@ -1,0 +1,24 @@
+{
+ "case": "under",
+ "expected": [
+  {
+   "id": "a",
+   "resource": "pool"
+  },
+  {}
+ ],
+ "function": "cap_records",
+ "input": {
+  "recs": [
+   {
+    "id": "a",
+    "resource": "pool"
+   },
+   7,
+   {}
+  ],
+  "t": 1800000000.0
+ },
+ "settings": "base",
+ "settings_over": {}
+}

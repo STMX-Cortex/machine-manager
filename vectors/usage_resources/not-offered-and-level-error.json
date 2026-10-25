@@ -1,0 +1,88 @@
+{
+ "case": "not-offered-and-level-error",
+ "expected": [
+  {
+   "id": "claude",
+   "location": "cloud",
+   "read_time": 1799999700.0,
+   "resource": "service",
+   "stale_after_s": 1800,
+   "state": null,
+   "values": [
+    {
+     "key": "used_5h_pct",
+     "value": 41.0
+    },
+    {
+     "key": "reset_5h",
+     "value": 1800003600
+    },
+    {
+     "key": "used_week_pct",
+     "value": 63.5
+    },
+    {
+     "key": "reset_week",
+     "value": 1800086400
+    }
+   ],
+   "why": null
+  },
+  {
+   "id": "codex",
+   "location": "cloud",
+   "read_time": 1799999700.0,
+   "resource": "service",
+   "stale_after_s": 1800,
+   "state": "UNKNOWN",
+   "values": [
+    {
+     "key": "used_week_pct",
+     "value": null
+    },
+    {
+     "key": "reset_week",
+     "value": null
+    }
+   ],
+   "why": "codex_weekly: status error"
+  }
+ ],
+ "function": "usage_resources",
+ "input": {
+  "now": 1800000000.0,
+  "resets": {
+   "claude_5h": {
+    "not_offered": false,
+    "reset_at": 1800003600.0
+   },
+   "claude_weekly": {
+    "not_offered": false,
+    "reset_at": 1800086400.0
+   },
+   "codex_5h": {
+    "not_offered": true,
+    "reset_at": null
+   },
+   "codex_weekly": {
+    "not_offered": false,
+    "reset_at": 1800007200.5
+   }
+  },
+  "usage": {
+   "age_s": 300.0,
+   "claude_5h": 41.0,
+   "claude_week": 63.5,
+   "codex_5h": null,
+   "codex_week": null,
+   "max_age_s": 1800,
+   "proj": null,
+   "stale_levels": {
+    "codex_5h": "status error",
+    "codex_weekly": "status error"
+   }
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

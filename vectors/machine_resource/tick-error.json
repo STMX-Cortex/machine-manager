@@ -1,0 +1,124 @@
+{
+ "case": "tick-error",
+ "expected": {
+  "capacity": {
+   "left": null,
+   "reserve": null,
+   "total": null,
+   "unit": "slots"
+  },
+  "id": "lab1",
+  "load": {
+   "queued": 0,
+   "running": null
+  },
+  "location": "local",
+  "read_time": 1799999995.0,
+  "resource": "machine",
+  "stale_after_s": null,
+  "state": "UNKNOWN",
+  "time": 1799999995.0,
+  "values": [
+   {
+    "key": "cores",
+    "value": 16
+   },
+   {
+    "key": "p_cores",
+    "value": null
+   },
+   {
+    "key": "e_cores",
+    "value": null
+   },
+   {
+    "key": "cpu_model",
+    "value": "Example CPU 3.0GHz"
+   },
+   {
+    "key": "ram_mb",
+    "value": 64000
+   },
+   {
+    "key": "ram_avail_mb",
+    "value": null
+   },
+   {
+    "key": "disk_gb_total",
+    "value": 500.1
+   },
+   {
+    "key": "disk_free_gb",
+    "value": null
+   },
+   {
+    "key": "cpu_pct",
+    "value": null
+   },
+   {
+    "key": "idle",
+    "value": false
+   },
+   {
+    "key": "idle_min",
+    "value": null
+   }
+  ],
+  "why": "tick error"
+ },
+ "function": "machine_resource",
+ "input": {
+  "mid": "lab1",
+  "now": 1800000000.0,
+  "st": {
+   "alerts": {
+    "ACTION": 0,
+    "ATTENTION": 0,
+    "INFO": 0
+   },
+   "busy": 0,
+   "calls": null,
+   "disk_gb": null,
+   "facts": {
+    "cores": 16,
+    "cpu_model": "Example CPU 3.0GHz",
+    "disk_gb_total": 500.1,
+    "e_cores": null,
+    "p_cores": null,
+    "ram_mb": 64000
+   },
+   "heartbeat": {
+    "note": "tick error: boom",
+    "pid": 100,
+    "tick": 7
+   },
+   "idle_minutes": null,
+   "kind": "machine",
+   "machine_id": "lab1",
+   "mode": "act",
+   "readings": {
+    "comp_mb": null,
+    "cpu_pct": null,
+    "free_pct": null,
+    "load5": null,
+    "pressure": null,
+    "swap_total_mb": null,
+    "swap_used_mb": null,
+    "sys_pct": null
+   },
+   "reasons": [
+    "tick error"
+   ],
+   "red_since": null,
+   "sampler": "fast",
+   "schema_version": 1,
+   "slots": null,
+   "slots_would": null,
+   "state": "UNKNOWN",
+   "time": 1799999995.0,
+   "waiting": 0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

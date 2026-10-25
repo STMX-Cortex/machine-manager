@@ -1,0 +1,40 @@
+{
+ "case": "not-a-record",
+ "expected": [
+  [
+   "resource",
+   null
+  ],
+  [
+   "id",
+   null
+  ],
+  [
+   "location",
+   null
+  ],
+  [
+   "state",
+   "UNKNOWN"
+  ],
+  [
+   "age_s",
+   null
+  ],
+  [
+   "fresh",
+   false
+  ],
+  [
+   "why",
+   "no record time"
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": null
+ },
+ "settings": "base",
+ "settings_over": {}
+}

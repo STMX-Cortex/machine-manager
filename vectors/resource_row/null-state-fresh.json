@@ -1,0 +1,45 @@
+{
+ "case": "null-state-fresh",
+ "expected": [
+  [
+   "resource",
+   "agent-service"
+  ],
+  [
+   "id",
+   "svc-1"
+  ],
+  [
+   "location",
+   "cloud"
+  ],
+  [
+   "state",
+   null
+  ],
+  [
+   "age_s",
+   60
+  ],
+  [
+   "fresh",
+   true
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "id": "svc-1",
+   "location": "cloud",
+   "read_time": 1799999940.0,
+   "resource": "agent-service",
+   "stale_after_s": 900,
+   "state": null,
+   "time": 1799999995.0,
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

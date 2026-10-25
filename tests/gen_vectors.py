@@ -18,7 +18,9 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import mmtest  # noqa: E402
 from vector_functions import FUNCTIONS  # noqa: E402
+import ad_ci_github  # noqa: E402
 import mmcore  # noqa: E402
+import mmdecide  # noqa: E402
 
 VEC = os.path.join(mmtest.CODE, "vectors")
 BASE = mmtest.base_settings()
@@ -392,68 +394,143 @@ case("reboot_check", "reboot-panics-unreadable", {"prev": PREV, "cur": {"boot_ti
 case("reboot_check", "reboot-no-last-tick", {"prev": dict(PREV, last_tick=None, last_state=None, last_slots=None),
                                              "cur": {"boot_time": NOW - 300, "now": NOW, "panics": [], "missing_jobs": []}})
 
-# ---- resource_row (mm resources): one row per record; freshness, state and arithmetic; never a crash
+# ---- resource records (mm resources): the writers' records, the cap, and one row per record
 FACTS_MAC = {"cores": 12, "p_cores": 8, "e_cores": 4, "cpu_model": "Example M1 Pro", "ram_mb": 32768, "disk_gb_total": 994.7}
 FACTS_LINUX = {"cores": 16, "p_cores": None, "e_cores": None, "cpu_model": "Example CPU 3.0GHz", "ram_mb": 64000,
                "disk_gb_total": 500.1}
 READINGS = {"free_pct": 60, "swap_used_mb": 100.0, "swap_total_mb": 2048.0, "comp_mb": 300.0, "pressure": 1, "load5": 2.5,
             "sys_pct": 8.5, "cpu_pct": 41.27}
 MACHINE = {"kind": "machine", "machine_id": "lab1", "schema_version": 1, "time": NOW - 5, "state": "GREEN",
-           "reasons": ["all readings in the green band"], "mode": "observe", "slots": 6, "slots_would": 6, "busy": 3,
-           "waiting": 0, "calls": 2, "idle_minutes": 12.4, "disk_gb": 210.44, "readings": READINGS, "facts": FACTS_MAC}
-TICK_ERROR = {"kind": "machine", "machine_id": "lab1", "schema_version": 1, "time": NOW - 5, "state": "UNKNOWN",
-              "reasons": ["tick error"], "red_since": None, "mode": "act", "slots": None, "slots_would": None, "busy": 0,
-              "waiting": 0, "readings": {k: None for k in READINGS}, "disk_gb": None, "sampler": "fast",
-              "alerts": {"ACTION": 0, "ATTENTION": 0, "INFO": 0}, "facts": FACTS_LINUX, "calls": None,
-              "idle_minutes": None, "heartbeat": {"pid": 100, "tick": 7, "note": "tick error: boom"}}
-POOL = {"kind": "pool", "machine_id": "ci:example/repo", "schema_version": 1, "time": NOW - 5, "state": "GREEN",
-        "reasons": ["budget and queue fine"], "capacity": {"minutes_left": 1234.5, "reserve_minutes": 300, "unit": "minutes"},
-        "money": {"used_usd": 0.0, "allowed_usd": 0}, "load": {"running": 2, "queued": 1}, "alerts": [],
-        "read_time": NOW - 120}
-AT = {"pool": "ci:example/repo", "read_time": NOW - 120, "time": NOW - 5}
-USAGE = {"age_s": 300.0, "max_age_s": 1800, "stale_levels": {}, "claude_5h": 41.0, "claude_week": 63.5, "codex_week": None,
+           "reasons": ["all readings in the green band"], "red_since": None, "mode": "observe", "slots": 6,
+           "slots_would": 6, "busy": 3, "waiting": 0, "readings": READINGS, "disk_gb": 210.44, "sampler": "fast",
+           "alerts": {"ACTION": 0, "ATTENTION": 0, "INFO": 0}, "facts": FACTS_MAC, "calls": 2, "idle_minutes": None,
+           "heartbeat": {"pid": 100, "tick": 7, "note": "ok"}}
+TICK_ERROR = dict(MACHINE, state="UNKNOWN", reasons=["tick error"], mode="act", slots=None, slots_would=None, busy=0,
+                  readings={k: None for k in READINGS}, disk_gb=None, facts=FACTS_LINUX, calls=None,
+                  heartbeat={"pid": 100, "tick": 7, "note": "tick error: boom"})
+STARTING = {"kind": "machine", "machine_id": "lab1", "schema_version": 1, "time": NOW - 5, "state": "UNKNOWN",
+            "reasons": ["starting"], "heartbeat": {"pid": 100, "tick": 0, "note": "starting"}}
+RUNNERS = [{"name": "build-1", "online": True, "busy": False, "labels": ["self-hosted", "lab"]},
+           {"name": "build-2", "online": True, "busy": True, "labels": ["self-hosted", "lab"]},
+           {"name": "build-3", "online": False, "busy": False, "labels": ["self-hosted", "lab"]},
+           {"name": "build-4", "online": "yes", "busy": False, "labels": ["self-hosted", "lab"]}]
+RUNS = {"in_progress": 2, "queued": 1, "running": [11, 12], "failed_1h": [], "oldest_queued_min": 3,
+        "oldest_queued_job_min": 0, "longest_running_min": 20}
+GH = {"time": NOW - 120, "errors": {}, "pool_id": "ci:example/repo", "runs": RUNS,
+      "billing": {"minutes": 1265.46, "gross": 1.234, "net": 0.0}, "watched": {}}
+SPEND = {"github.allowed_gross_usd": 5}  # paid use allowed: a small gross amount is GREEN
+USAGE = {"age_s": 300.0, "max_age_s": 1800, "stale_levels": {}, "claude_5h": 41.0, "claude_week": 63.5, "codex_week": 20.04,
          "codex_5h": None, "proj": None}
 RESETS = {"claude_5h": {"reset_at": NOW + 3600, "not_offered": False},
           "claude_weekly": {"reset_at": NOW + 86400, "not_offered": False},
           "codex_5h": {"reset_at": None, "not_offered": True},
-          "codex_weekly": {"reset_at": NOW + 7200, "not_offered": False}}
+          "codex_weekly": {"reset_at": NOW + 7200.5, "not_offered": False}}
 
 
-def row_case(name, kind, rec, extra=None, over=None):
-    case("resource_row", name, {"kind": kind, "rec": rec, "now": NOW, "extra": extra}, over)
+def machine_case(name, st, over=None):
+    case("machine_resource", name, {"st": st, "mid": "lab1", "now": NOW}, over)
 
 
-row_case("machine-fresh-mac", "machine", MACHINE, {"id": "lab1"})
-row_case("machine-linux-facts", "machine", dict(MACHINE, facts=FACTS_LINUX, readings=dict(READINGS, free_pct=None),
-                                                idle_minutes=None, state="STEADY"), {"id": "lab1"})
-row_case("machine-stale", "machine", dict(MACHINE, time=NOW - 120), {"id": "lab1"})
-row_case("machine-fresh-limit-setting", "machine", dict(MACHINE, time=NOW - 120), {"id": "lab1"}, {"other.status_fresh_s": 300})
-row_case("machine-missing", "machine", None, {"id": "lab1"})
-row_case("machine-empty", "machine", {}, {"id": "lab1"})
-row_case("machine-none-values", "machine", {k: None for k in MACHINE}, {"id": "lab1"})
-row_case("machine-tick-error", "machine", TICK_ERROR, {"id": "lab1"})
-row_case("machine-wrong-types", "machine", dict(MACHINE, state="PURPLE", slots="6", busy=True, calls=[1], readings=[1, 2],
-                                                facts="none", idle_minutes="12", disk_gb={"a": 1}, machine_id=7), {"id": "lab1"})
-row_case("pool-fresh", "pool", POOL, {"id": "ci_example_repo"})
-row_case("pool-old-read-fresh-file", "pool", dict(POOL, read_time=NOW - 3600), {"id": "ci_example_repo"})
-row_case("pool-file-stale", "pool", dict(POOL, time=NOW - 600), {"id": "ci_example_repo"})
-row_case("pool-no-read-and-wrong-types", "pool", dict(POOL, read_time=None, capacity="x", money=None, load=[]),
-         {"id": "ci_example_repo"})
-row_case("pool-empty", "pool", {}, {"id": "ci_example_repo"})
-row_case("runner-idle", "runner", {"name": "build-1", "online": True, "busy": False, "labels": ["self-hosted", "lab"]}, AT)
-row_case("runner-busy", "runner", {"name": "build-2", "online": True, "busy": True, "labels": ["self-hosted", "lab"]}, AT)
-row_case("runner-offline", "runner", {"name": "build-3", "online": False, "busy": False, "labels": ["self-hosted"]}, AT)
-row_case("runner-stale-read", "runner", {"name": "build-1", "online": True, "busy": False, "labels": []},
-         dict(AT, read_time=NOW - 3600))
-row_case("runner-error", "runner", {"error": "gh api runners rc=1 (the runner list needs admin access to the repository)"},
-         AT)
-row_case("runner-wrong-types", "runner", {"name": 5, "online": "yes", "busy": None}, {"pool": None})
-row_case("service-claude-fresh", "service", {"usage": USAGE, "levels": RESETS}, {"id": "claude"})
-row_case("service-codex-not-offered-and-stale", "service",
-         {"usage": dict(USAGE, stale_levels={"codex_weekly": "reading 4000 s old"}), "levels": RESETS}, {"id": "codex"})
-row_case("service-state-old", "service", {"usage": dict(USAGE, age_s=4000.0), "levels": RESETS}, {"id": "claude"})
-row_case("service-unreadable", "service", {"usage": None, "levels": {}}, {"id": "claude"})
-row_case("service-wrong-types", "service", {"usage": [], "levels": "x"}, {"id": "codex"})
+machine_case("mac", MACHINE)
+machine_case("linux-facts", dict(MACHINE, facts=FACTS_LINUX, readings=dict(READINGS, free_pct=None, cpu_pct=None)))
+machine_case("amber", dict(MACHINE, state="AMBER", reasons=["free memory below 50%", 7, "load5 high"]))
+machine_case("idle", dict(MACHINE, busy=0, calls=0, idle_minutes=12.4))
+machine_case("stale-idle", dict(MACHINE, busy=0, calls=0, idle_minutes=12.4, time=NOW - 120))
+machine_case("busy-over-slots", dict(MACHINE, slots=3, busy=5, calls=4, waiting=2))
+machine_case("tick-error", TICK_ERROR)
+machine_case("starting", STARTING)
+machine_case("missing", None)
+machine_case("none-values", {k: None for k in MACHINE})
+machine_case("wrong-types", dict(MACHINE, state="PURPLE", reasons="busy", slots="6", busy=True, calls=[1],
+                                 readings=[1, 2], facts="none", idle_minutes="12", disk_gb={"a": 1}, machine_id=7))
+
+
+def pool_case(name, gh, over=None):
+    case("pool_resources", name, {"gh": gh, "now": NOW, "pool_id": "ci:example/repo"}, over)
+
+
+pool_case("runners", dict(GH, runners=RUNNERS, runners_error=None), SPEND)
+pool_case("runners-unnamed", dict(GH, runners=[7, {"online": True, "busy": False}, {"name": "", "online": True},
+                                               RUNNERS[0]], runners_error=None), SPEND)  # no name: no record
+pool_case("runners-error", dict(GH, runners=[], runners_error="gh api runners rc=1 (the runner list needs admin access "
+                                                              "to the repository)"), SPEND)
+pool_case("never-read", None)
+pool_case("billing-error", dict({k: v for k, v in GH.items() if k != "billing"},
+                                errors={"billing": "gh api billing rc=1"}), SPEND)
+pool_case("budget-stop", dict(GH, billing={"minutes": 3010.0, "gross": 6.5, "net": 6.5}), SPEND)
+pool_case("no-runner-labels", GH, SPEND)
+pool_case("zero-left", dict(GH, billing={"minutes": 3000.0, "gross": 0.0, "net": 0.0}))
+
+
+def usage_case(name, usage, resets, over=None):
+    case("usage_resources", name, {"usage": usage, "resets": resets, "now": NOW}, over)
+
+
+usage_case("fresh", USAGE, RESETS)
+usage_case("not-offered-and-level-error", dict(USAGE, codex_week=None, stale_levels={"codex_weekly": "status error",
+                                                                                    "codex_5h": "status error"}), RESETS)
+usage_case("state-old", dict(USAGE, age_s=4000.0), RESETS)
+usage_case("unreadable", None, {})
+usage_case("wrong-types", [], "x")
+usage_case("no-max-age", dict(USAGE, max_age_s=None), RESETS, {"usage.watch_state_max_age_s": 900})
+
+case("cap_records", "under", {"recs": [{"resource": "pool", "id": "a"}, 7, {}], "t": NOW})
+case("cap_records", "at-cap", {"recs": [{}] * 1000, "t": NOW})
+case("cap_records", "over", {"recs": [{}] * 1001, "t": NOW})
+case("cap_records", "not-a-list", {"recs": {"resource": "pool"}, "t": NOW})
+case("cap_records", "over-no-time", {"recs": [{}] * 1001, "t": None})
+case("cap_records", "over-non-dict", {"recs": [{}] * 1000 + [None], "t": NOW})  # the cap counts raw entries
+
+
+def row_case(name, rec, over=None):
+    case("resource_row", name, {"rec": rec, "now": NOW}, over)
+
+
+def stamped(recs):
+    return [dict(r, time=NOW - 5) for r in recs]  # as the supervisor writes them
+
+
+POOL_RECS = stamped(ad_ci_github.pool_resources(dict(GH, runners=RUNNERS[:1], runners_error=None), dict(BASE, **SPEND),
+                                                NOW - 5, "ci:example/repo"))
+REC = {"resource": "agent-service", "id": "svc-1", "location": "cloud", "time": NOW - 5, "read_time": NOW - 60,
+       "stale_after_s": 900, "state": "GREEN", "why": None}
+row_case("pool-full", POOL_RECS[0])
+row_case("runner-with-parent", POOL_RECS[1])
+row_case("machine-from-status", mmdecide.machine_resource(dict(MACHINE, idle_minutes=12.4), "lab1", NOW, BASE))
+row_case("record-at-limit", dict(REC, time=NOW - 60))
+row_case("record-limit-raised", dict(REC, time=NOW - 120), {"other.status_fresh_s": 300})
+row_case("record-time-future", dict(REC, time=NOW + 30))
+row_case("no-record-time", {k: v for k, v in REC.items() if k != "time"})
+row_case("read-at-limit", dict(REC, read_time=NOW - 900))
+row_case("read-old", dict(REC, read_time=NOW - 901))
+row_case("no-read", dict(REC, read_time=None))
+row_case("no-read-rule", dict(REC, read_time=None, stale_after_s=None))
+row_case("bad-stale-after", dict(REC, stale_after_s="900"))
+row_case("negative-stale-after", dict(REC, stale_after_s=-1))
+row_case("null-state-fresh", dict(REC, state=None))
+row_case("null-state-stale", dict(REC, state=None, read_time=NOW - 1000))
+row_case("bad-state-word", dict(REC, state="PURPLE"))
+row_case("why-order", dict(REC, time=NOW - 600, read_time=NOW - 1000, state="green", why="writer reason"))
+# The freshness checks in order (the first that fails names the reason): the record time before a bad stale_after_s
+# and before the read; a bad stale_after_s before a missing read (negative-stale-after: before an old read).
+row_case("record-old-bad-stale-after", dict(REC, time=NOW - 600, stale_after_s=-1, read_time=None))
+row_case("bad-stale-after-no-read", dict(REC, stale_after_s=-1, read_time=None))
+row_case("groups-absent", dict(REC, capacity=None, load="x"))
+row_case("groups-partial-and-wrong", dict(REC, capacity={"unit": "Minutes", "total": "x", "left": True},
+                                          load={"running": 2.6, "queued": "1"}))
+row_case("values-odd", dict(REC, values=[
+    7, None, {"key": "credits_left", "value": 12.5}, {"key": "Bad-Key", "value": 1}, {"key": "x" * 41, "value": 1},
+    {"key": "state", "value": "RED"}, {"key": "age_s", "value": 1}, {"key": "credits_left", "value": 99},
+    {"key": "tags", "value": ["a"]}, {"key": "note", "value": "n" * 300}, {"key": "on", "value": True},
+    {"key": "off", "value": None}, {"key": "empty", "value": ""}, {"value": 3}, {"key": 5, "value": 3}] + [
+    {"key": k, "value": "spoof"} for k in ("time read_time stale_after_s why values fresh parent capacity load unit "
+                                           "total left reserve running queued").split()]))  # FIXED keys not in the row
+row_case("values-not-list", dict(REC, values={"key": "credits_left", "value": 1}))
+row_case("values-cap", dict(REC, values=[{"key": "v%d" % k, "value": k} if k != 2 else "x" for k in range(70)]))
+row_case("bad-words", dict(REC, resource="Pool", location="us east", id=7, parent=[]))
+row_case("text-cut", dict(REC, id="i" * 300, read_time=NOW - 1000, why="w" * 500,
+                          values=[{"key": "note", "value": "n" * 300}]))
+row_case("not-a-record", None)
 
 
 def write_settings():

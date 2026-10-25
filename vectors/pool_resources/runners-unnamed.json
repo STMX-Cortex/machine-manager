@@ -1,0 +1,107 @@
+{
+ "case": "runners-unnamed",
+ "expected": [
+  {
+   "capacity": {
+    "left": 1734.5,
+    "reserve": 300,
+    "total": 3000,
+    "unit": "minutes"
+   },
+   "id": "ci:example/repo",
+   "load": {
+    "queued": 1,
+    "running": 2
+   },
+   "location": "cloud",
+   "read_time": 1799999880.0,
+   "resource": "pool",
+   "stale_after_s": 1800,
+   "state": "GREEN",
+   "values": [
+    {
+     "key": "used_usd",
+     "value": 1.23
+    },
+    {
+     "key": "allowed_usd",
+     "value": 5
+    }
+   ],
+   "why": null
+  },
+  {
+   "id": "build-1",
+   "location": "self-hosted",
+   "parent": "ci:example/repo",
+   "read_time": 1799999880.0,
+   "resource": "runner",
+   "stale_after_s": 1800,
+   "state": "GREEN",
+   "values": [
+    {
+     "key": "online",
+     "value": true
+    },
+    {
+     "key": "busy",
+     "value": false
+    }
+   ],
+   "why": null
+  }
+ ],
+ "function": "pool_resources",
+ "input": {
+  "gh": {
+   "billing": {
+    "gross": 1.234,
+    "minutes": 1265.46,
+    "net": 0.0
+   },
+   "errors": {},
+   "pool_id": "ci:example/repo",
+   "runners": [
+    7,
+    {
+     "busy": false,
+     "online": true
+    },
+    {
+     "name": "",
+     "online": true
+    },
+    {
+     "busy": false,
+     "labels": [
+      "self-hosted",
+      "lab"
+     ],
+     "name": "build-1",
+     "online": true
+    }
+   ],
+   "runners_error": null,
+   "runs": {
+    "failed_1h": [],
+    "in_progress": 2,
+    "longest_running_min": 20,
+    "oldest_queued_job_min": 0,
+    "oldest_queued_min": 3,
+    "queued": 1,
+    "running": [
+     11,
+     12
+    ]
+   },
+   "time": 1799999880.0,
+   "watched": {}
+  },
+  "now": 1800000000.0,
+  "pool_id": "ci:example/repo"
+ },
+ "settings": "base",
+ "settings_over": {
+  "github.allowed_gross_usd": 5
+ }
+}

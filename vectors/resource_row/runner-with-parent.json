@@ -1,0 +1,68 @@
+{
+ "case": "runner-with-parent",
+ "expected": [
+  [
+   "resource",
+   "runner"
+  ],
+  [
+   "id",
+   "build-1"
+  ],
+  [
+   "parent",
+   "ci:example/repo"
+  ],
+  [
+   "location",
+   "self-hosted"
+  ],
+  [
+   "state",
+   "GREEN"
+  ],
+  [
+   "online",
+   true
+  ],
+  [
+   "busy",
+   false
+  ],
+  [
+   "age_s",
+   120
+  ],
+  [
+   "fresh",
+   true
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "id": "build-1",
+   "location": "self-hosted",
+   "parent": "ci:example/repo",
+   "read_time": 1799999880.0,
+   "resource": "runner",
+   "stale_after_s": 1800,
+   "state": "GREEN",
+   "time": 1799999995.0,
+   "values": [
+    {
+     "key": "online",
+     "value": true
+    },
+    {
+     "key": "busy",
+     "value": false
+    }
+   ],
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

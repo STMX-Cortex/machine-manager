@@ -1,0 +1,186 @@
+{
+ "case": "values-odd",
+ "expected": [
+  [
+   "resource",
+   "agent-service"
+  ],
+  [
+   "id",
+   "svc-1"
+  ],
+  [
+   "location",
+   "cloud"
+  ],
+  [
+   "state",
+   "GREEN"
+  ],
+  [
+   "credits_left",
+   12.5
+  ],
+  [
+   "tags",
+   null
+  ],
+  [
+   "note",
+   "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+  ],
+  [
+   "on",
+   true
+  ],
+  [
+   "off",
+   null
+  ],
+  [
+   "empty",
+   null
+  ],
+  [
+   "age_s",
+   60
+  ],
+  [
+   "fresh",
+   true
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "id": "svc-1",
+   "location": "cloud",
+   "read_time": 1799999940.0,
+   "resource": "agent-service",
+   "stale_after_s": 900,
+   "state": "GREEN",
+   "time": 1799999995.0,
+   "values": [
+    7,
+    null,
+    {
+     "key": "credits_left",
+     "value": 12.5
+    },
+    {
+     "key": "Bad-Key",
+     "value": 1
+    },
+    {
+     "key": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "value": 1
+    },
+    {
+     "key": "state",
+     "value": "RED"
+    },
+    {
+     "key": "age_s",
+     "value": 1
+    },
+    {
+     "key": "credits_left",
+     "value": 99
+    },
+    {
+     "key": "tags",
+     "value": [
+      "a"
+     ]
+    },
+    {
+     "key": "note",
+     "value": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    },
+    {
+     "key": "on",
+     "value": true
+    },
+    {
+     "key": "off",
+     "value": null
+    },
+    {
+     "key": "empty",
+     "value": ""
+    },
+    {
+     "value": 3
+    },
+    {
+     "key": 5,
+     "value": 3
+    },
+    {
+     "key": "time",
+     "value": "spoof"
+    },
+    {
+     "key": "read_time",
+     "value": "spoof"
+    },
+    {
+     "key": "stale_after_s",
+     "value": "spoof"
+    },
+    {
+     "key": "why",
+     "value": "spoof"
+    },
+    {
+     "key": "values",
+     "value": "spoof"
+    },
+    {
+     "key": "fresh",
+     "value": "spoof"
+    },
+    {
+     "key": "parent",
+     "value": "spoof"
+    },
+    {
+     "key": "capacity",
+     "value": "spoof"
+    },
+    {
+     "key": "load",
+     "value": "spoof"
+    },
+    {
+     "key": "unit",
+     "value": "spoof"
+    },
+    {
+     "key": "total",
+     "value": "spoof"
+    },
+    {
+     "key": "left",
+     "value": "spoof"
+    },
+    {
+     "key": "reserve",
+     "value": "spoof"
+    },
+    {
+     "key": "running",
+     "value": "spoof"
+    },
+    {
+     "key": "queued",
+     "value": "spoof"
+    }
+   ],
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

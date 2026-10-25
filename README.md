@@ -52,8 +52,8 @@ An old Python fails safe: `mm` prints one `E_PYTHON` line, and the hooks exit 0 
 
 Code and live data are apart. The code folder is this repository. The live data folder is
 `~/Library/Application Support/machine-manager/<profile>/` (or `--data DIR`, or `MM_DATA`): `status.json`,
-`alerts.jsonl`, `alerts-state.json`, `metrics.csv`, `deletes.log`, `settings.toml`, `off.json`, `state/`, `evidence/`,
-`pools/`, `drills/`.
+`resources.json`, `alerts.jsonl`, `alerts-state.json`, `metrics.csv`, `deletes.log`, `settings.toml`, `off.json`,
+`state/`, `evidence/`, `pools/`, `drills/`.
 
 ## Platforms
 
@@ -85,34 +85,49 @@ mm status        # at most 5 lines: state, mode, slots; readings; alert counts; 
 mm alerts        # one line per active alert: LEVEL ID text | do: command (agent values cleaned and quoted)
 mm explain ID    # one alert in full, with its evidence folder
 mm place --kind go-test --shards 4      # place=MACHINE|POOL|WAIT, why= lines, do= lines (never run by the tool)
-mm resources     # one line per resource: the machine, each pool, its runners, the usage services
+mm resources     # one line per resource: the machine, the pool, its runners, the usage services
 ```
 
 Output is plain `key=value` lines; `--json` gives one JSON object. Errors are one line: `E_CODE what; fix: how`.
 
-`mm resources` reads files only (status.json, `pools/*.json`, the profile, the settings and the delivery's usage
-state): no reading, no child process, no network, so a launch hook can call it before each agent launch. `--json`
-gives `{"resources": [row, ...]}`. The rows (`mmdecide.resource_row`, with vectors):
+`mm resources` reads files only: the machine from status.json, every other resource from `resources.json` (the
+supervisor writes it each tick from every adapter's records), plus the profile and the settings. No reading, no child
+process, no network and no adapter, so a launch hook can call it before each agent launch. `--json` gives
+`{"resources": [row, ...]}`. Each record follows one contract (`schemas/resource.schema.json`) and gives one row
+(`mmdecide.resource_row`, with vectors), whatever the resource; a new kind of resource needs no change here.
 
-1. `resource=machine`: `state` (status.json's while younger than `other.status_fresh_s`, else `UNKNOWN` with `why`),
-   `cores`, `p_cores`, `e_cores`, `cpu_model`, `ram_mb` (the static facts, read once at the supervisor's start),
-   `ram_avail_mb` (free % of `ram_mb`; none without the free reading), `disk_gb_total`, `disk_free_gb`, `cpu_pct` (all
-   CPU busy), `slots`, `busy` (held slots), `calls` (queue calls holding them), `waiting`, `idle` (the `IDLE_ROOM`
-   rule: yes, with `idle_min`; none when the status is not fresh), `age_s`.
-2. `resource=pool`, one per pool file: `state`, `unit`, `minutes_left`, `reserve_minutes`, `used_usd`, `allowed_usd`,
-   `running`, `queued`, `read_age_s`. `UNKNOWN` when the pool was not read within `github.stale_minutes`, or its file
-   is older than `other.status_fresh_s` (the supervisor is gone).
-3. `resource=runner`, with the profile's `ci.runner_labels`: `GREEN` online and idle, `STEADY` online and busy, `RED`
-   offline, `UNKNOWN` when the pool's read is stale. When the runner list cannot be read, one row
+Each row's keys, in this order: `resource id [parent] location state [unit total left reserve] [running queued]`, then
+the record's own values in the writer's order, then `age_s fresh [why]`. `unit total left reserve` is the capacity in
+the resource's own unit and `running queued` the load; each group shows only when the record has it. `age_s` is the age
+of the resource's last read (none when never read).
+
+`fresh=yes` when the record's `time` is younger than `other.status_fresh_s` and its last read is no older than the
+writer's own limit (`stale_after_s`; none: no read rule). Otherwise `fresh=no`, `state=UNKNOWN`, and `why` starts with
+the first reason: `no record time`, `record N s old` (the supervisor is gone), `bad stale_after_s`, `no read` or
+`read N s old`. A state word the tool does not know shows `UNKNOWN` (`state word not known`); `state=none` means the
+resource has no thresholds. Then comes the writer's own `why`. The values still show on a row that is not fresh, so read
+`fresh` and `state` first; only the machine's `idle` and `idle_min` are none unless its status is fresh.
+
+1. `resource=machine` (status.json, mapped when read): `state`, and its reasons as `why` when it is not `GREEN`;
+   `unit=slots total` (the queue's slots) `left` (slots not held; below 0 when more are held) `running` (queue calls
+   holding slots) `queued` (waiting calls); `cores`, `p_cores`, `e_cores`, `cpu_model`, `ram_mb` (the static facts, read
+   once at the supervisor's start), `ram_avail_mb` (free % of `ram_mb`; none without the free reading), `disk_gb_total`,
+   `disk_free_gb`, `cpu_pct` (all CPU busy), `idle` (the `IDLE_ROOM` rule: yes, with `idle_min`).
+2. `resource=pool` (the `ci` adapter): `unit=minutes`, `total` (`github.included_minutes`), `left`, `reserve`, the
+   runs `running` and `queued`, `used_usd`, `allowed_usd`; its read rule is `github.stale_minutes`.
+3. `resource=runner` (`parent=` the pool), with the profile's `ci.runner_labels`: `GREEN` online and idle, `STEADY`
+   online and busy, `RED` offline, else `UNKNOWN`; `online`, `busy`. When the runner list cannot be read, one row
    `id=runners state=UNKNOWN why="..."`; that never changes the pool's state or its alerts.
-4. `resource=service` (`claude`, `codex`), when the profile names `delivery.usage_state`: `used_5h_pct`,
-   `used_week_pct`, `reset_5h`, `reset_week` (epoch seconds), `age_s`, `fresh` (the state file is no older than its
-   own `max_age_seconds`, else `usage.watch_state_max_age_s`). A value the usage rules reject is none, and `why` names the reason. `state` is
-   `UNKNOWN` when no fresh value is known, else none: there are no usage thresholds here. A level the plan does not
-   offer is left out.
+4. `resource=service` (`claude`, `codex`; the `delivery` adapter, when the profile names `delivery.usage_state`):
+   `used_5h_pct`, `reset_5h`, `used_week_pct`, `reset_week` (epoch seconds); its read rule is the state file's own
+   `max_age_seconds`, else `usage.watch_state_max_age_s`. A value the usage rules reject is none, and `why` names the
+   reason. `state` is `UNKNOWN` when no value is known, else none. A window the plan does not offer is left out.
 
-Runner names and other outside text show cleaned and quoted as in "Agent-written files", item 6. Exit 0 when the
-machine status is fresh, 3 when status.json is missing or not fresh (the rows are still printed), 2 on a usage error.
+A `resources.json` whose `schema_version` is not 1 gives one `resource=file` row (`UNKNOWN`); more than 1000 records
+give the first 999 and one `resource=file` row that counts the rest. Plain floats show exactly (`used_usd=0.04`).
+Outside text (runner names and the like) shows cleaned and quoted as in "Agent-written files", item 6. Exit 0 when the
+machine status is fresh, 3 when status.json is missing or not fresh (the rows are still printed), 2 on a usage error. A
+supervisor that runs code older than `resources.json` writes none: until it restarts, only the machine row shows.
 
 ## Stop
 
@@ -182,8 +197,8 @@ A TOML file the tool reads and never writes. Only `name` is required; a section 
 `com.example.machine-manager`; `rollback_notes`; `path_extra`, folders for the service PATH), `sizes`, `live_tools` (process names of a live build), `memory_guard`
 (an external guard's heartbeat), `queue` (adapter `fifo-gates`), `kinds` (machine-only and pool job kinds), `ci`
 (adapter `github-gh`, read-only; `runner_labels`, optional: `mm resources` lists the self-hosted runners that carry
-every one of these labels, as `runs-on` matches; the list needs admin access to the repository, and a failed read is
-only a `runners_error` in the pool record, never a read error or an alert), `delivery` (adapter `claude-code-hook`), `trim` (the guarded cache trim), `deletes`
+every one of these labels, as `runs-on` matches; the list needs admin access to the repository, and a failed read
+shows only as the `UNKNOWN` runner record `id=runners`, never a read error or an alert), `delivery` (adapter `claude-code-hook`), `trim` (the guarded cache trim), `deletes`
 (`rules`, `cleanup`, `forbidden_parts`, `protected_roots`), `recovery` (`expected_jobs`: `{name, match}` regular
 expressions over process command lines, checked after a Mac reboot), `text_line_max` (default 4096, from 256 to
 1048576: the longest line any pattern sees, "Agent-written files", item 7). Placeholders: `{data}`, `{user_tmp}`,
@@ -268,9 +283,9 @@ profile names:
    (`deletes.cleanup_list_hours`), not only until the next deletes pass.
 6. **Outputs.** File, folder and ticket names, call labels, paths below agent folders and text read from such files
    reach alert keys and texts, `mm cleanup` and `mm place`. In every output (alert lines, the hook, `mm wait`,
-   `mm alerts`, `mm status`, `mm explain`, `mm ack`, `mm cleanup`, `mm place`, each `--json` form) such a value shows
-   cleaned: each control, format or line-separator character (Unicode Cc, Cf, Zl, Zp) and each `|` shows as `?`
-   (`core/mmtext.py`). A plain `key=value` value, an alert id in a line, and such a value inside an alert's text are
+   `mm alerts`, `mm status`, `mm explain`, `mm ack`, `mm cleanup`, `mm place`, `mm resources`, each `--json` form) such
+   a value shows cleaned: each control, format or line-separator character (Unicode Cc, Cf, Zl, Zp) and each `|`
+   shows as `?` (`core/mmtext.py`). A plain `key=value` value, an alert id in a line, and such a value inside an alert's text are
    JSON-quoted unless every character is a letter, a digit or one of `._/:@+,~-`. ` | do: ` comes only with the
    alert's own command. A command that would name a value cleaning changes, or that holds a control character, is
    withheld: a line shows `mm explain KEY` (the id shell-quoted when it needs it), `mm explain` shows
@@ -333,12 +348,15 @@ you add any resource with a profile entry, and a new kind of resource needs one 
 
 1. **A list of pools.** The profile takes `[[pools]]` entries (each with an `id` and an `adapter`) in place of the
    one `[ci]` section. The supervisor reads each pool apart. Each pool has its own status file, alert keys and
-   reserve. `mm place` already takes a list of candidates. Estimate: 1.5 to 2 hours.
+   reserve. `mm place` already takes a list of candidates. Until then the supervisor asks only the `ci`, `delivery` and
+   `queue` adapters for resource records. Estimate: 1.5 to 2 hours.
 2. **Any kind of pool.** One pool contract for every resource: the capacity left in its own unit (minutes, credits,
    tasks or slots), a reserve, the cost of a job, the queued and running work, and the start command. Two general
    adapters: `command` (a script prints the pool's state as JSON, checked against a schema, so a new resource needs
    only the script and a profile entry) and `static` (a fixed capacity). Examples: a second CI system, a cloud
-   machine, a cloud agent service. Estimate: 1.5 to 2 hours.
+   machine, a cloud agent service. The record contract exists (`schemas/resource.schema.json`: capacity in its own
+   unit, reserve, load, values, freshness), and `mm resources` shows any record that keeps it. Still to come: the cost
+   of a job, the start command, and the `command` and `static` adapters. Estimate: 1.5 to 2 hours.
 3. **Many machines.** Each machine runs its own `mm` and writes its `status.json`. A collector reads them over the
    network, and placement chooses across machines and pools. Safety actions stay local on each machine and never
    depend on the network. Estimate: 1 to 2 days.

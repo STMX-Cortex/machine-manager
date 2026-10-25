@@ -5,6 +5,7 @@ Readings and context in, decisions out. No file, process, clock or network acces
 Each function has language-neutral vectors in vectors/<function>/ that a port must pass unchanged.
 Settings `s` is the flat settings dict ("section.key" -> value).
 """
+import math
 import re
 
 LEVELS = {"INFO": 1, "ATTENTION": 2, "ACTION": 3}
@@ -590,11 +591,22 @@ def queue_idle(slots, busy, waiting, state):
 
 
 STATES = ("GREEN", "STEADY", "AMBER", "RED", "UNKNOWN")
+RECORDS_MAX = 1000  # records read per resources.json and per `mm resources` (reader caps, schemas/resource.schema.json)
+VALUES_MAX = 64  # raw `values` entries read per record
+WORD = re.compile(r"[a-z][a-z0-9_-]{0,31}")  # resource, location and unit words (re.fullmatch)
+VALUE_KEY = re.compile(r"[a-z][a-z0-9_]{0,39}")  # a `values` key (re.fullmatch)
+FIXED = frozenset(("resource id parent location time read_time stale_after_s state why capacity load values unit total "
+                   "left reserve running queued age_s fresh").split())  # keys a `values` entry never takes
 
 
 def _num(v):
-    """A finite number (not a bool), else None."""
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf") else None
+    """A finite number (not a bool) that fits a float, else None."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    try:
+        return v if math.isfinite(v) else None
+    except OverflowError:  # an int too large for a float
+        return None
 
 
 def _int(v):
@@ -611,6 +623,10 @@ def _text(v, limit=120):
     return v[:limit] if isinstance(v, str) and v else None
 
 
+def _word(v):
+    return v if isinstance(v, str) and WORD.fullmatch(v) else None
+
+
 def _dict(v):
     return v if isinstance(v, dict) else {}
 
@@ -621,139 +637,106 @@ def _age(now, t):
 
 
 def status_fresh(rec, now, s):
-    """A status record (status.json or a pool file) younger than other.status_fresh_s by its `time` (as mm place)."""
+    """A record by its `time`: younger than other.status_fresh_s (as mm place); a future time counts as fresh."""
     age = _age(now, _dict(rec).get("time"))
     return age is not None and age < s["other.status_fresh_s"]
 
 
-def _state(rec):
-    st = _dict(rec).get("state")
-    return st if st in STATES else "UNKNOWN"
+def cap_records(recs, t):
+    """At most RECORDS_MAX resource records (the writer and `mm resources`): the dict entries of recs (not a list: []);
+    over the cap, the first RECORDS_MAX - 1 and one UNKNOWN record that counts the ones left out (time: t)."""
+    recs = recs if isinstance(recs, list) else []
+    if len(recs) <= RECORDS_MAX:
+        return [r for r in recs if isinstance(r, dict)]
+    return [r for r in recs[:RECORDS_MAX - 1] if isinstance(r, dict)] + [
+        {"resource": "file", "id": "resources.json", "location": None, "time": _num(t), "read_time": None,
+         "stale_after_s": None, "state": "UNKNOWN", "why": "%d records left out" % (len(recs) - (RECORDS_MAX - 1))}]
 
 
-def resource_row(kind, rec, now, s, extra=None):
-    """One `mm resources` row (a dict; plain output prints it as key=value words) from one record. Pure, None-safe:
-    a missing, empty or wrong-typed field shows as None, never a crash.
-    machine: rec = status.json (or None); extra {id}. state is the record's while status_fresh, else UNKNOWN (with why).
-    pool: rec = pools/<id>.json; extra {id}. UNKNOWN when read_time is None or older than github.stale_minutes, or the
-      file's time is not status_fresh (the supervisor is gone).
-    runner: rec = one runner {name, online, busy} or {error}; extra {pool, read_time, time}: online and idle GREEN,
-      online and busy STEADY, offline RED, unknown or stale (the pool's freshness) UNKNOWN.
-    service: rec = {usage: ad_deliver_claude.read_usage's result or None, levels: usage_resets's result}; extra {id}
-      (claude or codex). fresh: the state file is no older than its max_age_seconds (else usage.watch_state_max_age_s). state is UNKNOWN when
-      no fresh value is known, else None (no usage thresholds here). A not_offered level's keys are left out."""
-    extra = _dict(extra)
-    if kind == "machine":
-        return _machine_row(rec, now, s, extra)
-    if kind == "pool":
-        return _pool_row(rec, now, s, extra)
-    if kind == "runner":
-        return _runner_row(rec, now, s, extra)
-    if kind == "service":
-        return _service_row(rec, now, s, extra)
-    return {"resource": _text(kind), "state": "UNKNOWN", "why": "unknown resource kind"}
-
-
-def _machine_row(rec, now, s, extra):
-    d = _dict(rec)
+def machine_resource(st, mid, now, s):
+    """The machine's resource record, mapped from status.json (st, or None) at read time; mid: the profile's machine id.
+    Capacity: the queue's slots; load: the calls holding them and the waiting ones. idle and idle_min are None unless
+    the status is fresh (status_fresh), so an agent never sees idle=yes on a stale or missing status."""
+    d = _dict(st)
     facts, r = _dict(d.get("facts")), _dict(d.get("readings"))
     fresh = status_fresh(d, now, s)
-    age = _age(now, d.get("time"))
-    ram, free = _num(facts.get("ram_mb")), _num(r.get("free_pct"))
-    idle = _num(d.get("idle_minutes"))
-    row = {"resource": "machine", "id": _text(d.get("machine_id")) or _text(extra.get("id")), "location": "local",
-           "state": _state(d) if fresh else "UNKNOWN",
-           "cores": _int(facts.get("cores")), "p_cores": _int(facts.get("p_cores")), "e_cores": _int(facts.get("e_cores")),
-           "cpu_model": _text(facts.get("cpu_model")), "ram_mb": _int(ram),
-           "ram_avail_mb": _int(free / 100.0 * ram) if free is not None and ram is not None else None,
-           "disk_gb_total": _r1(facts.get("disk_gb_total")), "disk_free_gb": _r1(d.get("disk_gb")),
-           "cpu_pct": _r1(r.get("cpu_pct")), "slots": _int(d.get("slots")), "busy": _int(d.get("busy")),
-           "calls": _int(d.get("calls")), "waiting": _int(d.get("waiting")),
-           "idle": (idle is not None) if fresh else None, "idle_min": _int(idle) if fresh else None,
-           "age_s": _int(age)}
-    if not fresh:
-        row["why"] = "no status.json" if not d else "status %s s old" % ("?" if age is None else "%.0f" % age)
-    return row
+    ram, free, idle = _num(facts.get("ram_mb")), _num(r.get("free_pct")), _num(d.get("idle_minutes"))
+    slots, busy = _int(d.get("slots")), _int(d.get("busy"))
+    if not d:
+        why = "no status.json"
+    elif d.get("state") != "GREEN":
+        reasons = d.get("reasons") if isinstance(d.get("reasons"), list) else []
+        why = "; ".join(x for x in reasons if isinstance(x, str))[:200] or None
+    else:
+        why = None
+    values = (("cores", _int(facts.get("cores"))), ("p_cores", _int(facts.get("p_cores"))),
+              ("e_cores", _int(facts.get("e_cores"))), ("cpu_model", _text(facts.get("cpu_model"))), ("ram_mb", _int(ram)),
+              ("ram_avail_mb", _int(free / 100.0 * ram) if free is not None and ram is not None else None),
+              ("disk_gb_total", _r1(facts.get("disk_gb_total"))), ("disk_free_gb", _r1(d.get("disk_gb"))),
+              ("cpu_pct", _r1(r.get("cpu_pct"))), ("idle", (idle is not None) if fresh else None),
+              ("idle_min", _int(idle) if fresh else None))
+    return {"resource": "machine", "id": _text(d.get("machine_id")) or _text(mid), "location": "local",
+            "time": d.get("time"), "read_time": d.get("time"), "stale_after_s": None, "state": d.get("state"), "why": why,
+            "capacity": {"unit": "slots", "total": slots, "left": slots - busy if slots is not None and busy is not None
+                         else None, "reserve": None},
+            "load": {"running": _int(d.get("calls")), "queued": _int(d.get("waiting"))},
+            "values": [{"key": k, "value": v} for k, v in values]}
 
 
-def _pool_fresh(d, now, s):
-    """(fresh, why) for a pool record: its read by read_time (github.stale_minutes), its file by time."""
-    read_age = _age(now, d.get("read_time"))
-    if read_age is None:
-        return False, "no read"
-    if read_age > s["github.stale_minutes"] * 60:
-        return False, "read %.0f min old" % (read_age / 60)
+def _fresh(d, now, s):
+    """(fresh, why) for a record: its own `time` (other.status_fresh_s), then its writer's read rule (stale_after_s)."""
+    t, limit, read = _num(d.get("time")), d.get("stale_after_s"), _num(d.get("read_time"))
+    if t is None:
+        return False, "no record time"
     if not status_fresh(d, now, s):
-        age = _age(now, d.get("time"))
-        return False, "pool record %s s old" % ("?" if age is None else "%.0f" % age)
+        return False, "record %.0f s old" % (now - t)
+    if limit is not None and (_num(limit) is None or limit < 0):
+        return False, "bad stale_after_s"
+    if limit is not None and read is None:
+        return False, "no read"
+    if limit is not None and now - read > limit:
+        return False, "read %.0f s old" % (now - read)
     return True, None
 
 
-def _pool_row(rec, now, s, extra):
+def _value(v):
+    if v is None or isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return _num(v)
+    return _text(v) if isinstance(v, str) else None
+
+
+def resource_row(rec, now, s):
+    """One `mm resources` row (a dict; plain output prints it as key=value words) from one resource record
+    (schemas/resource.schema.json). Pure, None-safe: a missing, empty or wrong-typed field shows as None, never a crash.
+    Fresh: the record's time is younger than other.status_fresh_s, and its read no older than its own stale_after_s
+    (null: no read rule). A record that is not fresh, or whose state is not a STATES word, is UNKNOWN; why gives the
+    freshness reason, the state reason and the writer's why. Keys: resource id [parent] location state
+    [unit total left reserve] [running queued] <values, in order> age_s fresh [why]."""
     d = _dict(rec)
-    cap, money, load = _dict(d.get("capacity")), _dict(d.get("money")), _dict(d.get("load"))
-    fresh, why = _pool_fresh(d, now, s)
-    row = {"resource": "pool", "id": _text(d.get("machine_id")) or _text(extra.get("id")), "location": "cloud",
-           "state": _state(d) if fresh else "UNKNOWN", "unit": _text(cap.get("unit")),
-           "minutes_left": _r1(cap.get("minutes_left")), "reserve_minutes": _r1(cap.get("reserve_minutes")),
-           "used_usd": _num(money.get("used_usd")), "allowed_usd": _num(money.get("allowed_usd")),
-           "running": _int(load.get("running")), "queued": _int(load.get("queued")),
-           "read_age_s": _int(_age(now, d.get("read_time")))}
+    fresh, fresh_why = _fresh(d, now, s)
+    state, state_why = d.get("state"), None
+    if state is not None and state not in STATES:
+        state, state_why = "UNKNOWN", "state word not known"
+    row = {"resource": _word(d.get("resource")), "id": _text(d.get("id"))}
+    if "parent" in d:
+        row["parent"] = _text(d.get("parent"))
+    row.update(location=_word(d.get("location")), state=state if fresh else "UNKNOWN")
+    if isinstance(d.get("capacity"), dict):
+        cap = d["capacity"]
+        row.update(unit=_word(cap.get("unit")), total=_num(cap.get("total")), left=_num(cap.get("left")),
+                   reserve=_num(cap.get("reserve")))
+    if isinstance(d.get("load"), dict):
+        row.update(running=_int(d["load"].get("running")), queued=_int(d["load"].get("queued")))
+    values = d.get("values")
+    for e in values[:VALUES_MAX] if isinstance(values, list) else ():
+        k = e.get("key") if isinstance(e, dict) else None
+        if isinstance(k, str) and VALUE_KEY.fullmatch(k) and k not in FIXED and k not in row:
+            row[k] = _value(e.get("value"))
+    read = _num(d.get("read_time"))
+    row.update(age_s=None if read is None else _int(now - read), fresh=fresh)
+    why = "; ".join(x for x in (fresh_why, state_why, d.get("why")) if isinstance(x, str) and x)[:200]
     if why:
         row["why"] = why
-    return row
-
-
-def _runner_row(rec, now, s, extra):
-    d = _dict(rec)
-    pool = {"read_time": extra.get("read_time"), "time": extra.get("time")}
-    base = {"resource": "runner", "id": None, "pool": _text(extra.get("pool")), "location": "self-hosted"}
-    if "error" in d or not d:
-        return dict(base, id="runners", state="UNKNOWN", why=_text(d.get("error"), 200) or "no runner record")
-    fresh, why = _pool_fresh(pool, now, s)
-    online = d.get("online") if isinstance(d.get("online"), bool) else None
-    busy = d.get("busy") if isinstance(d.get("busy"), bool) else None
-    if not fresh or online is None or (online and busy is None):
-        state = "UNKNOWN"
-    else:
-        state = "RED" if not online else ("STEADY" if busy else "GREEN")
-    row = dict(base, id=_text(d.get("name")), state=state, online=online, busy=busy,
-               age_s=_int(_age(now, pool["read_time"])))
-    if why:
-        row["why"] = why
-    return row
-
-
-SERVICE_LEVELS = {"claude": (("5h", "claude_5h", "claude_5h"), ("week", "claude_weekly", "claude_week")),
-                  "codex": (("5h", "codex_5h", "codex_5h"), ("week", "codex_weekly", "codex_week"))}
-
-
-def _service_row(rec, now, s, extra):
-    d = _dict(rec)
-    sid = extra.get("id") if extra.get("id") in SERVICE_LEVELS else None
-    u = d.get("usage") if isinstance(d.get("usage"), dict) else None
-    levels = _dict(d.get("levels"))
-    stale = _dict((u or {}).get("stale_levels"))
-    age = _num((u or {}).get("age_s"))
-    max_age = _num((u or {}).get("max_age_s"))  # the file's own max_age_seconds when it names one (read_usage)
-    fresh = u is not None and age is not None and age <= (s["usage.watch_state_max_age_s"] if max_age is None else max_age)
-    row = {"resource": "service", "id": sid or _text(extra.get("id")), "location": "cloud"}
-    known, why = False, []
-    if u is None:
-        why.append("usage state unreadable")
-    elif not fresh:
-        why.append("state %s min old" % ("?" if age is None else "%.0f" % (age / 60)))
-    for short, level, key in SERVICE_LEVELS.get(sid, ()):
-        lv = _dict(levels.get(level))
-        if lv.get("not_offered") is True:
-            continue  # a level the plan does not offer: no keys
-        used = _r1((u or {}).get(key))
-        row["used_%s_pct" % short] = used
-        row["reset_%s" % short] = _int(lv.get("reset_at")) if used is not None else None
-        known = known or used is not None
-        if isinstance(stale.get(level), str):
-            why.append("%s: %s" % (level, stale[level][:80]))
-    row.update(age_s=_int(age), fresh=fresh, state=None if fresh and known else "UNKNOWN")
-    if why:
-        row["why"] = "; ".join(why)
     return row

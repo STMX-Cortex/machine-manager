@@ -2,8 +2,9 @@
 """CI pool adapter "github-gh": GitHub Actions read through `gh` (read-only), described as a pool.
 
 Interface (PORTING.md, "Adapters"): Pool(cfg).read(s, now, watch) -> the raw read; status(read, s, now) -> a status
-record with kind "pool"; conditions(read, s, now, mk) -> alert conditions; owns(key) -> the key is one conditions()
-raises (the pool record lists only those); minutes_left(s, now); guard_args(req);
+record with kind "pool"; resources(read, s, now) -> resource records (the pool and its self-hosted runners, for
+resources.json; mmadapters.records); conditions(read, s, now, mk) -> alert conditions; owns(key) -> the key is one
+conditions() raises (the pool record lists only those); minutes_left(s, now); guard_args(req);
 guard(args) -> (rc, line); commands(req, gargs). Every gh call goes through gh_run, which MM_GH replaces in tests.
 Nothing here pushes, dispatches, deletes or changes GitHub (no automatic dispatch).
 """
@@ -354,6 +355,44 @@ def pool_state(gh, s, now):
     return ("AMBER", why) if why else ("GREEN", ["budget and queue fine"])
 
 
+def _runner_state(online, busy):
+    if online is None or (online and busy is None):
+        return "UNKNOWN"
+    return "RED" if not online else ("STEADY" if busy else "GREEN")
+
+
+def pool_resources(gh, s, now, pool_id):
+    """The pool's resource records from its last read (gh, or None before the first read): the pool (minutes left of
+    github.included_minutes, the reserve, the runs, the money), then one per named self-hosted runner (parent: the
+    pool; GREEN online and idle, STEADY online and busy, RED offline, UNKNOWN when not known; an entry without a
+    non-empty string name is left out), then the runner list's error. Each carries the read's time and
+    github.stale_minutes as its read rule. Pure."""
+    st, why = pool_state(gh, s, now)
+    g = gh or {}
+    b, r = g.get("billing") or {}, g.get("runs") or {}
+    read = {"read_time": g.get("time"), "stale_after_s": s["github.stale_minutes"] * 60}
+    out = [dict({"resource": "pool", "id": pool_id, "location": "cloud"}, **read, state=st,
+                why=None if st == "GREEN" else "; ".join(why),
+                capacity={"unit": "minutes", "total": s["github.included_minutes"],
+                          "left": None if not b else round(s["github.included_minutes"] - b["minutes"], 1),
+                          "reserve": s["github.reserve_minutes"]},
+                load={"running": r.get("in_progress"), "queued": r.get("queued")},
+                values=[{"key": "used_usd", "value": None if not b else round(b["gross"], 2)},
+                        {"key": "allowed_usd", "value": s["github.allowed_gross_usd"]}])]
+    for x in g.get("runners") if isinstance(g.get("runners"), list) else []:
+        if not isinstance(x, dict) or not isinstance(x.get("name"), str) or not x["name"]:
+            continue  # no name, no record: a record's id is a non-empty string (resource.schema.json)
+        online = x.get("online") if isinstance(x.get("online"), bool) else None
+        busy = x.get("busy") if isinstance(x.get("busy"), bool) else None
+        out.append(dict({"resource": "runner", "id": x["name"], "parent": pool_id, "location": "self-hosted"}, **read,
+                        state=_runner_state(online, busy),
+                        why=None, values=[{"key": "online", "value": online}, {"key": "busy", "value": busy}]))
+    if isinstance(g.get("runners_error"), str) and g["runners_error"]:
+        out.append(dict({"resource": "runner", "id": "runners", "parent": pool_id, "location": "self-hosted"}, **read,
+                        state="UNKNOWN", why=g["runners_error"]))
+    return out
+
+
 class Pool:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -383,16 +422,14 @@ class Pool:
         st, why = pool_state(gh, s, now)
         b = (gh or {}).get("billing") or {}
         r = (gh or {}).get("runs") or {}
-        rec = {"kind": "pool", "time": now, "state": st, "reasons": why,
-               "capacity": {"minutes_left": (s["github.included_minutes"] - b["minutes"]) if b else None,
-                            "reserve_minutes": s["github.reserve_minutes"], "unit": "minutes"},
-               "money": {"used_usd": b.get("gross"), "allowed_usd": s["github.allowed_gross_usd"]},
-               "load": {"running": r.get("in_progress"), "queued": r.get("queued")},
-               "alerts": list(alerts), "read_time": (gh or {}).get("time")}
-        for k in ("runners", "runners_error"):  # only when the profile names runner labels (mm resources)
-            if k in (gh or {}):
-                rec[k] = gh[k]
-        return mmcore.stamp(rec, mid=self.id)
+        return mmcore.stamp({"kind": "pool", "time": now, "state": st, "reasons": why,
+                             "capacity": {"minutes_left": (s["github.included_minutes"] - b["minutes"]) if b else None,
+                                          "reserve_minutes": s["github.reserve_minutes"]},
+                             "load": {"running": r.get("in_progress"), "queued": r.get("queued")},
+                             "alerts": list(alerts), "read_time": (gh or {}).get("time")}, mid=self.id)
+
+    def resources(self, gh, s, now):
+        return pool_resources(gh, s, now, self.id)
 
     def minutes_left(self, s, now):
         gh = mmcore.read_json(mmcore.path("state", "github.json"), None)

@@ -1,0 +1,211 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "resources.json: the resource records every adapter gives, written by the supervisor each tick (mm resources)",
+ "type": "object",
+ "required": [
+  "kind",
+  "time",
+  "machine_id",
+  "schema_version",
+  "resources"
+ ],
+ "properties": {
+  "kind": {
+   "const": "resources"
+  },
+  "time": {
+   "type": "number",
+   "description": "when the supervisor wrote the file (epoch seconds)"
+  },
+  "machine_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "schema_version": {
+   "const": 1
+  },
+  "resources": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/record"
+   },
+   "description": "the records in order (the pool, its runners, the services, ...). A reader reads at most 1000 (RECORDS_MAX): the first 999 and one UNKNOWN record that counts the ones left out"
+  }
+ },
+ "additionalProperties": false,
+ "$defs": {
+  "word": {
+   "type": "string",
+   "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+   "description": "a lower-case word: a letter, then up to 31 letters, digits, - or _"
+  },
+  "record": {
+   "type": "object",
+   "description": "one resource. A reader ignores fields it does not know; a new optional field keeps schema_version 1",
+   "required": [
+    "resource",
+    "id",
+    "read_time",
+    "stale_after_s",
+    "state"
+   ],
+   "properties": {
+    "resource": {
+     "$ref": "#/$defs/word",
+     "description": "the kind of resource (machine, pool, runner, service, ...); the core never branches on it"
+    },
+    "id": {
+     "type": "string",
+     "minLength": 1,
+     "description": "from the profile, or cleaned outside text; a reader shows its first 120 characters"
+    },
+    "parent": {
+     "type": "string",
+     "description": "optional: the id of the record this one belongs to (shown only); a reader shows its first 120 characters"
+    },
+    "location": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/word"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "local, cloud, self-hosted, ..."
+    },
+    "time": {
+     "type": "number",
+     "description": "when the supervisor wrote the record; set by the supervisor, so an adapter's output leaves it out (a reader reads a missing time as no record time)"
+    },
+    "read_time": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "when the resource was last read; null: never read"
+    },
+    "stale_after_s": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "minimum": 0,
+     "description": "the writer's limit on now - read_time, from its own setting; null: no read rule"
+    },
+    "state": {
+     "enum": [
+      "GREEN",
+      "STEADY",
+      "AMBER",
+      "RED",
+      "UNKNOWN",
+      null
+     ],
+     "description": "null: the resource has no thresholds"
+    },
+    "why": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "a reader shows the row's why (with its own reasons first) cut to 200 characters"
+    },
+    "capacity": {
+     "$ref": "#/$defs/capacity"
+    },
+    "load": {
+     "$ref": "#/$defs/load"
+    },
+    "values": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/value"
+     },
+     "description": "shown in order; a reader reads the first 64 entries (VALUES_MAX)"
+    }
+   },
+   "additionalProperties": false
+  },
+  "capacity": {
+   "type": "object",
+   "description": "in the resource's own unit",
+   "required": [
+    "unit",
+    "total",
+    "left",
+    "reserve"
+   ],
+   "properties": {
+    "unit": {
+     "$ref": "#/$defs/word"
+    },
+    "total": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "left": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "reserve": {
+     "type": [
+      "number",
+      "null"
+     ]
+    }
+   },
+   "additionalProperties": false
+  },
+  "load": {
+   "type": "object",
+   "required": [
+    "running",
+    "queued"
+   ],
+   "properties": {
+    "running": {
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "queued": {
+     "type": [
+      "integer",
+      "null"
+     ]
+    }
+   },
+   "additionalProperties": false
+  },
+  "value": {
+   "type": "object",
+   "required": [
+    "key",
+    "value"
+   ],
+   "properties": {
+    "key": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]{0,39}$",
+     "description": "not one of the row's own keys; a later duplicate is ignored"
+    },
+    "value": {
+     "type": [
+      "number",
+      "string",
+      "boolean",
+      "null"
+     ],
+     "description": "a reader shows a string's first 120 characters"
+    }
+   },
+   "additionalProperties": false
+  }
+ }
+}

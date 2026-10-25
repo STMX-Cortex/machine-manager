@@ -1,0 +1,91 @@
+{
+ "case": "starting",
+ "expected": {
+  "capacity": {
+   "left": null,
+   "reserve": null,
+   "total": null,
+   "unit": "slots"
+  },
+  "id": "lab1",
+  "load": {
+   "queued": null,
+   "running": null
+  },
+  "location": "local",
+  "read_time": 1799999995.0,
+  "resource": "machine",
+  "stale_after_s": null,
+  "state": "UNKNOWN",
+  "time": 1799999995.0,
+  "values": [
+   {
+    "key": "cores",
+    "value": null
+   },
+   {
+    "key": "p_cores",
+    "value": null
+   },
+   {
+    "key": "e_cores",
+    "value": null
+   },
+   {
+    "key": "cpu_model",
+    "value": null
+   },
+   {
+    "key": "ram_mb",
+    "value": null
+   },
+   {
+    "key": "ram_avail_mb",
+    "value": null
+   },
+   {
+    "key": "disk_gb_total",
+    "value": null
+   },
+   {
+    "key": "disk_free_gb",
+    "value": null
+   },
+   {
+    "key": "cpu_pct",
+    "value": null
+   },
+   {
+    "key": "idle",
+    "value": false
+   },
+   {
+    "key": "idle_min",
+    "value": null
+   }
+  ],
+  "why": "starting"
+ },
+ "function": "machine_resource",
+ "input": {
+  "mid": "lab1",
+  "now": 1800000000.0,
+  "st": {
+   "heartbeat": {
+    "note": "starting",
+    "pid": 100,
+    "tick": 0
+   },
+   "kind": "machine",
+   "machine_id": "lab1",
+   "reasons": [
+    "starting"
+   ],
+   "schema_version": 1,
+   "state": "UNKNOWN",
+   "time": 1799999995.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

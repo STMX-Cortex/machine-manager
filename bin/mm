@@ -54,15 +54,18 @@ def err(code, what, fix, rc=2):
     return rc
 
 
-def kv(d):
+def kv(d, exact=False):
     """`key=value` words; a value is JSON-quoted when it is empty or holds any character outside mmtext.BARE (C-20 (2)),
-    so a value never reads as words of its own."""
+    so a value never reads as words of its own. A float shows one decimal at most; exact: as repr, without a trailing
+    .0 (0.04 stays 0.04; mm resources)."""
     out = []
     for k, v in d.items():
         if v is None:
             v = "none"
         elif isinstance(v, bool):
             v = "yes" if v else "no"
+        elif isinstance(v, float) and exact:
+            v = repr(v)[:-2] if repr(v).endswith(".0") else repr(v)
         elif isinstance(v, float):
             v = ("%.1f" % v).rstrip("0").rstrip(".")
         v = str(v)
@@ -241,36 +244,35 @@ def peek_settings():
 
 
 def cmd_resources(args, as_json, profile):
-    """One row per resource from files only (status.json, pools/*.json, the usage state): no reading, no subprocess,
-    no network, so a launch hook can call it. The rows come from mmdecide.resource_row. Exit 3 when status.json is
-    missing or not fresh (rows still printed, the machine UNKNOWN)."""
-    import glob
+    """One row per resource record (mmdecide.resource_row), from files only: the machine from status.json
+    (mmdecide.machine_resource), every other record from resources.json (the supervisor writes it each tick). No reading,
+    no subprocess, no network and no adapter, so a launch hook can call it. Exit 3 when status.json is missing or not
+    fresh (rows still printed, the machine UNKNOWN)."""
     import mmdecide
     if args:
         return err("E_USAGE", "unknown words: %s" % " ".join(mmcore.quoted(a) for a in args), "mm help")
+
+    def load(name):
+        try:
+            return mmcore.read_json(mmcore.path(name), None)
+        except RecursionError:  # nested too deep to parse: no file
+            return None
     s, now = peek_settings(), time.time()
-    st = mmcore.read_json(mmcore.path("status.json"), None)
+    st = load("status.json")
     st = st if isinstance(st, dict) else None
-    rows = [mmdecide.resource_row("machine", st, now, s, {"id": mmcore.machine_id(profile)})]
-    for f in sorted(glob.glob(os.path.join(glob.escape(mmcore.path("pools")), "*.json"))):
-        rec = mmcore.read_json(f, None)
-        if not isinstance(rec, dict):
-            continue
-        pool = mmdecide.resource_row("pool", rec, now, s, {"id": os.path.basename(f)[:-5]})
-        rows.append(pool)
-        where = {"pool": pool["id"], "read_time": rec.get("read_time"), "time": rec.get("time")}
-        for r in rec.get("runners") if isinstance(rec.get("runners"), list) else []:
-            rows.append(mmdecide.resource_row("runner", r, now, s, where))
-        if rec.get("runners_error"):
-            rows.append(mmdecide.resource_row("runner", {"error": str(rec["runners_error"])}, now, s, where))
-    dl = profile.get("delivery") or {}
-    if dl.get("adapter") == "claude-code-hook" and dl.get("usage_state"):
-        import ad_deliver_claude
-        f = mmcore.expand(dl["usage_state"])
-        usage = {"usage": ad_deliver_claude.read_usage(f, now, s), "levels": ad_deliver_claude.usage_resets(f)}
-        rows += [mmdecide.resource_row("service", usage, now, s, {"id": sid}) for sid in ("claude", "codex")]
-    rows = [mmcore.clean_obj(mmcore.mask_obj(r)) for r in rows]  # runner names and errors are outside text (C-20)
-    emit(as_json, {"resources": rows}, [kv(r) for r in rows])
+    recs = [mmdecide.machine_resource(st, mmcore.machine_id(profile), now, s)]
+    doc = load("resources.json")
+    if isinstance(doc, dict) and doc.get("kind") == "resources":
+        v, t = doc.get("schema_version"), doc.get("time")
+        if type(v) is int and v == 1:
+            recs += mmdecide.cap_records(doc.get("resources"), t)
+        else:  # a newer writer: one UNKNOWN row, never a guess at its records
+            recs.append({"resource": "file", "id": "resources.json", "location": None,
+                         "time": t if isinstance(t, (int, float)) and not isinstance(t, bool) else None,
+                         "read_time": None, "stale_after_s": None, "state": "UNKNOWN",
+                         "why": "schema_version %s not known" % str(v)[:20]})
+    rows = [mmcore.clean_obj(mmcore.mask_obj(mmdecide.resource_row(r, now, s))) for r in recs]  # outside text (C-20)
+    emit(as_json, {"resources": rows}, [kv(r, exact=True) for r in rows])
     return 0 if mmdecide.status_fresh(st, now, s) else 3
 
 

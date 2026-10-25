@@ -1,0 +1,124 @@
+{
+ "case": "linux-facts",
+ "expected": {
+  "capacity": {
+   "left": 3,
+   "reserve": null,
+   "total": 6,
+   "unit": "slots"
+  },
+  "id": "lab1",
+  "load": {
+   "queued": 0,
+   "running": 2
+  },
+  "location": "local",
+  "read_time": 1799999995.0,
+  "resource": "machine",
+  "stale_after_s": null,
+  "state": "GREEN",
+  "time": 1799999995.0,
+  "values": [
+   {
+    "key": "cores",
+    "value": 16
+   },
+   {
+    "key": "p_cores",
+    "value": null
+   },
+   {
+    "key": "e_cores",
+    "value": null
+   },
+   {
+    "key": "cpu_model",
+    "value": "Example CPU 3.0GHz"
+   },
+   {
+    "key": "ram_mb",
+    "value": 64000
+   },
+   {
+    "key": "ram_avail_mb",
+    "value": null
+   },
+   {
+    "key": "disk_gb_total",
+    "value": 500.1
+   },
+   {
+    "key": "disk_free_gb",
+    "value": 210.4
+   },
+   {
+    "key": "cpu_pct",
+    "value": null
+   },
+   {
+    "key": "idle",
+    "value": false
+   },
+   {
+    "key": "idle_min",
+    "value": null
+   }
+  ],
+  "why": null
+ },
+ "function": "machine_resource",
+ "input": {
+  "mid": "lab1",
+  "now": 1800000000.0,
+  "st": {
+   "alerts": {
+    "ACTION": 0,
+    "ATTENTION": 0,
+    "INFO": 0
+   },
+   "busy": 3,
+   "calls": 2,
+   "disk_gb": 210.44,
+   "facts": {
+    "cores": 16,
+    "cpu_model": "Example CPU 3.0GHz",
+    "disk_gb_total": 500.1,
+    "e_cores": null,
+    "p_cores": null,
+    "ram_mb": 64000
+   },
+   "heartbeat": {
+    "note": "ok",
+    "pid": 100,
+    "tick": 7
+   },
+   "idle_minutes": null,
+   "kind": "machine",
+   "machine_id": "lab1",
+   "mode": "observe",
+   "readings": {
+    "comp_mb": 300.0,
+    "cpu_pct": null,
+    "free_pct": null,
+    "load5": 2.5,
+    "pressure": 1,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 8.5
+   },
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "red_since": null,
+   "sampler": "fast",
+   "schema_version": 1,
+   "slots": 6,
+   "slots_would": 6,
+   "state": "GREEN",
+   "time": 1799999995.0,
+   "waiting": 0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -1,0 +1,42 @@
+{
+ "case": "never-read",
+ "expected": [
+  {
+   "capacity": {
+    "left": null,
+    "reserve": 300,
+    "total": 3000,
+    "unit": "minutes"
+   },
+   "id": "ci:example/repo",
+   "load": {
+    "queued": null,
+    "running": null
+   },
+   "location": "cloud",
+   "read_time": null,
+   "resource": "pool",
+   "stale_after_s": 1800,
+   "state": "UNKNOWN",
+   "values": [
+    {
+     "key": "used_usd",
+     "value": null
+    },
+    {
+     "key": "allowed_usd",
+     "value": 0
+    }
+   ],
+   "why": "no fresh read"
+  }
+ ],
+ "function": "pool_resources",
+ "input": {
+  "gh": null,
+  "now": 1800000000.0,
+  "pool_id": "ci:example/repo"
+ },
+ "settings": "base",
+ "settings_over": {}
+}

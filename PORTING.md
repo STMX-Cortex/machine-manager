@@ -8,11 +8,11 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Layer | Python modules | Port rule |
 | --- | --- | --- |
 | Pure decisions | `core/mmdecide.py`, `core/mmalerts.py`, `core/mmreplay.py`, `core/mmtext.py` (cleaning, masking, cut lines), parsers in `core/mmread.py` and `adapters/` | Same inputs, same outputs: pass the vectors |
-| Records and files | `core/mmcore.py` (settings, alert store, atomic writes, line formats) | Match `schemas/`; atomic rename writes |
+| Records and files | `core/mmcore.py` (settings, alert store, atomic writes, line formats), `core/mmadapters.py` (`records`: each adapter's resource records, cut, masked, cleaned, strict JSON; a failure is one `UNKNOWN` record) | Match `schemas/`; atomic rename writes; `resources.json` written every good tick, even empty |
 | Readings | `core/mmread.py` (system calls; the macOS commands as a cross-check) | Any method; `mm check` compares with the commands |
 | Platform | `core/mmplat.py` (the choice; `MM_PLATFORM` overrides it), `core/mmplat_darwin.py`, `core/mmplat_linux.py` | One backend per platform, the same names (readings, `machine_facts` for the static facts, command paths); a reading it cannot take is None, a command it lacks is None and skipped |
 | Jobs and loop | `core/mmsuper.py`, `core/mmwatch.py`, `core/mmrecover.py`, `core/mmdelete.py`, `core/mmdrill.py`, `bin/cachetrim.py` | Same behaviour; tests in `tests/` describe it |
-| Adapters | `adapters/ad_queue_fifo.py`, `adapters/ad_ci_github.py`, `adapters/ad_deliver_claude.py` | One per kind; chosen by the profile's `adapter` value |
+| Adapters | `adapters/ad_queue_fifo.py`, `adapters/ad_ci_github.py`, `adapters/ad_deliver_claude.py` | One per kind; chosen by the profile's `adapter` value. Optional `resources(read, s, now)`: resource records (`schemas/resource.schema.json`, without `time`) from the adapter's last read and its own small files only (no command, no network, no waiting) |
 | Command line | `bin/mm`, `core/mminstall.py`, `core/mmplace.py` | Same verbs, output lines and exit codes (`tests/test_cli.py`) |
 
 ## Vectors
@@ -38,17 +38,27 @@ Functions with vectors: `classify`, `slot_decide`, `alert_raise`, `alert_absent`
 minute), `mask`, `compare_readings`, `parse_load_line`, `parse_history_line`, `parse_kernel_line`, `parse_billing`,
 `parse_delete_line`, `read_usage` (row freshness, percentages and weekly projection), and for self-recovery
 `sample_problems`, `self_check`, `crash_loop`, `resume_targets`,
-`reboot_check`, and `resource_row` (one `mm resources` row per record: freshness, state, arithmetic; whole numbers and
-one-decimal values are rounded as Python's `round`, half to even).
+`reboot_check`, and for `mm resources` `resource_row` (one row per record: freshness, state, words, groups and values;
+the expected row is a list of `[key, value]` pairs, so the key order is part of the contract), `machine_resource`
+(status.json as a record), `pool_resources` and `usage_resources` (the writers' records) and `cap_records` (the record
+cap). In `machine_resource`, `pool_resources` and `usage_resources`, and in `resource_row`'s `running`, `queued` and
+`age_s`, whole numbers and rounded values are rounded as Python's `round`, half to even.
 
 ## Schemas
 
-JSON Schema (2020-12) files: `reading`, `status` (kind `machine` or `pool`), `alert`, `placement-request`,
-`placement`, `delete-line`, `off`, `override`, `profile`, `settings`. `settings.schema.json` is generated from the
-code's table (`mmcore.settings_json_schema()`); `tests/test_vectors.py` fails when they differ.
+JSON Schema (2020-12) files: `reading`, `status` (kind `machine` or `pool`), `resource` (`resources.json`), `alert`,
+`placement-request`, `placement`, `delete-line`, `off`, `override`, `profile`, `settings`. `settings.schema.json` is
+generated from the code's table (`mmcore.settings_json_schema()`); `tests/test_vectors.py` fails when they differ.
 
-Every record carries `machine_id` and `schema_version` (now 1). A reader refuses a record with a newer major version.
-Several machines and pools are several status records; placement takes a list of candidates.
+Every file the tool writes as a record, and every log record, carries `machine_id` and `schema_version` (now 1); the
+records inside `resources.json` do not. A reader refuses a record with a newer major version (`mm resources`: one
+`UNKNOWN` row for a `resources.json` of another version). A new optional field keeps the version; removing or retyping
+a field raises it. Several machines and pools are several status records; placement takes a list of candidates.
+
+Resource record caps are reader limits, not validity rules (a longer list or text is still valid; the reader cuts it):
+`RECORDS_MAX` 1000 records per file and per `mm resources` (the first 999 and one record that counts the rest),
+`VALUES_MAX` 64 raw `values` entries per record, 120 characters for `id`, `parent` and a string value, 200 for a row's
+`why`. Words and value keys match their patterns whole (`re.fullmatch`).
 
 ## Rules a port keeps
 

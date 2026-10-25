@@ -1,0 +1,97 @@
+{
+ "case": "pool-full",
+ "expected": [
+  [
+   "resource",
+   "pool"
+  ],
+  [
+   "id",
+   "ci:example/repo"
+  ],
+  [
+   "location",
+   "cloud"
+  ],
+  [
+   "state",
+   "GREEN"
+  ],
+  [
+   "unit",
+   "minutes"
+  ],
+  [
+   "total",
+   3000
+  ],
+  [
+   "left",
+   1734.5
+  ],
+  [
+   "reserve",
+   300
+  ],
+  [
+   "running",
+   2
+  ],
+  [
+   "queued",
+   1
+  ],
+  [
+   "used_usd",
+   1.23
+  ],
+  [
+   "allowed_usd",
+   5
+  ],
+  [
+   "age_s",
+   120
+  ],
+  [
+   "fresh",
+   true
+  ]
+ ],
+ "function": "resource_row",
+ "input": {
+  "now": 1800000000.0,
+  "rec": {
+   "capacity": {
+    "left": 1734.5,
+    "reserve": 300,
+    "total": 3000,
+    "unit": "minutes"
+   },
+   "id": "ci:example/repo",
+   "load": {
+    "queued": 1,
+    "running": 2
+   },
+   "location": "cloud",
+   "read_time": 1799999880.0,
+   "resource": "pool",
+   "stale_after_s": 1800,
+   "state": "GREEN",
+   "time": 1799999995.0,
+   "values": [
+    {
+     "key": "used_usd",
+     "value": 1.23
+    },
+    {
+     "key": "allowed_usd",
+     "value": 5
+    }
+   ],
+   "why": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

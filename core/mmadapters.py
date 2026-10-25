@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The adapter table: profile adapter names -> modules. A second project adds its module here (no plugin system)."""
+"""The adapter table: profile adapter names -> modules. A second project adds its module here (no plugin system).
+
+Any adapter may define resources(read, s, now) -> [resource record without `time`] (schemas/resource.schema.json,
+$defs/record): built only from `read` (the supervisor's last read for that adapter) and the adapter's own small files,
+with no command, no network and no waiting. The supervisor asks each one through records() every tick and writes
+resources.json; `mm resources` reads that file and loads no adapter."""
 import importlib
+import json
 
 QUEUE = {"fifo-gates": ("ad_queue_fifo", "Queue")}
 POOL = {"github-gh": ("ad_ci_github", "Pool")}
@@ -28,3 +34,38 @@ def pool(profile):
 
 def delivery(profile):
     return _make(DELIVERY, profile.get("delivery"), "delivery")
+
+
+def records(ad, read, s, now, part):
+    """The resource records of one adapter (part: ci, delivery or queue) for resources.json: [] when ad is None or has
+    no resources method; else its list cut to mmdecide.RECORDS_MAX records (each one's values to VALUES_MAX), masked,
+    cleaned and checked as strict JSON the way _resources dumps it (sort_keys, allow_nan=False). Any failure (not a
+    list, NaN, a set, keys that do not sort, nesting too deep, an exception) gives one UNKNOWN record (resource
+    "adapter", id part) and one errors.log line, never a failed tick."""
+    import mmcore
+    import mmdecide
+    if ad is None or not hasattr(ad, "resources"):
+        return []
+    try:
+        got = ad.resources(read, s, now)
+        if not isinstance(got, list):
+            raise TypeError("not a list: %s" % type(got).__name__)
+        out = []
+        for r in got[:mmdecide.RECORDS_MAX]:
+            if not isinstance(r, dict):
+                continue
+            r = dict(r)
+            if isinstance(r.get("values"), list):
+                r["values"] = r["values"][:mmdecide.VALUES_MAX]
+            r = mmcore.clean_obj(mmcore.mask_obj(r))
+            json.dumps(r, sort_keys=True, allow_nan=False)  # as written: NaN, inf, a set, mixed keys or nesting raise
+            out.append(r)
+        return out
+    except Exception as e:  # RecursionError too
+        try:
+            mmcore.append_line(mmcore.path("state", "errors.log"),
+                               mmcore.mask("%s resources %s %r" % (mmcore.now_local(now), part, e)))
+        except Exception:  # the log line is help; the UNKNOWN record still says why
+            pass
+        return [{"resource": "adapter", "id": part, "location": None, "read_time": None, "stale_after_s": None,
+                 "state": "UNKNOWN", "why": mmcore.clean(mmcore.mask("%s.resources failed: %r" % (part, e)))[:200]}]

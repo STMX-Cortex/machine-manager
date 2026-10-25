@@ -68,5 +68,9 @@ FUNCTIONS = {
     "crash_loop": lambda i, s: mmdecide.crash_loop(i["starts"], i["now"], s),
     "resume_targets": lambda i, s: mmdecide.resume_targets(i["paused"], i["current"]),
     "reboot_check": lambda i, s: mmdecide.reboot_check(i["prev"], i["cur"]),
-    "resource_row": lambda i, s: mmdecide.resource_row(i["kind"], i["rec"], i["now"], s, i.get("extra")),
+    "resource_row": lambda i, s: [[k, v] for k, v in mmdecide.resource_row(i["rec"], i["now"], s).items()],
+    "machine_resource": lambda i, s: mmdecide.machine_resource(i["st"], i["mid"], i["now"], s),
+    "pool_resources": lambda i, s: ad_ci_github.pool_resources(i["gh"], s, i["now"], i["pool_id"]),
+    "usage_resources": lambda i, s: ad_deliver_claude.usage_resources(i["usage"], i["resets"], i["now"], s),
+    "cap_records": lambda i, s: mmdecide.cap_records(i["recs"], i["t"]),
 }
