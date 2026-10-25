@@ -456,6 +456,13 @@ row_case("service-unreadable", "service", {"usage": None, "levels": {}}, {"id": 
 row_case("service-wrong-types", "service", {"usage": [], "levels": "x"}, {"id": "codex"})
 
 
+def write_settings():
+    """vectors/_settings/base.json from the code's settings table (mmtest.base_settings); test_vectors checks it."""
+    os.makedirs(os.path.join(VEC, "_settings"), exist_ok=True)
+    with open(os.path.join(VEC, "_settings", "base.json"), "w") as f:
+        json.dump(BASE, f, indent=1, sort_keys=True)
+
+
 def main(function=None):
     # A scoped regeneration leaves separately maintained cases and shared settings intact.
     if function is None and os.path.isdir(VEC):
@@ -463,9 +470,7 @@ def main(function=None):
             if not d.startswith("_"):
                 shutil.rmtree(os.path.join(VEC, d))
     if function is None:
-        os.makedirs(os.path.join(VEC, "_settings"), exist_ok=True)
-        with open(os.path.join(VEC, "_settings", "base.json"), "w") as f:
-            json.dump(BASE, f, indent=1, sort_keys=True)
+        write_settings()
     n = 0
     for fn, cases in CASES.items():
         if function is not None and fn != function:
@@ -487,4 +492,13 @@ def main(function=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--function", choices=sorted(CASES), help="update only this function, keeping other cases")
-    main(parser.parse_args().function)
+    parser.add_argument("--settings", action="store_true",
+                        help="update only vectors/_settings/base.json from the settings table, keeping every case")
+    a = parser.parse_args()
+    if a.settings:
+        if a.function:
+            parser.error("--settings takes no --function")
+        write_settings()
+        print("settings=%d" % len(BASE))
+    else:
+        main(a.function)

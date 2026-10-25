@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 CODE = os.path.dirname(HERE)
@@ -67,6 +68,21 @@ def base_settings(**over):
     flat.update({"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10})
     flat.update(over)
     return flat
+
+
+def restored_without(*keys):
+    """The settings the supervisor runs on when its settings.toml is bad and the last good values were saved by an older
+    settings table (without `keys`): mmcore.Settings restores them over the defaults. With the vectors' machine values."""
+    with tempfile.TemporaryDirectory() as d, unittest.mock.patch.dict(os.environ, {"MM_DATA": d}):
+        os.makedirs(os.path.join(d, "state"))
+        with open(os.path.join(d, "state", "settings.lastgood.json"), "w") as f:
+            json.dump({k: v for k, v in mmcore.defaults().items() if k not in keys}, f)
+        with open(os.path.join(d, "settings.toml"), "w") as f:
+            f.write("[slots\n")  # not TOML: the last good values are restored
+        st = mmcore.Settings()
+        values = st.load(save=False)
+    assert st.problem and values is not None, st.problem
+    return dict(values, **{"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10})
 
 
 class TempData(unittest.TestCase):

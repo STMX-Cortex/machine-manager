@@ -269,9 +269,11 @@ class DefaultsChangeNothing(unittest.TestCase):
         self.assertEqual(mmcore.validate(d), [])
 
     def test_classify_is_the_same_without_the_new_keys(self):
-        """The defaults give the same state and reasons as settings without the new keys (an older settings table)."""
+        """Last good settings saved by an older table (without the new keys) are restored over the defaults, so they
+        give the same state and reasons as the defaults."""
         new = base_settings()
-        old = {k: v for k, v in new.items() if k not in ("slots.red_comp_mb", "slots.green_disk_gb")}
+        old = mmtest.restored_without("slots.red_comp_mb", "slots.green_disk_gb")
+        self.assertEqual(old, new)
         cases = [window(), window(comp_mb=9000), window(free_pct=30), window(pressure=4), window(free_pct=52)]
         for w in cases:
             for disk in (None, 15, 41, 44.9, 45, 100):

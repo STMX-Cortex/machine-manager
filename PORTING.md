@@ -24,7 +24,9 @@ One file per case: `vectors/<function>/<case>.json`:
  "input": {...}, "expected": {...}}
 ```
 
-Settings are `vectors/_settings/base.json` (a flat `section.key` map) with `settings_over` applied. Compare the
+Settings are `vectors/_settings/base.json` (a flat `section.key` map) with `settings_over` applied. It holds every
+key of the settings table (`python3 -I tests/gen_vectors.py --settings` writes it; `tests/test_vectors.py` fails when
+it differs), so a pure function reads each key it needs and keeps no default of its own. Compare the
 expected value after a JSON round trip (tuples are lists). A crash is a failure.
 `tests/run_vectors.py` is the reference runner; `tests/vector_functions.py` shows how each function takes its input.
 `python3 -I tests/run_vectors.py --list` prints the count per function.

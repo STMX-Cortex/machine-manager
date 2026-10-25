@@ -1032,7 +1032,7 @@ class Supervisor:
                 self.log_decision("%s RESUME pids %s" % (mmcore.now_local(now), p.resume()))
         else:
             self.state.pop("green_for_pause", None)
-        cap = s.get("pause_newest_call.max_minutes", 0)  # 0: no limit
+        cap = s["pause_newest_call.max_minutes"]  # 0: no limit
         if cap and p.st and now - self.state.setdefault("paused_at", now) >= cap * 60:
             # From the cap time on, count clear ticks: every memory reading present and no RED memory reason that holds
             # the pause (cap_holds). Any other tick starts the count again (review F1: one tick that only looks calm,

@@ -66,9 +66,9 @@ def classify(window, s, disk_gb=None, kernel_event=False):
         memory_sign = (
             (pressure is not None and pressure >= 2)
             or (g60 is not None and g60 > 0)
-            or (comp_growth is not None and comp_growth > s.get("slots.red_sys_comp_growth_mb_60s", 256))
+            or (comp_growth is not None and comp_growth > s["slots.red_sys_comp_growth_mb_60s"])
         )
-        if not s.get("slots.red_sys_needs_memory_sign", True) or memory_sign:
+        if not s["slots.red_sys_needs_memory_sign"] or memory_sign:
             red.append(reason)
         else:
             amber.append(reason + ", no memory sign")
@@ -79,7 +79,7 @@ def classify(window, s, disk_gb=None, kernel_event=False):
     if disk_gb is not None and disk_gb < s["slots.red_disk_gb"]:
         red.append("disk %.0f GB < %g GB" % (disk_gb, s["slots.red_disk_gb"]))
     comp_now = get(cur, "comp_mb")
-    red_comp = s.get("slots.red_comp_mb", 0)  # default 0: off
+    red_comp = s["slots.red_comp_mb"]  # 0: off
     if red_comp and comp_now is not None and comp_now > red_comp:
         red.append("compressor at %.0f MB (near its ceiling)" % comp_now)
 
@@ -112,13 +112,13 @@ def classify(window, s, disk_gb=None, kernel_event=False):
         green_fail.append("swap grew")
     if l5 is None or l5 >= s["slots.green_load5"]:
         green_fail.append("load5 not under %g" % s["slots.green_load5"])
-    l1, green_load1 = get(cur, "load1"), s.get("slots.green_load1_per_core", 0.8) * s["slots.cores"]
+    l1, green_load1 = get(cur, "load1"), s["slots.green_load1_per_core"] * s["slots.cores"]
     if l1 is None or l1 >= green_load1:
         green_fail.append("load1 not under %g" % green_load1)
     sp = get(cur, "sys_pct")
     if sp is not None and sp >= s["slots.green_sys_pct"]:
         green_fail.append("system CPU not under %g%%" % s["slots.green_sys_pct"])
-    green_disk = s.get("slots.green_disk_gb", 0) or s["disk.recover_gb"]  # 0 follows disk.recover_gb
+    green_disk = s["slots.green_disk_gb"] or s["disk.recover_gb"]  # 0 follows disk.recover_gb
     if disk_gb is not None and disk_gb < green_disk:
         green_fail.append("disk under %g GB" % green_disk)
     if green_fail or not complete:
@@ -235,7 +235,7 @@ def alert_absent(entry, now, s):
     Returns {"clear": bool, "push_cleared": bool, "entry": the entry (when kept)}."""
     cur = dict(entry)
     cur.setdefault("absent_since", now)
-    if now - cur["absent_since"] < s.get("repeat.clear_after_minutes", 5) * 60:
+    if now - cur["absent_since"] < s["repeat.clear_after_minutes"] * 60:
         return {"clear": False, "push_cleared": False, "entry": cur}
     return {"clear": True, "push_cleared": LEVELS[cur["level"]] >= 2, "entry": cur}
 
@@ -623,7 +623,7 @@ def _age(now, t):
 def status_fresh(rec, now, s):
     """A status record (status.json or a pool file) younger than other.status_fresh_s by its `time` (as mm place)."""
     age = _age(now, _dict(rec).get("time"))
-    return age is not None and age < s.get("other.status_fresh_s", 60)  # 60: its default (vectors' base settings)
+    return age is not None and age < s["other.status_fresh_s"]
 
 
 def _state(rec):

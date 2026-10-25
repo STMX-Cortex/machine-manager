@@ -8,6 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
+import mmtest
 from mmtest import TempData, base_settings, mmcore
 from test_deletes import make
 import mmalerts
@@ -73,8 +74,8 @@ class CleanupAttention(unittest.TestCase):
         self.assertEqual(self.condition(10e9, names={"disk_command": command})["command"], command)
 
     def test_saved_settings_without_the_new_key_use_the_default(self):
-        settings = base_settings()
-        settings.pop("deletes.cleanup_attention_gb")
+        settings = mmtest.restored_without("deletes.cleanup_attention_gb")
+        self.assertEqual(settings["deletes.cleanup_attention_gb"], 10)
         snap = {"disk_gb": 100, "cleanup": {"count": 1, "bytes": 10e9}}
         c = next(c for c in mmalerts.evaluate(snap, settings, 1_800_000_000) if c["name"] == "CLEANUP_LIST")
         self.assertEqual(c["level"], "ATTENTION")

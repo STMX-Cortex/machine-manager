@@ -132,6 +132,13 @@ class Schemas(unittest.TestCase):
         self.assertEqual(mmschema.validate(mmcore.defaults(), mmschema.load("settings")), [])
         self.assertTrue(mmschema.validate(dict(mmcore.defaults(), **{"slots.floor": 0}), mmschema.load("settings")))
 
+    def test_vector_settings_match_code(self):
+        """vectors/_settings/base.json is the settings table with the vectors' fixed machine values: a port reads every
+        key there, and a pure function never needs a default of its own."""
+        with open(os.path.join(run_vectors.VEC, "_settings", "base.json")) as f:
+            base = json.load(f)
+        self.assertEqual(base, mmtest.base_settings(), "run python3 -I tests/gen_vectors.py --settings")
+
     def test_profiles_validate(self):
         for f in (mmtest.PROFILE, os.path.join(mmtest.CODE, "profiles", "example.toml")):
             self.assertEqual(mmschema.validate(mmcore.load_toml(f), mmschema.load("profile")), [], f)

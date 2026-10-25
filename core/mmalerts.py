@@ -216,7 +216,7 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
     cl = g("cleanup")
     if cl and cl.get("count"):
         low_disk = disk is not None and disk < s["disk.cache_action_disk_gb"]
-        attention_gb = s.get("deletes.cleanup_attention_gb", 10)
+        attention_gb = s["deletes.cleanup_attention_gb"]
         large_list = attention_gb > 0 and (cl.get("bytes") or 0) >= attention_gb * 1e9
         level = "ATTENTION" if low_disk or large_list else "INFO"
         top = "; ".join("%s %s (%s)" % (_q(i["rule"]), _q(i["path"]), _gb(i.get("bytes")))
