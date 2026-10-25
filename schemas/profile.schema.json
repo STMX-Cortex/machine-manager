@@ -422,7 +422,34 @@
          "paths"
         ]
        }
-      }
+      },
+      "anyOf": [
+       {
+        "properties": {
+         "type": {
+          "const": "git_worktrees"
+         },
+         "keep": {
+          "type": "array",
+          "items": {
+           "type": "string",
+           "minLength": 1
+          }
+         }
+        }
+       },
+       {
+        "properties": {
+         "type": {
+          "enum": [
+           "git_branches",
+           "stale_children",
+           "paths"
+          ]
+         }
+        }
+       }
+      ]
      }
     }
    },

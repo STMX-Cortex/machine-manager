@@ -141,6 +141,7 @@ interval_minutes = 180  # min
 lsof_timeout_s = 30  # s
 evidence_keep_days = 7  # days
 cleanup_list_hours = 24  # h
+cleanup_attention_gb = 10  # GB (10^9 bytes); cleanup list ATTENTION at or above this; 0 = off; default 10; range 0-10000; authority: the owner
 
 [trim]
 # The guarded build cache trim (an exclusive queue call).

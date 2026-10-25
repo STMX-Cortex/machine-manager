@@ -312,6 +312,7 @@ SCHEMA = {
     "deletes.enabled": ("bool", None, None), "deletes.interval_minutes": ("num", 10, 10080),
     "deletes.lsof_timeout_s": ("num", 5, 300), "deletes.evidence_keep_days": ("num", 1, 365),
     "deletes.cleanup_list_hours": ("num", 1, 720),
+    "deletes.cleanup_attention_gb": ("num", 0, 10000),
     "trim.age_minutes": ("num", 60, 100000), "trim.wait_s": ("num", 0, 600), "trim.drained_minutes": ("num", 0.5, 60),
     "trim.needed_after_minutes": ("num", 5, 1440),
     "evidence.slots": ("int", 2, 200), "evidence.window_minutes": ("num", 5, 240),

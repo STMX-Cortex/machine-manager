@@ -34,6 +34,7 @@ GROUPS = {
     "hook": ["test_hook"],            # T9, the 3-line limit, fail-open
     "place": ["test_place"],          # T8
     "deletes": ["test_deletes"],      # T14a-h, T15
+    "cleanup_attention": ["test_cleanup_attention"],  # cleanup size warning and worktree keep patterns
     "sandbox_holds": ["test_sandbox_holds"],  # rules 46-48: git, the pause and deletes against agent-written files
     "sandbox_holds_r1": ["test_sandbox_holds_r1"],  # C-10 read-write openers, regular slot file; C-11 markers, DELETES_FAILED
     "sandbox_holds_r2": ["test_sandbox_holds_r2"],  # C-14: QUEUE_FILE_UNREADABLE, list alerts, A1, fresh snapshot, QWAIT

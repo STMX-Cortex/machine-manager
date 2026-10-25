@@ -215,11 +215,16 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
                       % (s["disk.low_gb"], tr["needed_min"]), command=TRIM_CMD))
     cl = g("cleanup")
     if cl and cl.get("count"):
-        level = "ATTENTION" if disk is not None and disk < s["disk.cache_action_disk_gb"] else "INFO"
+        low_disk = disk is not None and disk < s["disk.cache_action_disk_gb"]
+        attention_gb = s.get("deletes.cleanup_attention_gb", 10)
+        large_list = attention_gb > 0 and (cl.get("bytes") or 0) >= attention_gb * 1e9
+        level = "ATTENTION" if low_disk or large_list else "INFO"
         top = "; ".join("%s %s (%s)" % (_q(i["rule"]), _q(i["path"]), _gb(i.get("bytes")))
                         for i in cl.get("top", [])[:3])
-        out.append(_c("CLEANUP_LIST", "CLEANUP_LIST", level,
-                      "%d delete candidates for %s, %s; largest: %s" % (cl["count"], nm["recipient"], _gb(cl.get("bytes")), top),
+        text = "%d delete candidates for %s, %s; largest: %s" % (cl["count"], nm["recipient"], _gb(cl.get("bytes")), top)
+        if large_list and not low_disk:
+            text += "; list over %g GB" % attention_gb
+        out.append(_c("CLEANUP_LIST", "CLEANUP_LIST", level, text,
                       command=DISK_CMD or "mm cleanup",
                       value=(cl.get("bytes") or 0) / 1e9, band=10))
     for p in g("link_skipped") or []:

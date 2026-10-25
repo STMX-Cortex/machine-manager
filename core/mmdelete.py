@@ -663,6 +663,10 @@ def cleanup_list(ctx, now, sizes=True):
                     real = os.path.realpath(p)  # root has no link but root's own, and p is no link
                     if real not in trees:
                         continue  # git does not list it: not a worktree, never entered (C-2)
+                    pattern = next((pat for pat in r.get("keep", []) if fnmatch.fnmatchcase(os.path.basename(p), pat)), None)
+                    if pattern is not None:
+                        keep(r["id"], p, "kept by the profile (keep: %s)" % pattern)
+                        continue
                     why, gitdir = gitfile_check(p, gitdirs.get(real, ()))
                     if why:
                         keep(r["id"], p, why)

@@ -136,12 +136,23 @@ expressions over process command lines, checked after a Mac reboot), `text_line_
 1048576: the longest line any pattern sees, "Agent-written files", item 7). Placeholders: `{data}`, `{user_tmp}`,
 `{claude_tmp}`, `~`. The schema is `schemas/profile.schema.json`.
 
+Clean-up list rule types (`deletes.cleanup`) are `git_worktrees`, `git_branches`, `stale_children` and `paths`.
+A `git_worktrees` rule may set `keep = ["journal-*"]`: case-sensitive `fnmatch` patterns on each tree folder's
+base name. The first matching pattern gives a KEEP item with reason `kept by the profile (keep: <pattern>)`,
+no command and no inner cache candidates. An empty list, or no `keep`, preserves the usual merged-and-clean rule.
+
 ## Settings
 
 Thresholds and switches live in `settings.default.toml` (every key with its unit). A data folder's `settings.toml`
 overrides only the keys it names; an unknown key or a bad value is a problem (`SETTINGS_BAD`), and the last good
 values stay in force. The public defaults are safe: `mode.observe = true`, `mode.slot_writes = "off"`,
 `deletes.enabled = false`, `launch_gate.enabled = false`, `pause_newest_call.enabled = false`, `banner.enabled = false`.
+
+`deletes.cleanup_list_hours` controls how often the clean-up list is refreshed (default 24 h).
+`deletes.cleanup_attention_gb` makes `CLEANUP_LIST` ATTENTION when candidate bytes reach that many GB
+(10^9 bytes; default 10, range 0-10000, 0 = off; authority: the owner). Unknown sizes count as zero.
+The low-disk warning below `disk.cache_action_disk_gb` still applies independently. When only list size triggers
+the warning, its text ends with `; list over <N> GB`.
 
 System CPU above `slots.red_sys_pct` for `slots.sustain_samples` (defaults 40% and 2 samples) needs a current memory
 sign for RED: kernel pressure at least 2, any swap growth in the last 60 s, or compressor growth in the last 60 s

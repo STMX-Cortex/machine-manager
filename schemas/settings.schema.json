@@ -4,6 +4,7 @@
  "type": "object",
  "required": [
   "banner.enabled",
+  "deletes.cleanup_attention_gb",
   "deletes.cleanup_list_hours",
   "deletes.enabled",
   "deletes.evidence_keep_days",
@@ -125,6 +126,11 @@
  "properties": {
   "banner.enabled": {
    "type": "boolean"
+  },
+  "deletes.cleanup_attention_gb": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 10000
   },
   "deletes.cleanup_list_hours": {
    "type": "number",
