@@ -1,0 +1,54 @@
+{
+ "case": "machine-none-values",
+ "expected": {
+  "age_s": null,
+  "busy": null,
+  "calls": null,
+  "cores": null,
+  "cpu_model": null,
+  "cpu_pct": null,
+  "disk_free_gb": null,
+  "disk_gb_total": null,
+  "e_cores": null,
+  "id": "lab1",
+  "idle": null,
+  "idle_min": null,
+  "location": "local",
+  "p_cores": null,
+  "ram_avail_mb": null,
+  "ram_mb": null,
+  "resource": "machine",
+  "slots": null,
+  "state": "UNKNOWN",
+  "waiting": null,
+  "why": "status ? s old"
+ },
+ "function": "resource_row",
+ "input": {
+  "extra": {
+   "id": "lab1"
+  },
+  "kind": "machine",
+  "now": 1800000000.0,
+  "rec": {
+   "busy": null,
+   "calls": null,
+   "disk_gb": null,
+   "facts": null,
+   "idle_minutes": null,
+   "kind": null,
+   "machine_id": null,
+   "mode": null,
+   "readings": null,
+   "reasons": null,
+   "schema_version": null,
+   "slots": null,
+   "slots_would": null,
+   "state": null,
+   "time": null,
+   "waiting": null
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -129,6 +129,18 @@ def boot_time():
     return sec + usec / 1e6
 
 
+def machine_facts():
+    """The machine's static facts (sysctl, no fork), read once by the supervisor at its start: cores (hw.ncpu),
+    p_cores and e_cores (hw.perflevel0/1.logicalcpu; None on an Intel or older Mac), cpu_model
+    (machdep.cpu.brand_string, or None), ram_mb (hw.memsize in MB, or None)."""
+    brand = sysctl_raw("machdep.cpu.brand_string")
+    model = brand.split(b"\0", 1)[0].decode("utf-8", "replace").strip() if brand else ""
+    mem = sysctl_int("hw.memsize")
+    return {"cores": sysctl_int("hw.ncpu"), "p_cores": sysctl_int("hw.perflevel0.logicalcpu"),
+            "e_cores": sysctl_int("hw.perflevel1.logicalcpu"), "cpu_model": model or None,
+            "ram_mb": mem // 2**20 if mem and mem > 0 else None}
+
+
 # --------------------------------------------------------------------------------------------- commands and places
 
 PS_ARGV = ["/bin/ps", "-axo", "pid=,ppid=,rss=,%cpu=,comm="]  # mmread.parse_ps

@@ -68,4 +68,5 @@ FUNCTIONS = {
     "crash_loop": lambda i, s: mmdecide.crash_loop(i["starts"], i["now"], s),
     "resume_targets": lambda i, s: mmdecide.resume_targets(i["paused"], i["current"]),
     "reboot_check": lambda i, s: mmdecide.reboot_check(i["prev"], i["cur"]),
+    "resource_row": lambda i, s: mmdecide.resource_row(i["kind"], i["rec"], i["now"], s, i.get("extra")),
 }

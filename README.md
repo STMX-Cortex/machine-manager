@@ -60,7 +60,9 @@ Code and live data are apart. The code folder is this repository. The live data 
 `mm` runs on macOS in full. On Linux it loads and runs in a reduced form:
 
 1. The memory readings (free, swap, compressor, kernel pressure, segments) are unknown. Load, CPU ticks
-   (`/proc/stat`), the core count, the boot time and free disk are read. After `self.bad_reading_ticks` ticks with
+   (`/proc/stat`), the core count, the boot time and free disk are read. The static facts `mm resources` shows come
+   from `/proc/cpuinfo` (`model name`, else `Hardware` or `Processor`) and `/proc/meminfo` (`MemTotal`); there is no
+   P and E core split (none). After `self.bad_reading_ticks` ticks with
    missing readings the self-check turns safe mode on, so no automatic action runs.
 2. The macOS-only parts are skipped: the kernel `log stream`, `pmset` (power unknown), the daily readings check and the
    fallback sampler (no `READINGS_MISMATCH`), the evidence bundle's macOS commands (its `readings.txt` says so), the
@@ -83,9 +85,34 @@ mm status        # at most 5 lines: state, mode, slots; readings; alert counts; 
 mm alerts        # one line per active alert: LEVEL ID text | do: command (agent values cleaned and quoted)
 mm explain ID    # one alert in full, with its evidence folder
 mm place --kind go-test --shards 4      # place=MACHINE|POOL|WAIT, why= lines, do= lines (never run by the tool)
+mm resources     # one line per resource: the machine, each pool, its runners, the usage services
 ```
 
 Output is plain `key=value` lines; `--json` gives one JSON object. Errors are one line: `E_CODE what; fix: how`.
+
+`mm resources` reads files only (status.json, `pools/*.json`, the profile, the settings and the delivery's usage
+state): no reading, no child process, no network, so a launch hook can call it before each agent launch. `--json`
+gives `{"resources": [row, ...]}`. The rows (`mmdecide.resource_row`, with vectors):
+
+1. `resource=machine`: `state` (status.json's while younger than `other.status_fresh_s`, else `UNKNOWN` with `why`),
+   `cores`, `p_cores`, `e_cores`, `cpu_model`, `ram_mb` (the static facts, read once at the supervisor's start),
+   `ram_avail_mb` (free % of `ram_mb`; none without the free reading), `disk_gb_total`, `disk_free_gb`, `cpu_pct` (all
+   CPU busy), `slots`, `busy` (held slots), `calls` (queue calls holding them), `waiting`, `idle` (the `IDLE_ROOM`
+   rule: yes, with `idle_min`; none when the status is not fresh), `age_s`.
+2. `resource=pool`, one per pool file: `state`, `unit`, `minutes_left`, `reserve_minutes`, `used_usd`, `allowed_usd`,
+   `running`, `queued`, `read_age_s`. `UNKNOWN` when the pool was not read within `github.stale_minutes`, or its file
+   is older than `other.status_fresh_s` (the supervisor is gone).
+3. `resource=runner`, with the profile's `ci.runner_labels`: `GREEN` online and idle, `STEADY` online and busy, `RED`
+   offline, `UNKNOWN` when the pool's read is stale. When the runner list cannot be read, one row
+   `id=runners state=UNKNOWN why="..."`; that never changes the pool's state or its alerts.
+4. `resource=service` (`claude`, `codex`), when the profile names `delivery.usage_state`: `used_5h_pct`,
+   `used_week_pct`, `reset_5h`, `reset_week` (epoch seconds), `age_s`, `fresh` (the state file is no older than its
+   own `max_age_seconds`, else `usage.watch_state_max_age_s`). A value the usage rules reject is none, and `why` names the reason. `state` is
+   `UNKNOWN` when no fresh value is known, else none: there are no usage thresholds here. A level the plan does not
+   offer is left out.
+
+Runner names and other outside text show cleaned and quoted as in "Agent-written files", item 6. Exit 0 when the
+machine status is fresh, 3 when status.json is missing or not fresh (the rows are still printed), 2 on a usage error.
 
 ## Stop
 
@@ -154,7 +181,9 @@ A TOML file the tool reads and never writes. Only `name` is required; a section 
 `mm cleanup`), `service` (`label_prefix`, default
 `com.example.machine-manager`; `rollback_notes`; `path_extra`, folders for the service PATH), `sizes`, `live_tools` (process names of a live build), `memory_guard`
 (an external guard's heartbeat), `queue` (adapter `fifo-gates`), `kinds` (machine-only and pool job kinds), `ci`
-(adapter `github-gh`, read-only), `delivery` (adapter `claude-code-hook`), `trim` (the guarded cache trim), `deletes`
+(adapter `github-gh`, read-only; `runner_labels`, optional: `mm resources` lists the self-hosted runners that carry
+every one of these labels, as `runs-on` matches; the list needs admin access to the repository, and a failed read is
+only a `runners_error` in the pool record, never a read error or an alert), `delivery` (adapter `claude-code-hook`), `trim` (the guarded cache trim), `deletes`
 (`rules`, `cleanup`, `forbidden_parts`, `protected_roots`), `recovery` (`expected_jobs`: `{name, match}` regular
 expressions over process command lines, checked after a Mac reboot), `text_line_max` (default 4096, from 256 to
 1048576: the longest line any pattern sees, "Agent-written files", item 7). Placeholders: `{data}`, `{user_tmp}`,

@@ -32,6 +32,7 @@ Agents:
   mm place --kind K [--shards N] [--wide] [--agents N]
                             where a job should run: MACHINE, POOL or WAIT
   mm wait [--min-level attention|action]   block until an unseen alert (run it under a monitor)
+  mm resources              one line per resource: machine, pools, runners, services (files only)
 Owner:
   mm off [--reason TEXT] | mm on      every automatic action off or on; on also ends safe mode
   mm slots pin N --minutes M [--reason TEXT] | mm slots unpin
@@ -228,6 +229,49 @@ def cmd_place(args, as_json, profile):
             ["do=" + json.dumps(c) for c in rec["commands"]]
     emit(as_json, rec, lines)
     return mmdecide.EXIT[rec["place"]]
+
+
+def peek_settings():
+    """The settings without writing a file; the defaults when they cannot be read (never an error)."""
+    try:
+        s = mmcore.Settings().peek()
+    except Exception:
+        s = None
+    return s or mmcore.resolve(mmcore.defaults())
+
+
+def cmd_resources(args, as_json, profile):
+    """One row per resource from files only (status.json, pools/*.json, the usage state): no reading, no subprocess,
+    no network, so a launch hook can call it. The rows come from mmdecide.resource_row. Exit 3 when status.json is
+    missing or not fresh (rows still printed, the machine UNKNOWN)."""
+    import glob
+    import mmdecide
+    if args:
+        return err("E_USAGE", "unknown words: %s" % " ".join(mmcore.quoted(a) for a in args), "mm help")
+    s, now = peek_settings(), time.time()
+    st = mmcore.read_json(mmcore.path("status.json"), None)
+    st = st if isinstance(st, dict) else None
+    rows = [mmdecide.resource_row("machine", st, now, s, {"id": mmcore.machine_id(profile)})]
+    for f in sorted(glob.glob(os.path.join(glob.escape(mmcore.path("pools")), "*.json"))):
+        rec = mmcore.read_json(f, None)
+        if not isinstance(rec, dict):
+            continue
+        pool = mmdecide.resource_row("pool", rec, now, s, {"id": os.path.basename(f)[:-5]})
+        rows.append(pool)
+        where = {"pool": pool["id"], "read_time": rec.get("read_time"), "time": rec.get("time")}
+        for r in rec.get("runners") if isinstance(rec.get("runners"), list) else []:
+            rows.append(mmdecide.resource_row("runner", r, now, s, where))
+        if rec.get("runners_error"):
+            rows.append(mmdecide.resource_row("runner", {"error": str(rec["runners_error"])}, now, s, where))
+    dl = profile.get("delivery") or {}
+    if dl.get("adapter") == "claude-code-hook" and dl.get("usage_state"):
+        import ad_deliver_claude
+        f = mmcore.expand(dl["usage_state"])
+        usage = {"usage": ad_deliver_claude.read_usage(f, now, s), "levels": ad_deliver_claude.usage_resets(f)}
+        rows += [mmdecide.resource_row("service", usage, now, s, {"id": sid}) for sid in ("claude", "codex")]
+    rows = [mmcore.clean_obj(mmcore.mask_obj(r)) for r in rows]  # runner names and errors are outside text (C-20)
+    emit(as_json, {"resources": rows}, [kv(r) for r in rows])
+    return 0 if mmdecide.status_fresh(st, now, s) else 3
 
 
 def cmd_wait(args, as_json, profile):
@@ -491,6 +535,8 @@ def main(argv):
         return cmd_place(args, as_json, profile)
     if verb == "wait":
         return cmd_wait(args, as_json, profile)
+    if verb == "resources":
+        return cmd_resources(args, as_json, profile)
     if verb in ("off", "on"):
         return cmd_off(args, as_json, verb == "on", profile)
     if verb == "slots":

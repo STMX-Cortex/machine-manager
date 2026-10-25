@@ -65,6 +65,7 @@ def kill_children():
 sysctl_raw, sysctl_int, swapusage = plat.sysctl_raw, plat.sysctl_int, plat.swapusage
 vm_stats, cpu_ticks, proc_argv, boot_time = plat.vm_stats, plat.cpu_ticks, plat.proc_argv, plat.boot_time
 COMMAND_READINGS = plat.COMMAND_READINGS
+machine_facts = plat.machine_facts  # static facts (cores, P and E cores, CPU name, memory size): read once at start
 
 
 def sys_pct(prev, cur):
@@ -76,13 +77,22 @@ def sys_pct(prev, cur):
     return None if total <= 0 else d[1] * 100.0 / total
 
 
+def cpu_pct(prev, cur):
+    """All CPU busy % between two cpu_ticks() readings: 100 minus the idle share (the third value on every backend)."""
+    if not prev or not cur:
+        return None
+    d = [c - p for c, p in zip(cur, prev)]
+    total = sum(d)
+    return None if total <= 0 else 100.0 - d[2] * 100.0 / total
+
+
 PAGE = plat.PAGE
 CORES = plat.CORES
 
 
 def memory_sample(t, prev_ticks=None):
     """One fast sample. Returns (sample, ticks). The memory part comes from the backend (plat.memory_readings: free_pct,
-    swap, compressor, pressure, segments; None where the platform cannot read it), then the load and system CPU."""
+    swap, compressor, pressure, segments; None where the platform cannot read it), then the load, system CPU and all CPU."""
     s = {"t": t}
     s.update(plat.memory_readings())
     try:
@@ -91,6 +101,7 @@ def memory_sample(t, prev_ticks=None):
         s["load1"] = s["load5"] = None
     ticks = cpu_ticks()
     s["sys_pct"] = sys_pct(prev_ticks, ticks)
+    s["cpu_pct"] = cpu_pct(prev_ticks, ticks)  # shown only (status.json, mm resources); no rule reads it
     return s, ticks
 
 
@@ -203,6 +214,15 @@ def disk_free_gb(volume=None):
         volume = volume or plat.DATA_VOLUME
         st = os.statvfs(volume)
         return st.f_bavail * st.f_frsize / 1e9
+    except OSError:
+        return None
+
+
+def disk_total_gb(volume=None):
+    """Total GB (10^9 bytes) of the volume (default: plat.DATA_VOLUME), or None."""
+    try:
+        st = os.statvfs(volume or plat.DATA_VOLUME)
+        return st.f_blocks * st.f_frsize / 1e9
     except OSError:
         return None
 

@@ -4,8 +4,9 @@
 The same names as mmplat_darwin. The memory readings are unknown (None) for now: the Linux memory readings and
 rules come in a later stage. Only plain facts are read here, each by a pure parser of the file's text:
 the core count (os.cpu_count), CPU ticks and the boot time from /proc/stat, a process's argument list from
-/proc/<pid>/cmdline. Commands the tool cannot run here are None, and their callers skip them. It loads no ctypes and
-no macOS symbol; nothing here runs at import time but os.path checks. Nothing here runs a subprocess.
+/proc/<pid>/cmdline, the CPU name (/proc/cpuinfo) and the memory size (/proc/meminfo). Commands the tool cannot run
+here are None, and their callers skip them. It loads no ctypes and no macOS symbol; nothing here runs at import time
+but os.path checks. Nothing here runs a subprocess.
 """
 import os
 
@@ -65,6 +66,31 @@ def parse_cmdline(raw):
     return [w.decode("utf-8", "surrogateescape") for w in words]
 
 
+def parse_meminfo_total_mb(text):
+    """/proc/meminfo's `MemTotal:  N kB` -> MB (2^20 bytes) as a whole number, or None."""
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if parts[:1] == ["MemTotal:"] and len(parts) >= 2:
+            try:
+                kb = int(parts[1])
+            except ValueError:
+                return None
+            return kb // 1024 if kb > 0 else None
+    return None
+
+
+def parse_cpuinfo_model(text):
+    """/proc/cpuinfo's CPU name: the first `model name` (x86), else `Hardware`, else `Processor` (older ARM kernels);
+    None when none has a value. Keys match exactly (`processor`, lower case, is the CPU number)."""
+    found = {}
+    for line in (text or "").splitlines():
+        key, sep, value = line.partition(":")
+        key, value = key.strip(), value.strip()
+        if sep and value and key in ("model name", "Hardware", "Processor"):
+            found.setdefault(key, value)
+    return next((found[k] for k in ("model name", "Hardware", "Processor") if k in found), None)
+
+
 # --------------------------------------------------------------------------------------------- readings
 
 def sysctl_raw(name):
@@ -105,6 +131,15 @@ def memory_readings():
     """The memory part of one fast sample: every value unknown (None) until the Linux memory stage."""
     return {"free_pct": None, "swap_total_mb": None, "swap_used_mb": None, "comp_mb": None, "pressure": None,
             "seg_pct": None}
+
+
+def machine_facts():
+    """The machine's static facts, read once by the supervisor at its start: cores (os.cpu_count), cpu_model
+    (/proc/cpuinfo), ram_mb (/proc/meminfo MemTotal); p_cores and e_cores None (no such split here)."""
+    info, mem = _read("/proc/cpuinfo"), _read("/proc/meminfo")
+    return {"cores": os.cpu_count(), "p_cores": None, "e_cores": None,
+            "cpu_model": parse_cpuinfo_model(info.decode("utf-8", "replace")) if info is not None else None,
+            "ram_mb": parse_meminfo_total_mb(mem.decode("ascii", "replace")) if mem is not None else None}
 
 
 def proc_argv(pid):

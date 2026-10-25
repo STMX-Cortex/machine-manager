@@ -28,8 +28,10 @@ import sys
 import time
 
 import mmcore  # noqa: E402
-import mmread  # noqa: E402
 import mmtext  # noqa: E402
+
+# mmread (and its platform backend, ctypes on macOS) loads only where a function needs it, so `mm resources` can read
+# the usage state without it.
 
 EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "PreToolUse")
 LIMIT = 1 << 20
@@ -124,6 +126,7 @@ def stale_line(s, now):
 
 
 def waiter_live(session):
+    import mmread
     try:
         with open(mmcore.path("state", "waiter-%s.pid" % re.sub(r"[^0-9a-zA-Z-]", "_", session))) as f:
             return mmread.pid_alive(int(f.read().split()[0]))
@@ -385,6 +388,28 @@ def read_usage(file, now, s=None):
         return None
 
 
+USAGE_LEVELS = ("claude_5h", "claude_weekly", "codex_weekly", "codex_5h")
+
+
+def usage_resets(file):
+    """Each usage level's reset time and plan offer, for mm resources: {level: {reset_at: epoch or None, not_offered:
+    bool}}; {} when the file cannot be read. read_usage decides which values count; this adds only the reset times."""
+    try:
+        with open(file) as f:
+            d = _usage_json(f.read())
+        lv = d.get("levels") if isinstance(d, dict) else None
+    except (OSError, ValueError, TypeError, RecursionError):
+        return {}
+    out = {}
+    for level in USAGE_LEVELS:
+        row = lv.get(level) if isinstance(lv, dict) else None
+        if not isinstance(row, dict):
+            continue
+        r = row.get("reset_at")
+        ok = isinstance(r, (int, float)) and not isinstance(r, bool) and math.isfinite(r)
+        out[level] = {"reset_at": r if ok else None, "not_offered": row.get("status") == "not_offered"}
+    return out
+
 
 def jobs(cfg, base=None):
     """(pid, rc_path) pairs from 'pid=N ... rc=PATH' tokens in the recipient's job file, above its end marker."""
@@ -527,6 +552,7 @@ def banner(text, enabled):
     Skipped (False) where the platform has no notification command (mmread.plat.banner_argv gives None)."""
     if not enabled:
         return False
+    import mmread
     cmd = os.environ.get("MM_BANNER_CMD")
     # an alert line: masked part by part, its quotes kept (mmcore.mask_keep_quotes), then cleaned (C-23)
     safe = mmtext.clean(mmcore.mask_keep_quotes(text)).replace("\\", " ").replace('"', "'")[:200]

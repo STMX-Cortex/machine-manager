@@ -1,0 +1,16 @@
+Processor	: ARMv7 Processor rev 4 (v7l)
+processor	: 0
+BogoMIPS	: 38.40
+Features	: half thumb fastmult vfp edsp neon vfpv3 tls vfpv4 idiva idivt vfpd32 lpae evtstrm crc32
+CPU implementer	: 0x41
+CPU architecture: 7
+CPU variant	: 0x0
+CPU part	: 0xd03
+CPU revision	: 4
+
+processor	: 1
+BogoMIPS	: 38.40
+
+Hardware	: Example Board Rev 2
+Revision	: a02082
+Serial		: 0000000000000000

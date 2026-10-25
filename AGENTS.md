@@ -11,6 +11,7 @@
 | `mm explain ID` | one alert in full: text, command, evidence folder |
 | `mm ack ID` | silence an alert you handled, until it gets worse |
 | `mm place --kind K [--shards N] [--wide] [--agents N]` | where a job runs: MACHINE, POOL or WAIT |
+| `mm resources` | one line per resource (machine, pools, runners, services); files only, fast |
 | `mm wait [--min-level action]` | block until an unseen alert (run it under a monitor) |
 | `mm event timing-failure --note TEXT` | report a test that failed by time (slots go down one step) |
 | `mm watch RUN_ID --note TEXT` | an alert when that CI run ends |

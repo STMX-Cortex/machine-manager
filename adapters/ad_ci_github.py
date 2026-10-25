@@ -77,6 +77,47 @@ def parse_billing(text, month, linux_sku="actions linux"):
 
 
 
+# ------------------------------------------------------------------------------------------- self-hosted runners
+
+RUNNERS_MAX = 1000  # runners kept from one read; the API page holds at most 100
+
+
+def parse_runners(text, labels):
+    """`gh api repos/<repo>/actions/runners` -> [{name, online, busy, labels}] for each runner that carries every label
+    in `labels` (case-insensitive, as runs-on matches). Names and labels are GitHub text: kept cleaned and short.
+    Raises ValueError when the text is not that shape."""
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError) as e:
+        raise ValueError("runners is not JSON") from e
+    runners = data.get("runners") if isinstance(data, dict) else None
+    if not isinstance(runners, list):
+        raise ValueError("runners has no runners list")
+    want = {str(x).lower() for x in labels}
+    out = []
+    for r in runners[:RUNNERS_MAX]:
+        if not isinstance(r, dict) or not isinstance(r.get("name"), str) or not isinstance(r.get("labels"), list):
+            continue  # a runner without a name or labels matches nothing
+        names = [x.get("name") for x in r["labels"] if isinstance(x, dict) and isinstance(x.get("name"), str)]
+        if not want <= {n.lower() for n in names}:
+            continue
+        out.append({"name": mmtext.clean(r["name"])[:100], "online": r.get("status") == "online",
+                    "busy": r.get("busy") is True, "labels": [mmtext.clean(n)[:60] for n in names[:50]]})
+    return out
+
+
+def read_runners(cfg):
+    """(runners, None) or ([], why) for the profile's ci.runner_labels. A failure (no admin scope: gh rc 1 on a 403 or
+    404; text that does not parse) is only this part's: it never counts as a read error, a stale source or an alert."""
+    rc, out = gh_run(["api", "repos/%s/actions/runners?per_page=100" % cfg["repo"]])
+    if rc != 0:
+        return [], "gh api runners rc=%s (the runner list needs admin access to the repository)" % rc
+    try:
+        return parse_runners(out, cfg["runner_labels"]), None
+    except ValueError as e:
+        return [], mmcore.mask(str(e))[:200]
+
+
 # ------------------------------------------------------------------------------------------- runs
 
 def is_noise(r, noise):
@@ -146,6 +187,11 @@ def read_all(cfg, s, now, watch):
         res["billing"] = {"minutes": float(m), "gross": float(g), "net": float(n)}
     except BillingError as e:
         res["errors"]["billing"] = str(e)[:200]
+    if cfg.get("runner_labels"):  # optional: only when the profile names runner labels
+        try:
+            res["runners"], res["runners_error"] = read_runners(cfg)
+        except Exception as e:  # never the run or billing read's failure
+            res["runners"], res["runners_error"] = [], mmcore.mask("runners read failed: %r" % e)[:200]
     res["watched"] = poll_watched(watch, now, repo)
     return res
 
@@ -337,11 +383,16 @@ class Pool:
         st, why = pool_state(gh, s, now)
         b = (gh or {}).get("billing") or {}
         r = (gh or {}).get("runs") or {}
-        return mmcore.stamp({"kind": "pool", "time": now, "state": st, "reasons": why,
-                             "capacity": {"minutes_left": (s["github.included_minutes"] - b["minutes"]) if b else None,
-                                          "reserve_minutes": s["github.reserve_minutes"]},
-                             "load": {"running": r.get("in_progress"), "queued": r.get("queued")},
-                             "alerts": list(alerts), "read_time": (gh or {}).get("time")}, mid=self.id)
+        rec = {"kind": "pool", "time": now, "state": st, "reasons": why,
+               "capacity": {"minutes_left": (s["github.included_minutes"] - b["minutes"]) if b else None,
+                            "reserve_minutes": s["github.reserve_minutes"], "unit": "minutes"},
+               "money": {"used_usd": b.get("gross"), "allowed_usd": s["github.allowed_gross_usd"]},
+               "load": {"running": r.get("in_progress"), "queued": r.get("queued")},
+               "alerts": list(alerts), "read_time": (gh or {}).get("time")}
+        for k in ("runners", "runners_error"):  # only when the profile names runner labels (mm resources)
+            if k in (gh or {}):
+                rec[k] = gh[k]
+        return mmcore.stamp(rec, mid=self.id)
 
     def minutes_left(self, s, now):
         gh = mmcore.read_json(mmcore.path("state", "github.json"), None)

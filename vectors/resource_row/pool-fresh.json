@@ -1,0 +1,52 @@
+{
+ "case": "pool-fresh",
+ "expected": {
+  "allowed_usd": 0,
+  "id": "ci:example/repo",
+  "location": "cloud",
+  "minutes_left": 1234.5,
+  "queued": 1,
+  "read_age_s": 120,
+  "reserve_minutes": 300.0,
+  "resource": "pool",
+  "running": 2,
+  "state": "GREEN",
+  "unit": "minutes",
+  "used_usd": 0.0
+ },
+ "function": "resource_row",
+ "input": {
+  "extra": {
+   "id": "ci_example_repo"
+  },
+  "kind": "pool",
+  "now": 1800000000.0,
+  "rec": {
+   "alerts": [],
+   "capacity": {
+    "minutes_left": 1234.5,
+    "reserve_minutes": 300,
+    "unit": "minutes"
+   },
+   "kind": "pool",
+   "load": {
+    "queued": 1,
+    "running": 2
+   },
+   "machine_id": "ci:example/repo",
+   "money": {
+    "allowed_usd": 0,
+    "used_usd": 0.0
+   },
+   "read_time": 1799999880.0,
+   "reasons": [
+    "budget and queue fine"
+   ],
+   "schema_version": 1,
+   "state": "GREEN",
+   "time": 1799999995.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

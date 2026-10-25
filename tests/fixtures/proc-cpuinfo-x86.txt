@@ -1,0 +1,16 @@
+processor	: 0
+vendor_id	: GenuineExample
+cpu family	: 6
+model		: 85
+model name	: Example CPU E-2000 @ 3.00GHz
+stepping	: 7
+cpu MHz		: 3000.000
+cache size	: 16384 KB
+flags		: fpu vme de pse tsc msr
+
+processor	: 1
+vendor_id	: GenuineExample
+cpu family	: 6
+model		: 85
+model name	: Example CPU E-2000 @ 3.00GHz
+stepping	: 7

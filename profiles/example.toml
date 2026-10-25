@@ -65,6 +65,7 @@ push_command = "git push origin {sha}:refs/heads/{branch}"
 dispatch_argv = ["/opt/example/bin/ci-dispatch", "--branch", "{branch}"]
 scratch_command = "/opt/example/bin/make-scratch {branch}"
 noise = [{ workflow_regex = "^probe" }]
+runner_labels = ["self-hosted", "lab-mac"]   # optional: mm resources lists the self-hosted runners with all these labels
 
 [delivery]                           # warnings into one Claude Code session (adapter claude-code-hook)
 adapter = "claude-code-hook"

@@ -363,6 +363,27 @@ class Pauser:
         return mmrecover.resume_paused(why)
 
 
+FACT_KEYS = ("cores", "p_cores", "e_cores", "cpu_model", "ram_mb")
+
+
+def machine_facts():
+    """The static facts for status.json, read once at start (mmread.machine_facts, the data volume's total size).
+    A failed read gives None values, never a failed start; the CPU name is system text, kept cleaned and short."""
+    try:
+        f = mmread.machine_facts()
+        f = f if isinstance(f, dict) else {}
+    except Exception:
+        f = {}
+    out = {k: f.get(k) if isinstance(f.get(k), int) and not isinstance(f.get(k), bool) else None for k in FACT_KEYS}
+    out["cpu_model"] = mmcore.clean(f["cpu_model"])[:120] if isinstance(f.get("cpu_model"), str) else None
+    try:
+        total = mmread.disk_total_gb()
+    except Exception:
+        total = None
+    out["disk_gb_total"] = None if total is None else round(total, 1)
+    return out
+
+
 def critical(reasons):
     """A RED reason that pauses the newest call (pause_newest_call.max_minutes never ends a pause during it)."""
     return any(r.startswith(("kernel pressure 4", "swap +", "compressor +", "compressor at ")) for r in reasons)
@@ -452,6 +473,7 @@ class Supervisor:
         self.self_state = {}
         self.reading_problems = []
         self.ping = Worker(mmrecover.ping)
+        self.facts = machine_facts()  # static: read once (status.json `facts`, mm resources)
         # every start: no process stays stopped by an earlier run (a crash or a kill during a pause)
         legacy = self.state.pop("paused", None)
         if mmrecover.read_paused() or legacy:
@@ -722,7 +744,8 @@ class Supervisor:
         snap["trim_needed_ok"] = dk is not None and dk < s["disk.low_gb"]
 
         # idle room
-        idle_now = q and q.get("slots") and len(q["busy"]) < q["slots"] and not q["tickets"] and mac_state == "GREEN"
+        idle_now = bool(q) and mmdecide.queue_idle(q.get("slots"), len(q.get("busy") or []), len(q.get("tickets") or []),
+                                                    mac_state)
         if idle_now:
             self.state.setdefault("idle_since", now)
         else:
@@ -761,7 +784,8 @@ class Supervisor:
 
         # files
         active = (mmcore.read_json(store.state_file, {}) or {}).get("active") or {}
-        self._status(now, mac_state, reasons, q, sample, "ok", active, s, observe, off, safe)
+        self._status(now, mac_state, reasons, q, sample, "ok", active, s, observe, off, safe,
+                     idle_minutes=snap.get("idle_minutes"))
         if self.pool:
             self._pool_status(now, s, gh, active)
         if self.due("metrics", 60, now):
@@ -1052,8 +1076,11 @@ class Supervisor:
                     "while stopped, no pid to continue" % (mmcore.quoted(call), cap, mac_state))
         self.hold(key, "PAUSE_MAX", "ATTENTION", text, now + HELD_SELF_S, command="mm status")
 
-    def _status(self, now, mac_state, reasons, q, sample, note, active=None, s=None, observe=None, off=None, safe=None):
-        """status.json: the machine's status record and the heartbeat, every tick (schemas/status.schema.json)."""
+    def _status(self, now, mac_state, reasons, q, sample, note, active=None, s=None, observe=None, off=None, safe=None,
+                idle_minutes=None):
+        """status.json: the machine's status record and the heartbeat, every tick (schemas/status.schema.json).
+        Optional parts for mm resources: facts (static, read at start), calls (distinct queue calls, as SLOT_CPU
+        counts them), idle_minutes (the IDLE_ROOM span; None when not idle), readings.cpu_pct."""
         gate = self.state.get("gate", {})
         sample = sample or {}
         counts = {"ACTION": 0, "ATTENTION": 0, "INFO": 0}
@@ -1065,10 +1092,14 @@ class Supervisor:
             "slots": (q or {}).get("slots"), "slots_would": self.state.get("virtual_slots"),
             "busy": len((q or {}).get("busy", [])), "waiting": len((q or {}).get("tickets", [])),
             "readings": {k: (round(sample[k], 2) if isinstance(sample.get(k), float) else sample.get(k))
-                         for k in ("free_pct", "swap_used_mb", "swap_total_mb", "comp_mb", "pressure", "load5", "sys_pct")},
+                         for k in ("free_pct", "swap_used_mb", "swap_total_mb", "comp_mb", "pressure", "load5", "sys_pct",
+                                   "cpu_pct")},
             "disk_gb": None if self.cache.get("disk") is None else round(self.cache["disk"], 1),
             "sampler": "commands" if self.fallback else "fast",
             "alerts": counts,
+            "facts": getattr(self, "facts", None),
+            "calls": len(mmalerts.queue_calls(q.get("busy") or [])) if isinstance(q, dict) else None,
+            "idle_minutes": None if idle_minutes is None else round(idle_minutes, 1),
             "heartbeat": {"pid": os.getpid(), "tick": self.tick_n, "note": note}}, mid=self.mid)
         mmcore.write_atomic(mmcore.path("status.json"), json.dumps(rec, sort_keys=True))
 

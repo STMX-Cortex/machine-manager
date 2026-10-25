@@ -1,0 +1,71 @@
+{
+ "case": "machine-fresh-mac",
+ "expected": {
+  "age_s": 5,
+  "busy": 3,
+  "calls": 2,
+  "cores": 12,
+  "cpu_model": "Example M1 Pro",
+  "cpu_pct": 41.3,
+  "disk_free_gb": 210.4,
+  "disk_gb_total": 994.7,
+  "e_cores": 4,
+  "id": "lab1",
+  "idle": true,
+  "idle_min": 12,
+  "location": "local",
+  "p_cores": 8,
+  "ram_avail_mb": 19661,
+  "ram_mb": 32768,
+  "resource": "machine",
+  "slots": 6,
+  "state": "GREEN",
+  "waiting": 0
+ },
+ "function": "resource_row",
+ "input": {
+  "extra": {
+   "id": "lab1"
+  },
+  "kind": "machine",
+  "now": 1800000000.0,
+  "rec": {
+   "busy": 3,
+   "calls": 2,
+   "disk_gb": 210.44,
+   "facts": {
+    "cores": 12,
+    "cpu_model": "Example M1 Pro",
+    "disk_gb_total": 994.7,
+    "e_cores": 4,
+    "p_cores": 8,
+    "ram_mb": 32768
+   },
+   "idle_minutes": 12.4,
+   "kind": "machine",
+   "machine_id": "lab1",
+   "mode": "observe",
+   "readings": {
+    "comp_mb": 300.0,
+    "cpu_pct": 41.27,
+    "free_pct": 60,
+    "load5": 2.5,
+    "pressure": 1,
+    "swap_total_mb": 2048.0,
+    "swap_used_mb": 100.0,
+    "sys_pct": 8.5
+   },
+   "reasons": [
+    "all readings in the green band"
+   ],
+   "schema_version": 1,
+   "slots": 6,
+   "slots_would": 6,
+   "state": "GREEN",
+   "time": 1799999995.0,
+   "waiting": 0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

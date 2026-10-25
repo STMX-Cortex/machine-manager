@@ -143,6 +143,120 @@
     "number",
     "null"
    ]
+  },
+  "facts": {
+   "type": "object",
+   "description": "machine: static facts read once at the supervisor's start (mm resources)",
+   "properties": {
+    "cores": {
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "p_cores": {
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "e_cores": {
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "cpu_model": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "ram_mb": {
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "disk_gb_total": {
+     "type": [
+      "number",
+      "null"
+     ]
+    }
+   },
+   "additionalProperties": false
+  },
+  "calls": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "description": "machine: distinct queue calls holding slots (one call may hold several), or null when the queue cannot be read"
+  },
+  "idle_minutes": {
+   "type": [
+    "number",
+    "null"
+   ],
+   "description": "machine: minutes the queue has been idle (the IDLE_ROOM span), or null when it is not idle"
+  },
+  "money": {
+   "type": "object",
+   "description": "pool: money used and allowed this month",
+   "properties": {
+    "used_usd": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "allowed_usd": {
+     "type": [
+      "number",
+      "null"
+     ]
+    }
+   },
+   "additionalProperties": false
+  },
+  "runners": {
+   "type": "array",
+   "description": "pool: the self-hosted runners that carry every ci.runner_labels label",
+   "items": {
+    "type": "object",
+    "required": [
+     "name",
+     "online",
+     "busy",
+     "labels"
+    ],
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "online": {
+      "type": "boolean"
+     },
+     "busy": {
+      "type": "boolean"
+     },
+     "labels": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "additionalProperties": false
+   }
+  },
+  "runners_error": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "description": "pool: why the runner list could not be read (masked); no runners then"
   }
  },
  "additionalProperties": false

@@ -1,0 +1,32 @@
+{
+ "case": "runner-stale-read",
+ "expected": {
+  "age_s": 3600,
+  "busy": false,
+  "id": "build-1",
+  "location": "self-hosted",
+  "online": true,
+  "pool": "ci:example/repo",
+  "resource": "runner",
+  "state": "UNKNOWN",
+  "why": "read 60 min old"
+ },
+ "function": "resource_row",
+ "input": {
+  "extra": {
+   "pool": "ci:example/repo",
+   "read_time": 1799996400.0,
+   "time": 1799999995.0
+  },
+  "kind": "runner",
+  "now": 1800000000.0,
+  "rec": {
+   "busy": false,
+   "labels": [],
+   "name": "build-1",
+   "online": true
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -10,7 +10,7 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Pure decisions | `core/mmdecide.py`, `core/mmalerts.py`, `core/mmreplay.py`, `core/mmtext.py` (cleaning, masking, cut lines), parsers in `core/mmread.py` and `adapters/` | Same inputs, same outputs: pass the vectors |
 | Records and files | `core/mmcore.py` (settings, alert store, atomic writes, line formats) | Match `schemas/`; atomic rename writes |
 | Readings | `core/mmread.py` (system calls; the macOS commands as a cross-check) | Any method; `mm check` compares with the commands |
-| Platform | `core/mmplat.py` (the choice; `MM_PLATFORM` overrides it), `core/mmplat_darwin.py`, `core/mmplat_linux.py` | One backend per platform, the same names; a reading it cannot take is None, a command it lacks is None and skipped |
+| Platform | `core/mmplat.py` (the choice; `MM_PLATFORM` overrides it), `core/mmplat_darwin.py`, `core/mmplat_linux.py` | One backend per platform, the same names (readings, `machine_facts` for the static facts, command paths); a reading it cannot take is None, a command it lacks is None and skipped |
 | Jobs and loop | `core/mmsuper.py`, `core/mmwatch.py`, `core/mmrecover.py`, `core/mmdelete.py`, `core/mmdrill.py`, `bin/cachetrim.py` | Same behaviour; tests in `tests/` describe it |
 | Adapters | `adapters/ad_queue_fifo.py`, `adapters/ad_ci_github.py`, `adapters/ad_deliver_claude.py` | One per kind; chosen by the profile's `adapter` value |
 | Command line | `bin/mm`, `core/mminstall.py`, `core/mmplace.py` | Same verbs, output lines and exit codes (`tests/test_cli.py`) |
@@ -36,7 +36,8 @@ Functions with vectors: `classify`, `slot_decide`, `alert_raise`, `alert_absent`
 minute), `mask`, `compare_readings`, `parse_load_line`, `parse_history_line`, `parse_kernel_line`, `parse_billing`,
 `parse_delete_line`, `read_usage` (row freshness, percentages and weekly projection), and for self-recovery
 `sample_problems`, `self_check`, `crash_loop`, `resume_targets`,
-`reboot_check`.
+`reboot_check`, and `resource_row` (one `mm resources` row per record: freshness, state, arithmetic; whole numbers and
+one-decimal values are rounded as Python's `round`, half to even).
 
 ## Schemas
 

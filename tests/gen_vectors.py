@@ -392,6 +392,69 @@ case("reboot_check", "reboot-panics-unreadable", {"prev": PREV, "cur": {"boot_ti
 case("reboot_check", "reboot-no-last-tick", {"prev": dict(PREV, last_tick=None, last_state=None, last_slots=None),
                                              "cur": {"boot_time": NOW - 300, "now": NOW, "panics": [], "missing_jobs": []}})
 
+# ---- resource_row (mm resources): one row per record; freshness, state and arithmetic; never a crash
+FACTS_MAC = {"cores": 12, "p_cores": 8, "e_cores": 4, "cpu_model": "Example M1 Pro", "ram_mb": 32768, "disk_gb_total": 994.7}
+FACTS_LINUX = {"cores": 16, "p_cores": None, "e_cores": None, "cpu_model": "Example CPU 3.0GHz", "ram_mb": 64000,
+               "disk_gb_total": 500.1}
+READINGS = {"free_pct": 60, "swap_used_mb": 100.0, "swap_total_mb": 2048.0, "comp_mb": 300.0, "pressure": 1, "load5": 2.5,
+            "sys_pct": 8.5, "cpu_pct": 41.27}
+MACHINE = {"kind": "machine", "machine_id": "lab1", "schema_version": 1, "time": NOW - 5, "state": "GREEN",
+           "reasons": ["all readings in the green band"], "mode": "observe", "slots": 6, "slots_would": 6, "busy": 3,
+           "waiting": 0, "calls": 2, "idle_minutes": 12.4, "disk_gb": 210.44, "readings": READINGS, "facts": FACTS_MAC}
+TICK_ERROR = {"kind": "machine", "machine_id": "lab1", "schema_version": 1, "time": NOW - 5, "state": "UNKNOWN",
+              "reasons": ["tick error"], "red_since": None, "mode": "act", "slots": None, "slots_would": None, "busy": 0,
+              "waiting": 0, "readings": {k: None for k in READINGS}, "disk_gb": None, "sampler": "fast",
+              "alerts": {"ACTION": 0, "ATTENTION": 0, "INFO": 0}, "facts": FACTS_LINUX, "calls": None,
+              "idle_minutes": None, "heartbeat": {"pid": 100, "tick": 7, "note": "tick error: boom"}}
+POOL = {"kind": "pool", "machine_id": "ci:example/repo", "schema_version": 1, "time": NOW - 5, "state": "GREEN",
+        "reasons": ["budget and queue fine"], "capacity": {"minutes_left": 1234.5, "reserve_minutes": 300, "unit": "minutes"},
+        "money": {"used_usd": 0.0, "allowed_usd": 0}, "load": {"running": 2, "queued": 1}, "alerts": [],
+        "read_time": NOW - 120}
+AT = {"pool": "ci:example/repo", "read_time": NOW - 120, "time": NOW - 5}
+USAGE = {"age_s": 300.0, "max_age_s": 1800, "stale_levels": {}, "claude_5h": 41.0, "claude_week": 63.5, "codex_week": None,
+         "codex_5h": None, "proj": None}
+RESETS = {"claude_5h": {"reset_at": NOW + 3600, "not_offered": False},
+          "claude_weekly": {"reset_at": NOW + 86400, "not_offered": False},
+          "codex_5h": {"reset_at": None, "not_offered": True},
+          "codex_weekly": {"reset_at": NOW + 7200, "not_offered": False}}
+
+
+def row_case(name, kind, rec, extra=None, over=None):
+    case("resource_row", name, {"kind": kind, "rec": rec, "now": NOW, "extra": extra}, over)
+
+
+row_case("machine-fresh-mac", "machine", MACHINE, {"id": "lab1"})
+row_case("machine-linux-facts", "machine", dict(MACHINE, facts=FACTS_LINUX, readings=dict(READINGS, free_pct=None),
+                                                idle_minutes=None, state="STEADY"), {"id": "lab1"})
+row_case("machine-stale", "machine", dict(MACHINE, time=NOW - 120), {"id": "lab1"})
+row_case("machine-fresh-limit-setting", "machine", dict(MACHINE, time=NOW - 120), {"id": "lab1"}, {"other.status_fresh_s": 300})
+row_case("machine-missing", "machine", None, {"id": "lab1"})
+row_case("machine-empty", "machine", {}, {"id": "lab1"})
+row_case("machine-none-values", "machine", {k: None for k in MACHINE}, {"id": "lab1"})
+row_case("machine-tick-error", "machine", TICK_ERROR, {"id": "lab1"})
+row_case("machine-wrong-types", "machine", dict(MACHINE, state="PURPLE", slots="6", busy=True, calls=[1], readings=[1, 2],
+                                                facts="none", idle_minutes="12", disk_gb={"a": 1}, machine_id=7), {"id": "lab1"})
+row_case("pool-fresh", "pool", POOL, {"id": "ci_example_repo"})
+row_case("pool-old-read-fresh-file", "pool", dict(POOL, read_time=NOW - 3600), {"id": "ci_example_repo"})
+row_case("pool-file-stale", "pool", dict(POOL, time=NOW - 600), {"id": "ci_example_repo"})
+row_case("pool-no-read-and-wrong-types", "pool", dict(POOL, read_time=None, capacity="x", money=None, load=[]),
+         {"id": "ci_example_repo"})
+row_case("pool-empty", "pool", {}, {"id": "ci_example_repo"})
+row_case("runner-idle", "runner", {"name": "build-1", "online": True, "busy": False, "labels": ["self-hosted", "lab"]}, AT)
+row_case("runner-busy", "runner", {"name": "build-2", "online": True, "busy": True, "labels": ["self-hosted", "lab"]}, AT)
+row_case("runner-offline", "runner", {"name": "build-3", "online": False, "busy": False, "labels": ["self-hosted"]}, AT)
+row_case("runner-stale-read", "runner", {"name": "build-1", "online": True, "busy": False, "labels": []},
+         dict(AT, read_time=NOW - 3600))
+row_case("runner-error", "runner", {"error": "gh api runners rc=1 (the runner list needs admin access to the repository)"},
+         AT)
+row_case("runner-wrong-types", "runner", {"name": 5, "online": "yes", "busy": None}, {"pool": None})
+row_case("service-claude-fresh", "service", {"usage": USAGE, "levels": RESETS}, {"id": "claude"})
+row_case("service-codex-not-offered-and-stale", "service",
+         {"usage": dict(USAGE, stale_levels={"codex_weekly": "reading 4000 s old"}), "levels": RESETS}, {"id": "codex"})
+row_case("service-state-old", "service", {"usage": dict(USAGE, age_s=4000.0), "levels": RESETS}, {"id": "claude"})
+row_case("service-unreadable", "service", {"usage": None, "levels": {}}, {"id": "claude"})
+row_case("service-wrong-types", "service", {"usage": [], "levels": "x"}, {"id": "codex"})
+
 
 def main(function=None):
     # A scoped regeneration leaves separately maintained cases and shared settings intact.

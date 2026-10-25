@@ -280,6 +280,13 @@
      "additionalProperties": {
       "type": "string"
      }
+    },
+    "runner_labels": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "self-hosted runners for mm resources: a runner is listed when it carries every one of these labels (as runs-on matches); read only when set"
     }
    },
    "additionalProperties": false

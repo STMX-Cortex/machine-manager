@@ -1,0 +1,37 @@
+{
+ "case": "machine-missing",
+ "expected": {
+  "age_s": null,
+  "busy": null,
+  "calls": null,
+  "cores": null,
+  "cpu_model": null,
+  "cpu_pct": null,
+  "disk_free_gb": null,
+  "disk_gb_total": null,
+  "e_cores": null,
+  "id": "lab1",
+  "idle": null,
+  "idle_min": null,
+  "location": "local",
+  "p_cores": null,
+  "ram_avail_mb": null,
+  "ram_mb": null,
+  "resource": "machine",
+  "slots": null,
+  "state": "UNKNOWN",
+  "waiting": null,
+  "why": "no status.json"
+ },
+ "function": "resource_row",
+ "input": {
+  "extra": {
+   "id": "lab1"
+  },
+  "kind": "machine",
+  "now": 1800000000.0,
+  "rec": null
+ },
+ "settings": "base",
+ "settings_over": {}
+}

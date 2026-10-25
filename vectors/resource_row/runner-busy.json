@@ -1,0 +1,34 @@
+{
+ "case": "runner-busy",
+ "expected": {
+  "age_s": 120,
+  "busy": true,
+  "id": "build-2",
+  "location": "self-hosted",
+  "online": true,
+  "pool": "ci:example/repo",
+  "resource": "runner",
+  "state": "STEADY"
+ },
+ "function": "resource_row",
+ "input": {
+  "extra": {
+   "pool": "ci:example/repo",
+   "read_time": 1799999880.0,
+   "time": 1799999995.0
+  },
+  "kind": "runner",
+  "now": 1800000000.0,
+  "rec": {
+   "busy": true,
+   "labels": [
+    "self-hosted",
+    "lab"
+   ],
+   "name": "build-2",
+   "online": true
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}
