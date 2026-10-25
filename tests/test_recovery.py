@@ -924,7 +924,8 @@ class R8Never(unittest.TestCase):
                 if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "kill" and \
                         getattr(node.func.value, "id", None) == "os":
                     stops.append((os.path.basename(p), ast.unparse(node.args[1])))
-        self.assertEqual(sorted(set(stops)), [("mmread.py", "0"), ("mmrecover.py", "signal.SIGCONT"),
+        self.assertEqual(sorted(set(stops)), [("mmread.py", "0"), ("mmrecover.py", "0"),
+                                              ("mmrecover.py", "signal.SIGCONT"),
                                               ("mmsuper.py", "signal.SIGSTOP")])
 
 

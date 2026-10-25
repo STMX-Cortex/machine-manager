@@ -242,20 +242,25 @@ class PauseMax(Base):
         self.assertEqual(self.pause_max_alerts(), [])
 
     def test_a_tick_with_a_missing_memory_reading_starts_the_count_again(self):
-        """Clear, gap, clear: still stopped; the next clear tick (the second in a row) ends the pause. Each memory
-        reading counts, also the ones classify's `complete` does not name (kernel pressure, compressor segments)."""
+        """Round-3 ruling 1: a gap holds the pause through the 60 s growth window, then CAP_TICKS clear ticks end it.
+        Each memory reading counts, also the ones classify's `complete` does not name (pressure, segments)."""
         for missing in ("swap_used_mb", "free_pct", "comp_mb", "swap_total_mb", "pressure", "seg_pct"):
             with self.subTest(missing=missing):
                 paused_at = self.pause_at()
                 self.past_cap(paused_at)
                 self.tick_as("AMBER")  # clear tick 1
                 self.assertTrue(self.stopped())
+                gap_at = self.clock["t"]
                 self.tick_raw(dict(READINGS["AMBER"], **{missing: None}))  # not clear: the count starts again
                 self.assertTrue(self.stopped(), "a tick without %s never counts toward the cap" % missing)
-                self.tick_as("AMBER")  # clear tick 1 again
-                self.assertTrue(self.stopped(), "the count started again after the gap (%s)" % missing)
-                self.tick_as("AMBER")  # clear tick 2
-                self.assertFalse(self.stopped())
+                while self.clock["t"] - gap_at <= 60:
+                    self.tick_as("AMBER")
+                    self.assertTrue(self.stopped(), "the growth window still contains the %s gap" % missing)
+                for clear_tick in range(1, CAP_TICKS + 1):
+                    t = self.tick_as("AMBER")
+                    self.assertEqual(t - gap_at, 60 + clear_tick * TICK_S)
+                    self.assertEqual(self.stopped(), clear_tick < CAP_TICKS,
+                                     "complete-window clear tick %d after the %s gap" % (clear_tick, missing))
                 self.assert_cap_resume(self.cap_lines()[-1], "AMBER")
                 for _ in range(2):
                     self.tick_as("AMBER")
