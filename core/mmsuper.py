@@ -389,6 +389,13 @@ def memory_readings_present(complete, sample):
     return bool(complete) and isinstance(sample, dict) and all(num(sample.get(k)) for k in CAP_READINGS)
 
 
+def pause_readings_present(complete, window):
+    """No missing memory reading in classify's 60-second growth window (including its one-second tolerance).
+    A reading returning after a gap cannot make either pause-release path look calm before the gap ages out."""
+    return bool(window) and all(memory_readings_present(complete, sample) for sample in window
+                                if window[-1]["t"] - sample["t"] <= 60 + 1)
+
+
 class Supervisor:
     def __init__(self, profile, dry_run=False, kernel=True, allow_live_slots=False, clock=time.time, sampler=None,
                  sizes=True, slow_jobs=True, delete_extra=None, check_readings=True, boot=None):
@@ -749,7 +756,7 @@ class Supervisor:
 
         # the pause (the launch gate is in the hook)
         self._gate_and_pause(now, s, mac_state, reasons, actions_on, safe,
-                             memory_readings_present(complete, win[-1] if win else None))
+                             pause_readings_present(complete, win))
 
         # files
         active = (mmcore.read_json(store.state_file, {}) or {}).get("active") or {}
@@ -943,8 +950,8 @@ class Supervisor:
         self.log_decision(line)
 
     def _gate_and_pause(self, now, s, mac_state, reasons, actions_on, safe=None, readings_ok=False):
-        """`readings_ok`: this tick has every memory reading (memory_readings_present); without it the tick never
-        counts toward ending a pause at pause_newest_call.max_minutes."""
+        """`readings_ok`: every memory reading is present throughout classify's growth window; without it neither
+        the calm span nor the cap count advances."""
         gate = self.state.setdefault("gate", {})
         if mac_state == "RED":
             gate.setdefault("red_since", now)
@@ -994,7 +1001,7 @@ class Supervisor:
         elif not p.st:
             # no pause check and nothing paused: the refusal no longer holds
             self.state["pause_refused"] = self.state["pause_not_a_file"] = None
-        if mac_state in ("GREEN", "STEADY"):  # calm: GREEN, or calm but busy (owner request, 2026-10-20)
+        if readings_ok and mac_state in ("GREEN", "STEADY"):  # calm: GREEN, or calm but busy
             gs = self.state.setdefault("green_for_pause", now)
             if p.st and now - gs >= s["pause_newest_call.resume_after_green_s"]:
                 self.log_decision("%s RESUME pids %s" % (mmcore.now_local(now), p.resume()))
@@ -1011,6 +1018,8 @@ class Supervisor:
                 self.state["cap_clear_ticks"] = 0
             if self.state["cap_clear_ticks"] >= s["slots.sustain_samples"]:
                 self._resume_at_cap(now, cap, mac_state, p)
+        else:
+            self.state.pop("cap_clear_ticks", None)
         if p.st and (mmcore.off_state() or self.dry or safe):
             why = "safe mode" if safe else "off switch"
             self.log_decision("%s RESUME pids %s (%s)" % (mmcore.now_local(now), p.resume(why), why))
@@ -1032,9 +1041,11 @@ class Supervisor:
         if pids:
             text = ("paused call %s continued after %g min paused with no calm span (pause_newest_call.max_minutes; "
                     "state %s): pids %s" % (mmcore.quoted(call), cap, mac_state, pids))
+            if any(str(pid) in p.st for pid in pids):
+                text += "; updated pause record was not written; recovery will retry"
         elif p.st:  # the record is still there: the resume itself failed (recovery.log); the next tick tries again
             text = ("paused call %s reached %g min paused (pause_newest_call.max_minutes; state %s), but the resume "
-                    "failed; it stays paused" % (mmcore.quoted(call), cap, mac_state))
+                    "failed; pause record kept for retry" % (mmcore.quoted(call), cap, mac_state))
         else:  # review F3: the call ended while it was stopped; nothing continued
             text = ("paused call %s was gone at %g min paused (pause_newest_call.max_minutes; state %s): it ended "
                     "while stopped, no pid to continue" % (mmcore.quoted(call), cap, mac_state))

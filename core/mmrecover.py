@@ -45,7 +45,7 @@ def _lock():
 
 
 def start_time(pid):
-    """The process start time as ps prints it (lstart), or None when the pid is gone."""
+    """The process start time as ps prints it (lstart), or None when the pid is gone or ps cannot read it."""
     rc, out = mmread.run(["/bin/ps", "-o", "lstart=", "-p", str(int(pid))], timeout=5)
     return (out.strip() or None) if rc == 0 else None
 
@@ -72,26 +72,42 @@ def drop_paused(pids):
 
 
 def resume_paused(why, now=None, legacy=None):
-    """SIGCONT every recorded pid whose start time still matches (mmdecide.resume_targets), then forget the record.
-    `legacy`: an older record kept in controller.json ({pid: start}). Returns the pids continued."""
+    """SIGCONT each recorded pid whose start time still matches; retain uncertain or failed entries for retry.
+    `legacy`: an older record kept in controller.json ({pid: start}). Returns the pids actually continued, even when
+    writing the updated record fails after a signal."""
+    done = []
     try:
         with _lock():
             d = read_paused()
             d.update({str(k): v for k, v in (legacy or {}).items()})
             if not d:
                 return []
-            cur = {p: start_time(p) for p in d}
-            done = []
-            for pid in mmdecide.resume_targets(d, cur):
+            keep = {}
+            for p in sorted(d, key=int):
+                expected = d[p]
+                pid = int(p)
                 try:
+                    current = start_time(pid)
+                    if current is None:
+                        # ps cannot distinguish a vanished pid from a timeout or a failed fork. Only ESRCH proves
+                        # it is gone; signal 0 checks existence without continuing an unverified process.
+                        os.kill(pid, 0)
+                        keep[p] = expected
+                        log("RESUME start time unreadable for pid %s; record kept (%s)" % (pid, why), now)
+                        continue
+                    if current != expected:
+                        continue
                     os.kill(pid, signal.SIGCONT)
                     done.append(pid)
-                except OSError:
+                except ProcessLookupError:
                     pass
-            mmcore.write_atomic(paused_file(), "{}")
+                except (OSError, TimeoutError) as e:
+                    keep[p] = expected
+                    log("RESUME pid %s failed; record kept (%s): %r" % (pid, why, e), now)
+            mmcore.write_atomic(paused_file(), json.dumps(keep, sort_keys=True))
     except (OSError, TimeoutError) as e:
         log("RESUME failed (%s): %r" % (why, e), now)
-        return []
+        return done
     skipped = sorted(int(p) for p in d if int(p) not in done)
     log("RESUME pids %s skipped %s (%s)" % (done, skipped, why), now)
     return done

@@ -95,9 +95,13 @@ setting (`[self]`, `[safe_mode]`, `[heartbeat]`); every decision is a pure funct
    whose start time still matches. A paused call also continues after a long calm (GREEN or STEADY), and after
    `pause_newest_call.max_minutes` paused (default 0 = no limit). From that time it needs `slots.sustain_samples`
    clear ticks in a row: every memory reading present (free, swap used and total, compressor, kernel pressure,
-   compressor segments), and no critical reason, kernel memorystatus event, growing swap near its total or
-   compressor segments over their limit. Any other tick starts the count again. It writes a `RESUME` line with the
-   reason, and each capped pause raises its own `PAUSE_MAX` naming the call (or saying the call was gone).
+   compressor segments) in this tick and every sample of the last 60 s used for growth, and no critical reason,
+   kernel memorystatus event, growing swap near its total or compressor segments over their limit. The calm span
+   needs the same complete memory window. Any other tick starts the relevant count or span again; ticks before
+   the cap time, including after a cap change, drop the cap count. A failed start-time read keeps the process record
+   for retry and sends no signal to that pid. It writes a `RESUME` line with the reason, and each capped pause raises
+   its own `PAUSE_MAX` naming the call (or saying the call was gone). If a call continued but its updated record could
+   not be written, the alert says both.
 5. **The watchdog is watched.** Each watchdog run writes `state/watchdog.stamp`; at `self.watchdog_stale_s` the
    supervisor raises `WATCHDOG_STALE` and restarts the watchdog (installed runs only, once per 10 min).
 6. **Mac reboot** (`reboot_check`). At start, a changed `kern.boottime` gives `MAC_REBOOTED`: the uptime, how long the
