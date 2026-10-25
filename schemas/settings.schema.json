@@ -51,6 +51,7 @@
   "other.load_log_max_age_s",
   "other.recipient_tool_wait_minutes",
   "other.resume_gap_s",
+  "other.status_fresh_s",
   "pause_newest_call.enabled",
   "pause_newest_call.lsof_timeout_s",
   "pause_newest_call.max_minutes",
@@ -351,6 +352,11 @@
    "type": "number",
    "minimum": 30,
    "maximum": 86400
+  },
+  "other.status_fresh_s": {
+   "type": "number",
+   "minimum": 15,
+   "maximum": 3600
   },
   "pause_newest_call.enabled": {
    "type": "boolean"

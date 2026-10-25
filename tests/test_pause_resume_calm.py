@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 
+import mmtest
 from mmtest import mmread
 import mmsuper
 from test_supervisor import Base, sampler_of
@@ -154,21 +155,27 @@ class PauseResumeCalm(Base):
         self.assertEqual(self.resume_lines(), [])
 
     # -- PR-1: resume on calm (new behaviour; fails on the base) ------------------------------------------------
+    @mmtest.needs_proc
     def test_pr1_steady_for_the_full_span_resumes_once(self):
         self.calm_span_resumes(["STEADY"])
 
+    @mmtest.needs_proc
     def test_pr1_steady_by_load_for_the_full_span_resumes_once(self):
         self.calm_span_resumes(["STEADY_LOAD"])
 
+    @mmtest.needs_proc
     def test_pr1_green_and_steady_mixed_form_one_span(self):
         self.calm_span_resumes(["STEADY", "GREEN", "GREEN", "STEADY_LOAD"])
 
+    @mmtest.needs_proc
     def test_pr1_green_then_steady_form_one_span(self):
         self.calm_span_resumes(["GREEN"] * 3 + ["STEADY"] * 20)
 
+    @mmtest.needs_proc
     def test_pr1_span_broken_by_one_amber_tick_starts_again(self):
         self.span_broken_by("AMBER")
 
+    @mmtest.needs_proc
     def test_pr1_span_broken_by_one_red_tick_starts_again(self):
         self.span_broken_by("RED")
 
@@ -181,23 +188,29 @@ class PauseResumeCalm(Base):
         self.calm_span_resumes(["STEADY"])
 
     # -- PR-1 guard: a short calm span (passes on the base too) -----------------------------------------------
+    @mmtest.needs_proc
     def test_pr1_steady_for_less_than_the_span_stays_paused(self):
         self.calm_for_less_than_span("STEADY")
         self.assertTrue(self.stopped())
 
     # -- PR-2: kept behaviour (passes on the base) --------------------------------------------------------------
+    @mmtest.needs_proc
     def test_pr2_red_and_amber_for_a_long_time_never_resume(self):
         self.assert_never_resumes(["AMBER", "RED"], 20 * SPAN_S)
 
+    @mmtest.needs_proc
     def test_pr2_amber_for_a_long_time_never_resumes(self):
         self.assert_never_resumes(["AMBER"], 20 * SPAN_S)
 
+    @mmtest.needs_proc
     def test_pr2_red_for_a_long_time_never_resumes(self):
         self.assert_never_resumes(["RED"], 20 * SPAN_S)
 
+    @mmtest.needs_proc
     def test_pr2_green_only_span_resumes_once(self):
         self.calm_span_resumes(["GREEN"])
 
+    @mmtest.needs_proc
     def test_pr2_green_span_broken_by_amber_starts_again(self):
         self.calm_for_less_than_span("GREEN")
         self.tick_as("AMBER")
@@ -221,12 +234,15 @@ class PauseResumeCalm(Base):
         self.assertTrue(m, "the release line reads `<time> RESUME pids [...] (pausing disabled)`: %r" % lines[0])
         self.assertEqual(sorted(int(x) for x in m.group(1).replace(",", " ").split()), self.call_pids)
 
+    @mmtest.needs_proc
     def test_pr3_pausing_turned_off_at_red_releases_on_the_next_tick(self):
         self.disabled_release("RED")
 
+    @mmtest.needs_proc
     def test_pr3_pausing_turned_off_at_amber_releases_on_the_next_tick(self):
         self.disabled_release("AMBER")
 
+    @mmtest.needs_proc
     def test_pr3_pausing_turned_off_on_a_calm_tick_releases_at_once(self):
         self.disabled_release("STEADY")
 
@@ -266,9 +282,11 @@ class PauseResumeCalm(Base):
                 break
         self.assertTrue(self.stopped(), "fixture: pausing on again, the call is paused at a critical RED")
 
+    @mmtest.needs_proc
     def test_pr3_no_calm_span_across_a_disabled_amber_period(self):
         self.no_span_across_a_disabled_period("AMBER")
 
+    @mmtest.needs_proc
     def test_pr3_no_calm_span_across_a_disabled_red_period(self):
         self.no_span_across_a_disabled_period("RED")
 

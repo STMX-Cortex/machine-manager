@@ -8,12 +8,14 @@ import sys
 import time
 import unittest
 
+import mmtest
 from mmtest import FIX, mmread
 import mmsuper
 import ad_queue_fifo
 
 
 class Live(unittest.TestCase):
+    @mmtest.darwin_only
     def test_fast_readings_match_the_commands(self):
         bad = None
         for _ in range(3):  # the two reads are a moment apart; a busy machine can move between them
@@ -26,15 +28,19 @@ class Live(unittest.TestCase):
             self.assertIsNotNone(fast.get(k), k)
 
     def test_disk_matches_df(self):
-        rc, out = mmread.run(["/bin/df", "-k", "/System/Volumes/Data"], timeout=10)
+        rc, out = mmread.run(["/bin/df", "-k", mmread.plat.DATA_VOLUME], timeout=10)
         self.assertEqual(rc, 0)
         self.assertLessEqual(abs(mmread.disk_free_gb() - mmread.parse_df_free_gb(out)), 1.0)
 
-    def test_interval_sys_pct_and_power(self):
+    @mmtest.needs_proc
+    def test_interval_sys_pct(self):
         s1, t = mmread.memory_sample(time.time())
         time.sleep(1.0)
         s2, _ = mmread.memory_sample(time.time(), t)
         self.assertTrue(0 <= s2["sys_pct"] <= 100)
+
+    @mmtest.darwin_only
+    def test_power(self):
         rc, out = mmread.run(["/usr/bin/pmset", "-g", "ps"], timeout=10)
         self.assertIn(mmread.parse_pmset(out), (True, False))
 

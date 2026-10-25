@@ -68,11 +68,12 @@ def parse_history_line(line):
         return None
 
 
-def read_queue(d, now=None, kind_of=None):
-    """Slots, busy holders and live tickets of a queue folder. Never writes or unlinks anything."""
+def read_queue(d, now=None, kind_of=None, slots_path=None):
+    """Slots, busy holders and live tickets of a queue folder. Never writes or unlinks anything.
+    slots_path: the slot count file (Queue.slots_path(), profile queue.slots_file); default `slots` in the folder."""
     now = time.time() if now is None else now
     try:
-        with open(os.path.join(d, "slots")) as f:
+        with open(slots_path or os.path.join(d, "slots")) as f:
             slots = max(1, min(int(f.read().split()[0]), 16))
     except (OSError, ValueError, IndexError):
         slots = None
@@ -144,7 +145,7 @@ class Queue:
         return "other"
 
     def read(self, now=None):
-        return read_queue(self.dir, now, self.kind_of)
+        return read_queue(self.dir, now, self.kind_of, self.slots_path())
 
     def last_sample(self, now):
         """The sampler's newest line as a sample, with its age in seconds (None when missing)."""

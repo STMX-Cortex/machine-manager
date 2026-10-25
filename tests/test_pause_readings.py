@@ -8,6 +8,7 @@ import signal
 import unittest
 from unittest.mock import patch
 
+import mmtest
 from mmtest import TempData, base_settings, mmcore
 import mmdecide
 import mmrecover
@@ -255,6 +256,7 @@ class K1GrowthWindowAfterAGap(Harness):
     again have no value 60 s back: the first has no growth at all, the second only 10 s of it. They look calm, while
     the same race with every reading is a critical RED."""
 
+    @mmtest.needs_proc
     def test_swap_race_after_a_long_swap_gap_keeps_the_pause(self):
         paused_at = self.race_pause()
         while self.clock["t"] - paused_at <= tpm.CAP_S:
@@ -274,6 +276,7 @@ class K1GrowthWindowAfterAGap(Harness):
         self.assertTrue(mmsuper.critical(seen[-1][1]), "fixture: once 60 s of readings are back the race is a "
                         "critical RED again: %s" % seen)
 
+    @mmtest.needs_proc
     def test_control_a_gap_under_60_s_keeps_the_pause(self):
         """Control: the same race with a 50-s gap (5 ticks): a swap value 60 s back is still in the window, so the
         first tick back is a critical RED and the pause holds."""
@@ -293,6 +296,7 @@ class K2CountAcrossACapChange(Harness):
     while now is past the cap time; a cap the owner raises (or turns off and on) mid-count puts now before the cap
     again, and the critical RED ticks of that time never reset it."""
 
+    @mmtest.needs_proc
     def test_a_count_from_before_a_cap_raise_does_not_carry(self):
         paused_at = self.pause_at()
         self.past_cap(paused_at)
@@ -308,6 +312,7 @@ class K2CountAcrossACapChange(Harness):
         self.tick_as("AMBER")
         self.assertFalse(self.stopped(), "control: the second clear tick in a row ends it")
 
+    @mmtest.needs_proc
     def test_a_count_from_before_the_cap_was_turned_off_does_not_carry(self):
         paused_at = self.pause_at()
         self.past_cap(paused_at)
@@ -326,6 +331,7 @@ class K3ResumeFailedText(Harness):
     then writes the empty record; when that write fails (a full disk) it returns [] and keeps the record, though the
     call runs. The new text then says 'the resume failed; it stays paused'."""
 
+    @mmtest.needs_proc
     def test_no_stays_paused_claim_when_the_call_runs(self):
         paused_at = self.pause_at()
         real = mmcore.write_atomic
@@ -350,6 +356,7 @@ class K3ResumeFailedText(Harness):
 class K4MutantKills(Harness):
     """Killing tests for the two planted mutants that the lasting tests miss (mutants.py M6 and M9)."""
 
+    @mmtest.needs_proc
     def test_a_count_kept_before_a_restart_never_reaches_a_new_pause(self):
         """M9 (no count reset at a new pause): a restart continues the call; when the first ticks after it pause the
         call again, the count kept in controller.json from the old pause must not carry into the new one."""
@@ -362,6 +369,7 @@ class K4MutantKills(Harness):
         second = self.pause_at()  # the first tick of the new run is a critical RED: a new pause
         self.ticks_until_cap("AMBER", second)  # RESUME_S after the new pause, never CAP_S
 
+    @mmtest.needs_proc
     def test_load_missing_tick_is_not_clear(self):
         """M6 (classify's `complete` dropped): ruling F1 'no readings incomplete'; a tick without load1 is
         incomplete, so it starts the count again."""
@@ -376,6 +384,7 @@ class N1StartTimeReadFails(Harness):
     counts as 'gone'; the record is dropped and the stopped call is never continued. Round 2's text then says the call
     'ended while stopped'."""
 
+    @mmtest.needs_proc
     def test_a_failed_start_time_read_never_strands_the_call(self):
         paused_at = self.pause_at()
         real = mmrecover.start_time
@@ -397,6 +406,7 @@ class N2CalmSpanOnGapTicks(Harness):
     only reason is 'readings incomplete' counts as calm, so a swap gap as long as resume_after_green_s during a swap
     race ends the pause with no cap at all (max_minutes 0)."""
 
+    @mmtest.needs_proc
     def test_gap_ticks_are_not_a_calm_span(self):
         self.settings(**{"pause_newest_call.resume_after_green_s": 60})  # max_minutes: the default 0
         self.race_pause()

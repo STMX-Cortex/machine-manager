@@ -287,6 +287,9 @@ def expected_wait(q, medians, default, now):
     return ahead / q["slots"]
 
 
+GUARD_SKIP = "skipped (this pool needs no guard round; counts as passed)"
+
+
 def place(req, ctx, s):
     """Placement over a list of candidates (today: this machine and one CI pool).
     req: kind, shards, wide, agents.
@@ -294,6 +297,7 @@ def place(req, ctx, s):
     medians}), pools ([{id, minutes_left, minutes_source, plan_minutes, job_minutes, guard: null|{rc, line}|"skip",
     guard_why, stop_active}]).
     Returns {"place": MACHINE|GO|POOL|WAIT, "candidate": id or null, "reasons": [...], "need_guard": pool id or null}.
+    A guard of "skip" means the pool needs no guard round: it counts as passed by the guard.
     When a pool needs its budget guard read and ctx has none yet, the answer says need_guard: the caller reads the guard
     and calls place() again with it (two pure steps; the guard read is the adapter's)."""
     m = ctx["machine"]
@@ -352,12 +356,12 @@ def place(req, ctx, s):
             g = p.get("guard")
             if g is None:
                 return {"place": None, "candidate": None, "reasons": out, "need_guard": p["id"]}
-            if g["rc"] != 0:
+            if g != "skip" and g["rc"] != 0:
                 no.append("guard %s: %s" % ({1: "refused", 2: "cannot read"}.get(g["rc"], "rc=%s" % g["rc"]), g["line"][:160]))
         if not no:
             return _ans("POOL", p["id"], out + [wtxt, "%s: %.0f minutes left (%s), worst case %d, reserve %g" % (
                 p["id"], p["minutes_left"], p.get("minutes_source"), worst, s["github.reserve_minutes"]),
-                "guard: " + p["guard"]["line"][:160]])
+                "guard: " + (GUARD_SKIP if p["guard"] == "skip" else p["guard"]["line"][:160])])
         no_all.append("%s: %s" % (p["id"], "; ".join(no)))
     if st == "RED":
         return _ans("WAIT", None, out + ["RED; no pool: " + " | ".join(no_all)])

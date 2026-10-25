@@ -444,6 +444,7 @@ class TickErrorsAndDryRun(Base):
 
 
 class Pause(Base):
+    @mmtest.needs_proc
     def test_pause_and_resume_fixture_tree_only(self):
         """Changed for rule 47 (design part C, rule 47 and settlement C-5): only a process that has the slot file open
         and runs the configured queue launcher is paused, so the holder is now a real call of the fixture launcher

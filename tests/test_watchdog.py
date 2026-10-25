@@ -7,6 +7,7 @@ import stat
 import time
 import unittest
 
+import mmtest
 from mmtest import TempData, mmcore
 
 
@@ -39,6 +40,7 @@ class Watchdog(TempData):
         self.assertFalse(os.path.exists(self.calls))
         self.assertEqual(self.pushed(), [])
 
+    @mmtest.darwin_only
     def test_stale_supervisor_alerts_and_restarts(self):
         self.fresh(st_age=200)
         rc, line = self.wd()
@@ -75,6 +77,7 @@ class Watchdog(TempData):
         self.assertEqual({r["name"]: r["level"] for r in self.pushed()}, {"GUARD_DOWN": "ACTION", "SOURCE_STALE": "ATTENTION"})
         self.assertFalse(os.path.exists(self.calls), "only the supervisor is restarted")
 
+    @mmtest.darwin_only
     def test_failing_launchctl_is_reported(self):
         with open(self.fake, "w") as f:
             f.write('#!/bin/sh\n[ "$1" = print ] && exit 0\nexit 113\n')  # loaded, but the kickstart fails

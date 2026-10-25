@@ -5,6 +5,8 @@ install writes two LaunchAgents (the supervisor, KeepAlive; the watchdog, every 
 Claude Code settings file the profile names (delivery.settings_file), and records everything in base_dir()/install.json.
 Before it changes a file it keeps a copy `<file>.bak-before-machine-manager-<time>`. Rollback undoes all of it.
 MM_LAUNCHCTL replaces launchctl and HOME moves ~/Library/LaunchAgents (tests use both; they never touch the real ones).
+macOS only (launchd): on a platform without the service (mmread.plat.SERVICE is None) bin/mm refuses these verbs with
+E_PLATFORM, launchctl() runs nothing, and check() names the platform and skips the LaunchAgent checks.
 """
 import json
 import os
@@ -55,6 +57,9 @@ def stamp_time():
 
 
 def launchctl(args):
+    """(rc, output) of launchctl; (None, "") without running anything where the platform has no launchd."""
+    if mmread.plat.SERVICE != "launchd":
+        return None, ""
     exe = os.environ.get("MM_LAUNCHCTL", "/bin/launchctl")
     return mmread.run([exe] + list(args), timeout=30)
 
@@ -150,7 +155,7 @@ def command_problems(profile, online=False):
             if rc != 0 or not o.strip():
                 out.append("E_GH gh cannot read GitHub in the service environment (rc=%s); fix: gh auth login" % rc)
     sup = os.path.join(agents_dir(), labels(profile)[0] + ".plist")
-    if os.path.exists(sup):
+    if mmread.plat.SERVICE == "launchd" and os.path.exists(sup):
         try:
             with open(sup, "rb") as f:
                 pl = plistlib.load(f)
@@ -272,10 +277,15 @@ def init(name, folder=None):
 
 
 def check(profile_file=None, online=False):
-    """One line per problem in the profile and the settings, plus the macOS readings check. [] = all fine."""
+    """One line per problem in the profile and the settings, plus the macOS readings check. [] = all fine.
+    Where the platform has no service, a W_PLATFORM line names it (the LaunchAgent checks are skipped)."""
     import mmadapters
+    import mmplat
     import mmschema
     out = interpreter_problems(sys.executable, sys.version_info)
+    if not mmread.plat.SERVICE:
+        out.append("W_PLATFORM %s runs in a reduced form: memory readings unknown, no service, LaunchAgent checks "
+                   "skipped; fix: run mm run in the foreground (README.md, Platforms)" % mmplat.PLATFORM)
     try:
         prof = mmcore.load_profile(profile_file)
     except mmcore.MMError as e:

@@ -202,6 +202,7 @@ class QueueFileUnreadable(Stepped):
     def named_paths(self, text, paths):
         return [p for p in paths if any(f in text for f in path_forms(p))]
 
+    @mmtest.needs_proc
     def test_eleven_unreadable_files_give_one_alert_and_the_call_is_still_paused(self):
         call = self.call()
         files = self.unreadable([5, 6, 8, 9], 7)
@@ -213,6 +214,7 @@ class QueueFileUnreadable(Stepped):
         strip = [f for p in files for f in path_forms(p)] + [self.root, os.path.realpath(self.root)]
         self.assertTrue(names_count(text, 11, strip), "the alert names the count 11: %s" % text)
 
+    @mmtest.needs_proc
     def test_one_unreadable_ticket_is_named_with_its_count(self):
         call = self.call()
         files = self.unreadable([], 1)
@@ -275,6 +277,7 @@ class FreshSnapshot(Stepped):
         self.settings()
         self.go = os.path.join(self.t, "go")
 
+    @mmtest.needs_proc
     def test_a_child_started_after_an_older_snapshot_is_still_paused(self):
         call = self.call_of([sys.executable, "-I", "-c", CHILD_LATER, self.go])
         sup = self.supervisor()
@@ -290,6 +293,7 @@ class FreshSnapshot(Stepped):
                                                "process list)" % pid)
         self.assertEqual(sorted(int(x) for x in mmrecover.read_paused()), tree)
 
+    @mmtest.needs_proc
     def test_a_pid_that_ended_before_the_tick_is_never_signalled(self):
         call = self.call_of([sys.executable, "-I", "-c", CHILD_ENDS, self.go])
         self.wait_until(lambda: len(self.tree_of(call)) >= 3, "the command's child")

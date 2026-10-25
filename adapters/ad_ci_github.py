@@ -2,7 +2,8 @@
 """CI pool adapter "github-gh": GitHub Actions read through `gh` (read-only), described as a pool.
 
 Interface (PORTING.md, "Adapters"): Pool(cfg).read(s, now, watch) -> the raw read; status(read, s, now) -> a status
-record with kind "pool"; conditions(read, s, now, mk) -> alert conditions; minutes_left(s, now); guard_args(req);
+record with kind "pool"; conditions(read, s, now, mk) -> alert conditions; owns(key) -> the key is one conditions()
+raises (the pool record lists only those); minutes_left(s, now); guard_args(req);
 guard(args) -> (rc, line); commands(req, gargs). Every gh call goes through gh_run, which MM_GH replaces in tests.
 Nothing here pushes, dispatches, deletes or changes GitHub (no automatic dispatch).
 """
@@ -229,6 +230,17 @@ def good_keys(gh):
     return ["SOURCE_STALE:gh"] + ["SOURCE_STALE:gh-" + p for p in READ_PARTS if p not in errs]
 
 
+# The alert keys conditions() raises: whole keys, and key prefixes. owns() picks them for the pool record; the memory
+# guard's GUARD_KILL and GUARD_DOWN (other keys) stay out. tests/test_consistency.py checks each key conditions() makes.
+OWN_KEYS = ("SOURCE_STALE:gh", "GH_STUCK", "GUARD", "GH_PACE")
+OWN_PREFIXES = ("SOURCE_STALE:gh-", "GH_FAIL:", "GH_DONE:")
+
+
+def owns(key):
+    """True for an alert key this adapter raises (conditions)."""
+    return key in OWN_KEYS or key.startswith(OWN_PREFIXES)
+
+
 def conditions(gh, s, now, mk, owner="the owner"):
     """GH_FAIL, GH_STUCK, GH_DONE, GUARD_NEAR/STOP, GH_PACE and gh SOURCE_STALE from the last read (`mk` = mmalerts._c)."""
     out = []
@@ -309,6 +321,9 @@ class Pool:
 
     def good_keys(self, gh):
         return good_keys(gh)
+
+    def owns(self, key):
+        return owns(key)
 
     def job(self, s, now):
         """One full read in a worker thread: the watched runs too; writes state/github.json."""

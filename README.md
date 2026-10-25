@@ -2,9 +2,12 @@
 
 ## What
 
-machine-manager watches one build machine (macOS) and keeps it safe and busy:
+machine-manager watches one build machine (macOS; Linux in a reduced form, see Platforms) and keeps it safe and busy:
 
-1. It reads memory, swap, compressor, load, disk, power and kernel memory events every 10 s, with no fork.
+1. It reads memory, swap, compressor, load and CPU every 10 s by system calls (sysctl and Mach), with no fork. Free
+   disk comes every 5 min (statvfs), `ps` and the queue every 30 s, and power every minute (`pmset`, a child process).
+   Kernel memory events come from one long-running `log stream` child. After a `READINGS_MISMATCH`, the fallback
+   sampler runs the macOS commands each tick.
 2. It classifies the machine as `GREEN`, `STEADY`, `AMBER` or `RED`, and lowers or raises the slot count of a job queue.
 3. It answers "where should this job run?" (`mm place`): this machine, a CI pool (GitHub Actions), or wait.
 4. It raises one-line alerts and delivers them into one Claude Code session through hooks.
@@ -51,6 +54,27 @@ Code and live data are apart. The code folder is this repository. The live data 
 `~/Library/Application Support/machine-manager/<profile>/` (or `--data DIR`, or `MM_DATA`): `status.json`,
 `alerts.jsonl`, `alerts-state.json`, `metrics.csv`, `deletes.log`, `settings.toml`, `off.json`, `state/`, `evidence/`,
 `pools/`, `drills/`.
+
+## Platforms
+
+`mm` runs on macOS in full. On Linux it loads and runs in a reduced form:
+
+1. The memory readings (free, swap, compressor, kernel pressure, segments) are unknown. Load, CPU ticks
+   (`/proc/stat`), the core count, the boot time and free disk are read. After `self.bad_reading_ticks` ticks with
+   missing readings the self-check turns safe mode on, so no automatic action runs.
+2. The macOS-only parts are skipped: the kernel `log stream`, `pmset` (power unknown), the daily readings check and the
+   fallback sampler (no `READINGS_MISMATCH`), the evidence bundle's macOS commands (its `readings.txt` says so), the
+   banner, the panic report names. `{user_tmp}` is the system temp folder.
+3. `mm install`, `mm rollback`, `mm stop`, `mm start`, `mm restart` and `mm drill` refuse with one `E_PLATFORM` line.
+   Run `mm run` in the foreground. The watchdog restarts nothing. `mm check` prints `W_PLATFORM` and skips the
+   LaunchAgent checks.
+4. The data folder is `$XDG_DATA_HOME/machine-manager/<profile>/`, else `~/.local/share/machine-manager/<profile>/`.
+   `MM_BASE`, `MM_DATA` and `--data` still choose another.
+5. Without `ps` or `lsof`, nothing is deleted, trimmed or paused.
+
+The Linux memory readings and rules, the Linux process layer and a systemd service come in later stages.
+`MM_PLATFORM=linux` (or `darwin`) replaces the detected platform. It is a test hook, like `MM_LAUNCHCTL`: the Linux path
+runs on a Mac (`tests/test_platform.py`).
 
 ## Status
 
@@ -162,6 +186,11 @@ above `slots.red_sys_comp_growth_mb_60s` (default 256 MB). Without a sign, this 
 A compressor over `slots.red_comp_mb` (default 0 = off; range 0-100000 MB) is RED `compressor at N MB (near its
 ceiling)`, a critical reason (it pauses the newest call).
 
+status.json older than `other.heartbeat_max_age_s` (default 90 s) is stale: `mm status` says `E_STALE` (it uses 90 s
+when it cannot read the settings), the hook says `SELF_STALE`. `mm place` and the launch gate use status.json's state
+only while it is younger than `other.status_fresh_s` (default 60 s, range 15-3600); else `mm place` takes one sample
+and the gate stays open. `mm drill` keeps its own stricter 30 s.
+
 GREEN needs load1 strictly below `slots.green_load1_per_core` times the core count (default 0.8, range 0.1-4), as well
 as the load5 band. A slot raise needs `slots.raise_green_minutes` of GREEN while enough calls wait and all slots stay
 busy. GREEN also needs free disk of at least `slots.green_disk_gb` (default 0 = follow `disk.recover_gb`; else at
@@ -266,7 +295,7 @@ the CI pool; `GUARD_NEAR`, `GUARD_STOP` the CI budget.
 Exit codes: 0 ok; 1 nothing found or problems listed; 2 error (one `E_` line); 3 stale; 10 `POOL`; 20 `WAIT`;
 75 the supervisor restarts itself (`mm run` only).
 Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFILE`, `E_NO_PROFILE`, `E_SETTINGS`, `E_HOOKS`, `E_READINGS`,
-`E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`.
+`E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`, `E_PLATFORM`.
 
 ## Roadmap
 

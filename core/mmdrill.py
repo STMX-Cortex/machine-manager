@@ -23,6 +23,9 @@ import mmdecide
 import mmread
 
 MB = 1 << 20
+# A drill safety limit, kept stricter than other.status_fresh_s: the drill starts, and trusts the supervisor's state
+# (its AMBER stop), only while status.json is at most 30 s (3 ticks) old.
+STATUS_FRESH_S = 30
 
 
 def fill(mb):
@@ -75,7 +78,7 @@ def live_reader(now):
     """Readings and the supervisor's state, as the drill sees them."""
     sample, _ = mmread.memory_sample(now)
     st = mmcore.read_json(mmcore.path("status.json"), {}) or {}
-    fresh = now - float(st.get("time", 0)) < 30
+    fresh = now - float(st.get("time", 0)) < STATUS_FRESH_S
     return {"free_pct": sample.get("free_pct"), "swap_used_mb": sample.get("swap_used_mb"), "comp_mb": sample.get("comp_mb"),
             "state": st.get("state") if fresh else None, "status_fresh": fresh}
 
@@ -97,7 +100,7 @@ def preconditions(profile, queue, now):
         if age is None or age > mg.get("max_age_s", 60):
             return "E_DRILL memory guard not alive; fix: start the memory guard first"
     st = mmcore.read_json(mmcore.path("status.json"), None)
-    if not isinstance(st, dict) or now - float(st.get("time", 0)) > 30:
+    if not isinstance(st, dict) or now - float(st.get("time", 0)) > STATUS_FRESH_S:
         return "E_DRILL supervisor status not fresh; fix: mm start, then retry"
     return None
 

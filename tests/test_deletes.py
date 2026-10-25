@@ -4,6 +4,7 @@ them; T15: forbidden and protected paths survive with deletes on, and the cleanu
 Every fixture lives in a temporary folder that the test removes."""
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -158,7 +159,11 @@ class T14Folders(Base):
         rule = dict(FOLDERS, roots=[short])
         v = self.verbs(self.run_rules([rule]))
         self.assertEqual(v["go-build666"][0], "KEEP", v)
-        self.assertIn("unix socket of pid %d" % os.getpid(), v["go-build666"][1])
+        if sys.platform == "darwin":
+            self.assertIn("unix socket of pid %d" % os.getpid(), v["go-build666"][1])
+        else:  # Linux lsof +D already names the socket's holder: the first lsof step keeps it
+            self.assertTrue(re.search(r"unix socket of pid %d\b|lsof=pids (\d+,)*%d\b" % (os.getpid(), os.getpid()),
+                                      v["go-build666"][1]), v["go-build666"][1])
         self.assertTrue(os.path.exists(d))
 
     def test_forbidden_inside_and_protected_survive_with_deletes_on(self):

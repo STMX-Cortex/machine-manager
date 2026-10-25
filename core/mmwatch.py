@@ -6,6 +6,7 @@ supervisor gives an ACTION alert SELF_STALE and a restart of the supervisor's La
 MM_LAUNCHCTL replaces launchctl in tests). After `mm stop` (state/stopped.json) it restarts nothing and stays quiet.
 It writes no slots file and stops no process. When the supervisor is stale over self.resume_paused_after_s (or
 stopped), it continues every process the pause stopped (mmrecover.resume_paused). Each run writes state/watchdog.stamp.
+Where the platform has no service yet (mmread.plat.SERVICE is None: Linux) it restarts nothing; SELF_STALE still says so.
 """
 import os
 
@@ -45,7 +46,7 @@ def check(now, s, profile, restart=True):
     if not stopped and (age is None or age > limit) and not in_grace:
         why = "no status.json" if age is None else "status.json %.0f s old (limit %g s)" % (age, limit)
         restarted = ""
-        if restart:
+        if restart and mmread.plat.SERVICE:
             import mminstall
             if not mminstall.is_loaded(label(profile)):  # kickstart needs a loaded service: load it again
                 rc = mminstall.bootstrap(label(profile))

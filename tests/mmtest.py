@@ -16,8 +16,45 @@ FIX = os.path.join(HERE, "fixtures")
 RESULTS = os.path.join(HERE, "results")
 sys.path[:0] = [os.path.join(CODE, "core"), os.path.join(CODE, "adapters")]
 import mmcore  # noqa: E402
+import mmplat  # noqa: E402
 import mmread  # noqa: E402
 import ad_queue_fifo  # noqa: E402
+
+# A test that needs macOS itself (real sysctl or Mach readings, the macOS commands, launchd) skips elsewhere,
+# and under MM_PLATFORM=linux on a Mac (the Linux path's test hook).
+darwin_only = unittest.skipUnless(mmplat.DARWIN, "needs macOS (platform %s)" % mmplat.PLATFORM)
+# A test that needs the real process layer (the pause reads each opener's argument list: sysctl on macOS,
+# /proc/<pid>/cmdline on Linux; the boot time) runs on macOS and on Linux, and skips only under MM_PLATFORM=linux on a
+# machine without /proc (a Mac).
+needs_proc = unittest.skipUnless(mmplat.DARWIN or os.path.isdir("/proc"),
+                                 "needs the process layer (/proc); MM_PLATFORM=linux on a machine without it")
+
+
+def root_link_folder():
+    """(link, folder, real folder) for C-7 tests: a link owned by root and an existing real folder reached through it,
+    or None when this machine has none. macOS: /var and /var/empty. Linux (merged /usr): the first of /bin, /sbin,
+    /lib, /lib64 that is a root-owned link, and its first real subfolder. Chosen by the real system: a file system fact."""
+    import stat
+    cands = [("/var", "empty")] if sys.platform == "darwin" else [(p, None) for p in ("/bin", "/sbin", "/lib", "/lib64")]
+    for link, sub in cands:
+        try:
+            st = os.lstat(link)
+            if not stat.S_ISLNK(st.st_mode) or st.st_uid != 0:
+                continue
+            if sub is None:
+                sub = next((n for n in sorted(os.listdir(link)) if os.path.isdir(os.path.join(link, n))
+                            and not os.path.islink(os.path.join(link, n))), None)
+        except OSError:
+            continue
+        if sub and os.path.isdir(os.path.join(link, sub)):
+            folder = os.path.join(link, sub)
+            return link, folder, os.path.realpath(folder)
+    return None
+
+
+def without_platform(lines):
+    """`mm check` lines without the W_PLATFORM line a platform in its reduced form adds."""
+    return [line for line in lines if not line.startswith("W_PLATFORM ")]
 
 PROFILE = os.path.join(FIX, "profile-test.toml")
 TMP_BASE = os.environ.get("MM_TEST_TMP") or os.path.join(tempfile.gettempdir(), "mm-tests")

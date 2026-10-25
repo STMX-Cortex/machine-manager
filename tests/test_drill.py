@@ -8,6 +8,7 @@ import sys
 import time
 import unittest
 
+import mmtest
 from mmtest import TempData, base_settings, mmcore, mmread
 import mmdrill
 
@@ -155,7 +156,9 @@ class Drill(TempData):
     def test_cli_refuses_with_one_line(self):
         os.remove(os.path.join(self.data, "status.json"))
         r = self.mm("drill", "memory")
-        self.assertEqual((r.returncode, r.stdout.strip()), (2, "E_DRILL supervisor status not fresh; fix: mm start, then retry"))
+        # where the drill is not built (Linux), its one line is the E_PLATFORM refusal
+        want = mmtest.mmplat.refusal("drill") or "E_DRILL supervisor status not fresh; fix: mm start, then retry"
+        self.assertEqual((r.returncode, r.stdout.strip()), (2, want))
 
     def test_compressed_memory_stops_as_not_used(self):
         """The 2026-10-14 live failure on the fake reader: free falls 1/7.5 of the held memory per step. The drill

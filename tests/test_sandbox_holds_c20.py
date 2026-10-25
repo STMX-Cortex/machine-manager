@@ -310,14 +310,16 @@ class C20Base(mmtest.TempData):
         return hits[0]
 
     def explain_argv(self, command):
-        """The argv a shell gives `mm` when it runs command, in zsh and in sh (a function prints each word)."""
+        """The argv a shell gives `mm` when it runs command, in zsh (where it exists, as on macOS) and in sh (a function
+        prints each word). The commands are POSIX shell-quoted, so sh alone suffices where there is no zsh."""
         got = []
-        for shell, define in (("/bin/zsh", "mm() { printf '%s\\0' \"$@\"; }; "), ("/bin/sh", "mm() { printf '%s\\0' \"$@\"; }; ")):
+        shells = [s for s in ("/bin/zsh", "/bin/sh") if os.path.exists(s)]
+        for shell, define in ((s, "mm() { printf '%s\\0' \"$@\"; }; ") for s in shells):
             argv = [shell, "-f", "-c", define + command] if shell.endswith("zsh") else [shell, "-c", define + command]
             r = subprocess.run(argv, capture_output=True, cwd=self.root, timeout=10)
             self.assertEqual(r.returncode, 0, "%s cannot run the line's command %s: %s" % (shell, ascii(command), r.stderr))
             got.append(r.stdout.decode("utf-8", "surrogateescape").split("\0")[:-1])
-        self.assertEqual(got[0], got[1], "zsh and sh read the command alike: %s" % ascii(command))
+        self.assertEqual(got[0], got[-1], "zsh and sh read the command alike: %s" % ascii(command))
         self.assertFalse(os.path.exists(os.path.join(self.root, "pwned")), "the command ran agent text: %s" % ascii(command))
         return got[0]
 

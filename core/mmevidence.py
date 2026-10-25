@@ -4,7 +4,8 @@
 A bundle is a folder evidence/<NN>/ in the data folder (a ring of evidence.slots folders, the oldest reused) with the
 facts of one alert: alert.json (the question, the hypotheses, the time window), metrics.csv rows of the window, the
 queue's sampler and history tails, the queue, ps top lists with the slot trees marked, kernel memorystatus lines of the
-window, vm_stat / sysctl / memory_pressure readings, the usage state, the pool summary and sizes.
+window, vm_stat / sysctl / memory_pressure readings (macOS; elsewhere readings.txt notes them skipped), the usage
+state, the pool summary and sizes.
 state/evidence-index.json maps alert seq and key to the folder. Every text is masked (mmcore.mask) before it is written.
 Each text file is cleaned line by line as it is written (mmtext.log_text: cut lines, no control or separator character;
 C-22, C-23); each JSON file holds masked and cleaned strings (agent values are text an agent can make).
@@ -15,6 +16,7 @@ import shutil
 import time
 
 import mmcore
+import mmplat
 import mmread
 import mmtext
 
@@ -117,11 +119,10 @@ def bundle(rec, s, now, queue=None, slot=None, extra=None, usage_file=None):
     # each record decoded, its strings cleaned, encoded again: a JSON line is never cut or masked as text
     put_lines("kernel.jsonl", [json.dumps(mmtext.clean_obj(mmcore.mask_obj(json.loads(line)))) for line in kl])
     rd = []
-    for argv in (["/usr/bin/vm_stat"], ["/usr/sbin/sysctl", "vm.swapusage", "vm.loadavg", "vm.compressor.segment.total",
-                                        "kern.memorystatus_level"], ["/usr/bin/memory_pressure", "-Q"]):
+    for argv in mmread.plat.EVIDENCE_ARGVS:  # vm_stat, sysctl, memory_pressure on macOS
         rc, out = mmread.run(argv, timeout=20)
         rd.append("$ %s  (rc=%s)\n%s" % (" ".join(argv), rc, out.strip()))
-    put("readings.txt", "\n\n".join(rd))
+    put("readings.txt", "\n\n".join(rd) if rd else "# skipped: no reading commands on %s yet" % mmplat.PLATFORM)
     try:
         with open(usage_file) as f:
             usage = json.loads(f.read(200000))

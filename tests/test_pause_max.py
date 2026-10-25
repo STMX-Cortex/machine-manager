@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 
+import mmtest
 from mmtest import mmcore, mmread
 import mmdecide
 import mmsuper
@@ -180,6 +181,7 @@ class PauseMax(Base):
             self.assertTrue(self.stopped())
 
     # -- the cap ends a pause in a non-critical state ---------------------------------------------------------------
+    @mmtest.needs_proc
     def test_amber_resumes_at_the_cap_once_with_line_and_alert(self):
         paused_at = self.pause_at()
         self.ticks_until_cap("AMBER", paused_at)
@@ -197,6 +199,7 @@ class PauseMax(Base):
             self.assertIn(str(pid), alerts[0]["text"])
         self.assertNotIn("paused_at", self.controller(), "nothing paused: no pause time kept")
 
+    @mmtest.needs_proc
     def test_red_without_a_critical_reason_resumes_at_the_cap(self):
         paused_at = self.pause_at()
         self.ticks_until_cap("RED_FREE", paused_at)
@@ -207,6 +210,7 @@ class PauseMax(Base):
         self.assertEqual(len(lines), 1, lines)
         self.assert_cap_resume(lines[0], "RED")
 
+    @mmtest.needs_proc
     def test_critical_red_ticks_count_toward_the_cap(self):
         """Critical RED past the cap holds the pause; after it, CAP_TICKS clear ticks in a row end the pause."""
         paused_at = self.pause_at()
@@ -223,6 +227,7 @@ class PauseMax(Base):
         self.assertEqual(len(self.resume_lines()), 1)
 
     # -- review F1 (C6): only clear ticks in a row from the cap time end a pause ----------------------------------------
+    @mmtest.needs_proc
     def test_one_missing_swap_reading_in_a_swap_race_keeps_the_pause(self):
         """Review C6: a swap race past the cap with ONE sample whose swap reading is missing (a sampler gap). The race
         has not ended; that tick only looks calm (STEADY, readings incomplete) and never ends the pause."""
@@ -241,6 +246,7 @@ class PauseMax(Base):
         self.assertEqual(self.resume_lines(), [])
         self.assertEqual(self.pause_max_alerts(), [])
 
+    @mmtest.needs_proc
     def test_a_tick_with_a_missing_memory_reading_starts_the_count_again(self):
         """Round-3 ruling 1: a gap holds the pause through the 60 s growth window, then CAP_TICKS clear ticks end it.
         Each memory reading counts, also the ones classify's `complete` does not name (pressure, segments)."""
@@ -265,6 +271,7 @@ class PauseMax(Base):
                 for _ in range(2):
                     self.tick_as("AMBER")
 
+    @mmtest.needs_proc
     def test_ticks_before_the_cap_time_do_not_count(self):
         """Clear ticks all along: the pause still ends exactly RESUME_S after it (CAP_TICKS clear ticks from the cap
         time), never at the cap time on a count carried from before it."""
@@ -273,6 +280,7 @@ class PauseMax(Base):
             self.tick_as("AMBER")
         self.ticks_until_cap("AMBER", paused_at)
 
+    @mmtest.needs_proc
     def test_the_count_follows_slots_sustain_samples(self):
         self.settings(**{"pause_newest_call.max_minutes": CAP_MIN, "slots.sustain_samples": 1})
         paused_at = self.pause_at()
@@ -310,15 +318,19 @@ class PauseMax(Base):
         self.assertTrue(self.gate_ticks(reasons, 3 * CAP_TICKS), "the cap ended the pause during RED %s" % reasons)
         self.assertEqual(self.resume_lines(), [])
 
+    @mmtest.needs_proc
     def test_kernel_memorystatus_event_keeps_the_pause(self):
         self.hold_back([KERNEL_RED])
 
+    @mmtest.needs_proc
     def test_swap_near_total_and_growing_keeps_the_pause(self):
         self.hold_back(["swap 1900 of 2048 MB and growing"])
 
+    @mmtest.needs_proc
     def test_compressor_segments_over_limit_keeps_the_pause(self):
         self.hold_back(["compressor segments 95% of limit"])
 
+    @mmtest.needs_proc
     def test_control_another_red_reason_ends_the_pause_at_the_cap(self):
         """Control for the three above: the same steps with a RED reason that does not hold the pause end it."""
         paused_at = self.pause_at()
@@ -327,11 +339,13 @@ class PauseMax(Base):
         self.assertFalse(self.gate_ticks(["free 30% < 35%"], 1))
         self.assert_cap_resume(self.resume_lines()[0], "RED")
 
+    @mmtest.needs_proc
     def test_control_no_readings_flag_never_ends_the_pause(self):
         paused_at = self.pause_at()
         self.clock["t"] = max(self.clock["t"], paused_at + CAP_S + 1)
         self.assertTrue(self.gate_ticks(["free 30% < 35%"], 3 * CAP_TICKS, readings_ok=False))
 
+    @mmtest.needs_proc
     def test_compressor_segments_red_from_real_readings_keeps_the_pause(self):
         paused_at = self.pause_at()
         while self.clock["t"] - paused_at <= 4 * CAP_S:
@@ -364,6 +378,7 @@ class PauseMax(Base):
         self.assertFalse(mmsuper.cap_holds("AMBER", [KERNEL_RED]), "only a RED tick holds")
 
     # -- review F2 (C2) and F3 (C3): one PAUSE_MAX for each capped pause, and the truth when the call is gone -----------
+    @mmtest.needs_proc
     def test_each_capped_resume_pushes_its_own_pause_max(self):
         first = self.pause_at()
         self.ticks_until_cap("AMBER", first)
@@ -382,6 +397,7 @@ class PauseMax(Base):
             self.assertTrue(r.get("key", "").startswith("PAUSE_MAX:"), r)
             self.assertIn(LABEL, r["text"])
 
+    @mmtest.needs_proc
     def test_no_continued_claim_when_no_pid_was_continued(self):
         paused_at = self.pause_at()
         for pid in reversed(self.call_pids):  # processes this test started
@@ -414,6 +430,7 @@ class PauseMax(Base):
         self.assertIn(LABEL, text)
         self.assertNotIn("paused_at", self.controller())
 
+    @mmtest.needs_proc
     def test_a_failed_resume_at_the_cap_says_so_and_tries_again(self):
         """F3's sibling: the resume itself fails (the record stays): PAUSE_MAX never claims the call continued or was
         gone; the next clear tick tries again and continues it."""
@@ -436,6 +453,7 @@ class PauseMax(Base):
         self.assertFalse(self.stopped(), "the next clear tick continues the call")
 
     # -- review C5: a restart drops the pause time -------------------------------------------------------------------
+    @mmtest.needs_proc
     def test_restart_drops_the_pause_time(self):
         paused_at = self.pause_at()
         self.tick_as("AMBER")
@@ -459,13 +477,16 @@ class PauseMax(Base):
         self.assertEqual(self.resume_lines(), [])
         self.assertEqual(self.pause_max_alerts(), [])
 
+    @mmtest.needs_proc
     def test_critical_red_by_pressure_never_resumes(self):
         self.never_resumes(["RED"], 10 * CAP_S, self.pause_at())
 
+    @mmtest.needs_proc
     def test_critical_red_by_swap_growth_never_resumes(self):
         self.tick_as("GREEN")  # fixture: one earlier sample, so the swap rise shows
         self.never_resumes(["RED_SWAP"], 10 * CAP_S, self.pause_at("RED_SWAP"))
 
+    @mmtest.needs_proc
     def test_critical_red_by_compressor_ceiling_pauses_and_never_resumes(self):
         self.settings(**{"pause_newest_call.max_minutes": CAP_MIN, "slots.red_comp_mb": 6000})
         paused_at = self.pause_at("RED_COMP")
@@ -474,6 +495,7 @@ class PauseMax(Base):
         self.never_resumes(["RED_COMP", "RED"], 10 * CAP_S, paused_at)
 
     # -- defaults and kept behaviour --------------------------------------------------------------------------------
+    @mmtest.needs_proc
     def test_default_zero_never_ends_a_pause(self):
         self.settings()  # max_minutes not named: the default
         self.assertEqual(mmcore.Settings().load()["pause_newest_call.max_minutes"], 0)
@@ -491,6 +513,7 @@ class PauseMax(Base):
             self.assertFalse(self.stopped())
         self.assertNotIn(" PAUSE ", self.decisions())
 
+    @mmtest.needs_proc
     def test_calm_span_still_resumes_first_without_a_pause_max(self):
         self.settings(**{"pause_newest_call.max_minutes": 10, "pause_newest_call.resume_after_green_s": 60})
         paused_at = self.pause_at()
@@ -503,6 +526,7 @@ class PauseMax(Base):
         self.assertEqual(self.pause_max_alerts(), [])
         self.assertNotIn("paused_at", self.controller())
 
+    @mmtest.needs_proc
     def test_a_second_pause_counts_from_its_own_tick(self):
         first = self.pause_at()
         self.ticks_until_cap("AMBER", first)
@@ -516,6 +540,7 @@ class PauseMax(Base):
         for line in lines:
             self.assert_cap_resume(line, "AMBER")
 
+    @mmtest.needs_proc
     def test_pausing_turned_off_drops_the_pause_time(self):
         paused_at = self.pause_at()
         self.tick_as("AMBER")

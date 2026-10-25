@@ -333,6 +333,7 @@ class PauseBase(tsh.Base):
 class ReadOnlyOpeners(PauseBase):
     """C-10: read-only openers are never candidates and need no alert."""
 
+    @mmtest.needs_proc
     def test_the_launchers_own_read_only_scan_is_never_paused(self):
         """A waiting queue call (the configured launcher) scans the slot file read-only: only the holder is paused."""
         call = self.call()
@@ -342,6 +343,7 @@ class ReadOnlyOpeners(PauseBase):
         self.assert_paused_exactly(call)
         self.assert_no_refusal()
 
+    @mmtest.needs_proc
     def test_a_read_only_opener_that_is_not_the_launcher_raises_no_refusal(self):
         call = self.call()
         r = self.reader()
@@ -350,6 +352,7 @@ class ReadOnlyOpeners(PauseBase):
         self.assert_paused_exactly(call)
         self.assert_no_refusal()
 
+    @mmtest.needs_proc
     def test_a_read_write_impostor_is_named_and_a_reader_beside_it_is_not(self):
         call = self.call()
         r = self.reader()
@@ -359,6 +362,7 @@ class ReadOnlyOpeners(PauseBase):
         self.assert_paused_exactly(call)
         self.assert_refusal_names([imp], not_named=[r])
 
+    @mmtest.needs_proc
     def test_a_write_only_impostor_is_named(self):
         """C-12 (Q3): write access `w` makes a candidate too; this one is not the launcher, so it is named and never
         paused."""
@@ -369,6 +373,7 @@ class ReadOnlyOpeners(PauseBase):
         self.assert_paused_exactly(call)
         self.assert_refusal_names([imp])
 
+    @mmtest.needs_proc
     def test_an_impostor_with_a_read_only_and_a_read_write_descriptor_is_still_named(self):
         """Any read-write descriptor makes a candidate, also when a read-only one of the same process comes first."""
         call = self.call()
@@ -478,6 +483,7 @@ class QueueReadWithAFifo(PauseBase):
     whole queue reading was lost. Agents may write the slot and ticket files (README.md, "Agent-written files").
     Expected: the ticks end, the real call is still paused, and SLOT_NOT_A_FILE names the FIFO."""
 
+    @mmtest.needs_proc
     def test_a_fifo_at_an_idle_slot_path_hangs_no_tick(self):
         call = self.call()
         fifo = os.path.join(self.q, ".slot.2")
@@ -487,6 +493,7 @@ class QueueReadWithAFifo(PauseBase):
         self.assert_paused_exactly(call)
         self.assert_slot_not_a_file(fifo)
 
+    @mmtest.needs_proc
     def test_a_fifo_at_an_idle_slot_path_with_a_writer_does_not_stop_the_pause(self):
         call = self.call()
         fifo = os.path.join(self.q, ".slot.2")
@@ -499,6 +506,7 @@ class QueueReadWithAFifo(PauseBase):
         self.assert_paused_exactly(call)
         self.assert_slot_not_a_file(fifo)
 
+    @mmtest.needs_proc
     def test_a_ticket_that_is_a_link_counts_as_not_held_and_alerts(self):
         """A ticket link to a file another process holds locked: not a regular file, so SLOT_NOT_A_FILE names it."""
         call = self.call()
@@ -511,6 +519,7 @@ class QueueReadWithAFifo(PauseBase):
         self.assert_paused_exactly(call)
         self.assert_slot_not_a_file(ticket)
 
+    @mmtest.needs_proc
     def test_a_fifo_ticket_hangs_no_tick(self):
         call = self.call()
         fifo = os.path.join(self.q, "queue", "%d-%d" % (time.time_ns(), os.getpid()))

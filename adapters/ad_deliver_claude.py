@@ -168,7 +168,8 @@ def gate_decision(data, s, now, cfg):
     cur = mmcore.read_json(mmcore.path("status.json"), None)
     if not isinstance(cur, dict) or cur.get("state") != "RED" or not cur.get("red_since"):
         return None
-    if now - float(cur.get("time", 0)) > 60 or now - float(cur["red_since"]) > s["launch_gate.max_minutes"] * 60:
+    if (now - float(cur.get("time", 0)) > s["other.status_fresh_s"]
+            or now - float(cur["red_since"]) > s["launch_gate.max_minutes"] * 60):
         return None
     tool = data.get("tool_name")
     cmd = ((data.get("tool_input") or {}).get("command") or "") if isinstance(data.get("tool_input"), dict) else ""
@@ -522,13 +523,16 @@ def cache_5m(project_dir, now, window=3600):
 
 
 def banner(text, enabled):
-    """A macOS notification for an ACTION alert (settings banner.enabled). MM_BANNER_CMD replaces osascript in tests."""
+    """A macOS notification for an ACTION alert (settings banner.enabled). MM_BANNER_CMD replaces osascript in tests.
+    Skipped (False) where the platform has no notification command (mmread.plat.banner_argv gives None)."""
     if not enabled:
         return False
     cmd = os.environ.get("MM_BANNER_CMD")
     # an alert line: masked part by part, its quotes kept (mmcore.mask_keep_quotes), then cleaned (C-23)
     safe = mmtext.clean(mmcore.mask_keep_quotes(text)).replace("\\", " ").replace('"', "'")[:200]
-    argv = [cmd, safe] if cmd else ["/usr/bin/osascript", "-e", 'display notification "%s" with title "machine-manager"' % safe]
+    argv = [cmd, safe] if cmd else mmread.plat.banner_argv(safe)
+    if not argv:
+        return False
     rc, _ = mmread.run(argv, timeout=10)
     return rc == 0
 

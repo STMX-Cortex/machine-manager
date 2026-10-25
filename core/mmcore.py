@@ -15,6 +15,7 @@ import socket
 import time
 
 import mmdecide
+import mmplat
 import mmtext
 
 CORE = os.path.dirname(os.path.realpath(__file__))
@@ -35,8 +36,9 @@ class MMError(Exception):
 
 
 def base_dir():
-    """Where installs live: MM_BASE, else ~/Library/Application Support/machine-manager."""
-    return os.path.abspath(os.path.expanduser(os.environ.get("MM_BASE") or "~/Library/Application Support/machine-manager"))
+    """Where installs live: MM_BASE, else ~/Library/Application Support/machine-manager (macOS), or
+    $XDG_DATA_HOME/machine-manager, else ~/.local/share/machine-manager (Linux; mmplat.default_base)."""
+    return os.path.abspath(os.path.expanduser(os.environ.get("MM_BASE") or mmplat.default_base()))
 
 
 def install_record():
@@ -306,6 +308,9 @@ SCHEMA = {
     "other.cache_5m_min_tokens_m": ("num", 0, 100000), "other.recipient_tool_wait_minutes": ("num", 1, 1440),
     "other.load_log_max_age_s": ("num", 30, 86400), "other.heartbeat_max_age_s": ("num", 20, 86400),
     "other.resume_gap_s": ("num", 30, 86400),
+    # Default 60; range 15-3600 s; authority: the owner. mm place and the launch gate use status.json's state only
+    # when it is younger (the drill keeps its own stricter limit, mmdrill.STATUS_FRESH_S).
+    "other.status_fresh_s": ("num", 15, 3600),
     "repeat.action_minutes": ("num", 1, 1440), "repeat.clear_after_minutes": ("num", 0, 1440), "repeat.attention_hours": ("num", 0.1, 168),
     "hook.log_input_keys": ("bool", None, None), "hook.remind_waiter_minutes": ("num", 1, 1440),
     "hook.subagent_model_replies": ("int", 1, 1000), "hook.subagent_model_scan_mb": ("num", 1, 1024),
@@ -430,7 +435,8 @@ class Settings:
         self.problem = None
         self.mtime = None
 
-    def load(self):
+    def load(self, save=True):
+        """The merged, validated values; a good read is saved as settings.lastgood.json unless save is False."""
         try:
             try:
                 st = os.stat(self.file)
@@ -445,10 +451,11 @@ class Settings:
             if bad:
                 raise ValueError("; ".join(bad[:5]))
             self.values, self.problem, self.mtime = resolve(flat), None, mtime
-            try:
-                write_atomic(self.last_good_file, json.dumps(flat, sort_keys=True))
-            except OSError:
-                pass
+            if save:
+                try:
+                    write_atomic(self.last_good_file, json.dumps(flat, sort_keys=True))
+                except OSError:
+                    pass
         except (OSError, ValueError) as e:  # tomllib.TOMLDecodeError is a ValueError
             self.problem = str(e)[:400]
             if self.values is None:
@@ -459,6 +466,10 @@ class Settings:
                     if not validate(restored, self.real_slots):
                         self.values = resolve(restored)
         return self.values
+
+    def peek(self):
+        """load() that writes no file (for `mm status`, which only reads)."""
+        return self.load(save=False)
 
     def __getitem__(self, key):
         return self.values[key]

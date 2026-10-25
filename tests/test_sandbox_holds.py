@@ -406,11 +406,14 @@ class Rule48CleanupCommands(Repo):
         self.assert_keep_item(items, below)
 
     def test_a_path_through_a_root_owned_link_is_still_listed(self):
-        """C-7: links owned by root (/var here) are allowed in the path. The command is only printed, never run.
-        Passes before the change too."""
-        self.assertTrue(os.path.islink("/var") and os.lstat("/var").st_uid == 0, "this machine's /var is a root link")
-        items, _ = self.listing({"id": "R5", "type": "paths", "paths": ["/var/empty"]})
-        self.assertTrue(self.removes(items) & {"/var/empty", "/private/var/empty"}, items)
+        """C-7: links owned by root (/var on macOS, /lib or /bin on merged-/usr Linux) are allowed in the path. The
+        command is only printed, never run. Passes before the change too."""
+        got = mmtest.root_link_folder()
+        if not got:
+            self.skipTest("no root-owned link to a folder on this machine (C-7 needs one)")
+        _, folder, real = got
+        items, _ = self.listing({"id": "R5", "type": "paths", "paths": [folder]})
+        self.assertTrue(self.removes(items) & {folder, real}, items)
 
 
 def alert_records(data):
@@ -548,17 +551,21 @@ class Rule48Deletes(Base):
             self.assertTrue(keeps and all(keeps), "a KEEP line with its reason for %s: %s" % (path, r.lines))
 
     def test_command_per_dir_runs_through_a_root_owned_link(self):
-        """C-7: /var is a link owned by root, so /var/empty is allowed. The prune here is this test's own script; it
-        only records its argument. Passes before the change too."""
-        self.assertTrue(os.path.islink("/var") and os.lstat("/var").st_uid == 0, "this machine's /var is a root link")
+        """C-7: /var is a link owned by root (macOS; on merged-/usr Linux /lib or /bin), so /var/empty (a real folder
+        under it) is allowed. The prune here is this test's own script; it only records its argument. Passes before
+        the change too."""
+        got = mmtest.root_link_folder()
+        if not got:
+            self.skipTest("no root-owned link to a folder on this machine (C-7 needs one)")
+        _, folder, real = got
         ran = os.path.join(self.t, "ran.log")
         tool = os.path.join(self.t, "prune.sh")
         with open(tool, "w") as f:
             f.write('#!/bin/sh\nprintf "%%s\\n" "$2" >> \'%s\'\n' % ran)
         os.chmod(tool, 0o700)
-        r = self.run_rules([{"id": "S7", "type": "command_per_dir", "dirs": ["/var/empty"], "argv": [tool, "--dir", "{dir}"]}])
+        r = self.run_rules([{"id": "S7", "type": "command_per_dir", "dirs": [folder], "argv": [tool, "--dir", "{dir}"]}])
         with open(ran) as f:
-            self.assertIn(f.read().splitlines(), (["/var/empty"], ["/private/var/empty"]), r.lines)
+            self.assertIn(f.read().splitlines(), ([folder], [real]), r.lines)
 
     def test_a_refused_link_raises_link_skipped(self):
         """C-8: the supervisor's deletion pass raises an ATTENTION alert LINK_SKIPPED naming the refused path."""
@@ -748,6 +755,7 @@ class Rule47Pause(Base):
 
     # -- the real launcher holds the slot
 
+    @mmtest.needs_proc
     def test_the_real_launcher_holding_the_slot_is_paused(self):
         """The control: passes before the change too."""
         call = self.launcher()
@@ -757,6 +765,7 @@ class Rule47Pause(Base):
         self.assertTrue(kids and all(self.stopped(k) for k in kids), "its command is paused")
         self.assert_no_refusal()
 
+    @mmtest.needs_proc
     def test_a_rewritten_label_never_redirects_the_pause(self):
         call = self.launcher()
         v = self.victim()
@@ -766,6 +775,7 @@ class Rule47Pause(Base):
         self.assertTrue(self.stopped(call.pid), "the process that holds the slot file is paused")
         self.assert_no_refusal()
 
+    @mmtest.needs_proc
     def test_a_label_without_a_pid_still_pauses_the_holder(self):
         call = self.launcher()
         self.rewrite_label("garbage without a pid")
@@ -796,6 +806,7 @@ class Rule47Pause(Base):
         self.assert_nothing_paused(h)
         self.assert_alerted_about(h.pid)
 
+    @mmtest.needs_proc
     def test_an_extra_opener_that_rewrites_the_label_to_itself_is_never_paused(self):
         """C-5: every opener is checked; the launcher is paused, the other opener never, and the alert names it."""
         call = self.launcher()

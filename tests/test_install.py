@@ -44,6 +44,7 @@ class SetupBase(TempData):
 
 
 class Setup(SetupBase):
+    @mmtest.darwin_only
     def test_install_stop_start_rollback(self):
         uid = os.getuid()
         sup, wd = "com.example.machine-manager-test", "com.example.machine-manager-test-watchdog"
@@ -105,6 +106,7 @@ class Setup(SetupBase):
         self.assertEqual(len(set(names)), 3, names)
         self.assertTrue(all(open(n).read() == open(self.hooks_file).read() for n in names))
 
+    @mmtest.darwin_only
     def test_rollback_restores_exact_bytes_and_keeps_later_edits(self):
         odd = '{\n    "permissions" : {"allow": ["Bash(ls:*)"]},\n    "hooks": {}\n}\n'
         with open(self.hooks_file, "w") as f:
@@ -124,6 +126,7 @@ class Setup(SetupBase):
         self.assertEqual(after["permissions"]["allow"], ["Bash(ls:*)", "Bash(pwd)"], "the later edit stays")
         self.assertNotIn(" hook --event ", json.dumps(after))
 
+    @mmtest.darwin_only
     def test_install_refuses_without_observe_and_on_a_differing_settings_file(self):
         self.write_settings(**{"mode.observe": False})
         rc, out, _ = self.run_mm("install")
@@ -138,6 +141,7 @@ class Setup(SetupBase):
         self.assertTrue(out[0].startswith("E_EXISTS "), out)
         self.assertEqual(json.load(open(self.hooks_file)), THEIRS)
 
+    @mmtest.darwin_only
     def test_install_refuses_a_broken_hooks_file(self):
         with open(self.hooks_file, "w") as f:
             f.write("[1, 2]")
@@ -158,22 +162,23 @@ class Setup(SetupBase):
         r = self.mm("init", "--profile", "bad name!", "--dir", d)
         self.assertEqual((r.returncode, r.stdout.split()[0]), (2, "E_USAGE"))
         r = self.mm("check", "--profile", os.path.join(d, "lab1.toml"), "--data", os.path.join(self.root, "lab-data"))
-        self.assertEqual(r.stdout.strip(), "check=ok", r.stdout)
+        self.assertEqual(mmtest.without_platform(r.stdout.strip().splitlines()), ["check=ok"], r.stdout)
         self.assertEqual(r.returncode, 0)
         r = self.mm("check")
-        self.assertEqual((r.returncode, r.stdout.strip()), (0, "check=ok"), "the test profile is valid")
+        self.assertEqual((r.returncode, mmtest.without_platform(r.stdout.strip().splitlines())), (0, ["check=ok"]),
+                         "the test profile is valid")
         bad = os.path.join(self.root, "bad.toml")
         with open(bad, "w") as f:
             f.write('name = "bad"\n[queue]\nadapter = "nope"\ndir = "/nonexistent-q"\n')
         r = self.mm("check", "--profile", bad)
         self.assertEqual(r.returncode, 1)
-        lines = r.stdout.strip().splitlines()
+        lines = mmtest.without_platform(r.stdout.strip().splitlines())
         self.assertTrue(lines and all(l.startswith("E_") and "; fix: " in l for l in lines), lines)
         self.assertTrue(any("queue.adapter" in l or "nope" in l for l in lines), lines)
 
     def test_example_profile_checks(self):
         r = self.mm("check", "--profile", os.path.join(mmtest.CODE, "profiles", "example.toml"))
-        lines = r.stdout.strip().splitlines()
+        lines = mmtest.without_platform(r.stdout.strip().splitlines())
         self.assertEqual([l for l in lines if not l.startswith(("E_PROFILE queue.dir not found",
                                                                  "E_COMMAND /opt/example/"))], [],
                          "the example is valid except its made-up queue folder and tools")
@@ -226,9 +231,12 @@ class Interpreter(SetupBase):
     def test_check_and_install_warn_on_a_versioned_interpreter(self):
         rc, out, err = self.as_python(CELLAR_PY, "check")
         self.assertEqual(rc, 0, out + [err])
+        out = mmtest.without_platform(out)
         self.assertEqual(len(out), 2, out)
         self.assertTrue(out[0].startswith("W_PYTHON "), out)
         self.assertEqual(out[1], "check=ok")
+        if not mmtest.mmplat.DARWIN:  # install is launchd's: it refuses here (tests/test_platform.py)
+            return
         rc, out, err = self.as_python(CELLAR_PY, "install")
         self.assertEqual(rc, 0, out + [err])
         self.assertIn("python=%s" % CELLAR_PY, out[0])

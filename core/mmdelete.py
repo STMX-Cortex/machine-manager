@@ -30,6 +30,7 @@ import shlex
 import shutil
 import stat
 import subprocess
+import tempfile
 import time
 
 import mmcore
@@ -39,7 +40,11 @@ import mmtext
 
 
 def user_tmp():
-    rc, out = mmread.run(["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"], timeout=10)
+    """The {user_tmp} placeholder: macOS's per-user temp folder (getconf DARWIN_USER_TEMP_DIR); where the platform has
+    no such command, tempfile.gettempdir()."""
+    if not mmread.plat.USER_TEMP_ARGV:
+        return os.path.realpath(tempfile.gettempdir()).rstrip("/") or "/nonexistent-user-temp"
+    rc, out = mmread.run(mmread.plat.USER_TEMP_ARGV, timeout=10)
     p = out.strip() if rc == 0 else ""
     return os.path.realpath(p).rstrip("/") if p else "/nonexistent-user-temp"
 
@@ -193,10 +198,13 @@ class Run:
 
     def held(self, p):
         """None when no live process holds a file, a socket or its working folder under p; else the reason.
-        A failed or timed-out lsof counts as held."""
+        A missing, failed or timed-out lsof counts as held."""
         t = self.s["deletes.lsof_timeout_s"]
+        lsof = mmread.plat.LSOF
+        if not lsof:
+            return "lsof not available"
         try:
-            r = subprocess.run(["/usr/sbin/lsof", "-t", "+D", p], capture_output=True, text=True, timeout=t)
+            r = subprocess.run([lsof, "-t", "+D", p], capture_output=True, text=True, timeout=t)
         except (OSError, subprocess.TimeoutExpired) as e:
             return "lsof failed: %s" % str(e)[:60]
         pids = r.stdout.split()
@@ -205,7 +213,7 @@ class Run:
         if r.returncode not in (0, 1):
             return "lsof rc=%d" % r.returncode
         try:
-            u = subprocess.run(["/usr/sbin/lsof", "-U", "-F", "pn"], capture_output=True, text=True, timeout=t)
+            u = subprocess.run([lsof, "-U", "-F", "pn"], capture_output=True, text=True, timeout=t)
         except (OSError, subprocess.TimeoutExpired) as e:
             return "lsof -U failed: %s" % str(e)[:60]
         pid = None
@@ -351,13 +359,15 @@ class Run:
         base = self.c.x(r["base"])
         if not os.path.isdir(base):
             return
-        procs = self.procs() or []
-        app_open = any(os.path.basename(p["comm"]) == r["app"] for p in procs)
+        procs = self.procs()
+        # no process list (ps missing or failed): the app may be running, so its while-closed folders stay
+        app_open = procs is None or any(os.path.basename(p["comm"]) == r["app"] for p in procs)
         wc = r.get("while_closed")
         if wc:
             d = os.path.join(base, wc["dir"])
             if app_open:
-                self.log("KEEP", r["id"], d, guard="%s is running: left alone" % r["app"])
+                self.log("KEEP", r["id"], d, guard="%s is running: left alone" % r["app"] if procs is not None
+                         else "ps failed: %s may be running; left alone" % r["app"])
             else:
                 for p in children(d, ["*"], dirs_only=True):
                     self.remove(r["id"], p, wc["age_minutes"], [d])

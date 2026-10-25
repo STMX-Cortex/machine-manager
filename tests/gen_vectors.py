@@ -212,6 +212,12 @@ case("place", "busy-guard-ok-pool", {"req": {"kind": "go-test", "shards": 2}, "c
                                      pools=[dict(pool, guard={"rc": 0, "line": "fits: 82 of 20000"})])})
 case("place", "busy-guard-refused", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(ctx, machine=dict(mach, queue=qfull),
                                      pools=[dict(pool, guard={"rc": 1, "line": "over the month budget"})])})
+case("place", "busy-guard-skip-pool", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(ctx, machine=dict(mach, queue=qfull),
+                                       pools=[dict(pool, guard="skip")])})
+case("place", "busy-guard-skip-reserve", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(ctx, machine=dict(mach, queue=qfull),
+                                          pools=[dict(pool, guard="skip", minutes_left=3050)])}, {"github.reserve_minutes": 3000})
+case("place", "red-guard-skip-stop-active", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(
+    ctx, machine=dict(mach, state="RED", reasons=["free 30%"], queue=qfull), pools=[dict(pool, guard="skip", stop_active=True)])})
 case("place", "busy-reserve", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(ctx, machine=dict(mach, queue=qfull),
                                pools=[dict(pool, minutes_left=3050)])}, {"github.reserve_minutes": 3000})
 case("place", "busy-stop-active", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(ctx, machine=dict(mach, queue=qfull),

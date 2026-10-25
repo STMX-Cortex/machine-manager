@@ -135,18 +135,21 @@ class RelativeLauncherPause(TempData):
 
     # -- the configured launcher, started by a relative path
 
+    @mmtest.needs_proc
     def test_a_call_started_by_a_path_relative_to_the_parent_folder_is_paused(self):
         """`python3 <dir>/<launcher> -- CMD` from the folder above the queue folder (a recipe's form)."""
         call = self.relative_call(os.path.dirname(self.q), os.path.join(os.path.basename(self.q), "launcher.py"))
         self.tick_red()
         self.assert_call_paused(call)
 
+    @mmtest.needs_proc
     def test_a_call_started_inside_the_queue_folder_is_paused(self):
         """`python3 <launcher> -- CMD` from the queue folder itself."""
         call = self.relative_call(self.q, "launcher.py")
         self.tick_red()
         self.assert_call_paused(call)
 
+    @mmtest.needs_proc
     def test_an_exclusive_call_by_a_relative_path_with_an_extra_environment_is_paused(self):
         """The trim command's form: `X=1 python3 <rel>/<launcher> --exclusive -- CMD` (it holds every slot)."""
         call = self.relative_call(os.path.dirname(self.q), os.path.join(os.path.basename(self.q), "launcher.py"),

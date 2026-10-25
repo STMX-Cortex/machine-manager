@@ -125,6 +125,7 @@ class Base(TempData):
 
 
 class R1Restart(Base):
+    @mmtest.darwin_only
     def test_restart_stops_starts_and_waits_for_a_fresh_heartbeat(self):
         mmcore.write_atomic(os.path.join(self.data, "status.json"),
                             json.dumps({"time": time.time() - 5, "heartbeat": {"pid": 1111}}))
@@ -136,6 +137,7 @@ class R1Restart(Base):
         self.assertNotIn("STOPPED", [n for n, _ in self.names()], "a restart is not a stop: no STOPPED alert")
         self.assertFalse(os.path.exists(os.path.join(self.data, "state", "stopped.json")))
 
+    @mmtest.darwin_only
     def test_restart_without_a_fresh_heartbeat_is_one_error_line(self):
         self.write_settings(**{"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10, "self.restart_wait_s": 5})
         mmcore.write_atomic(os.path.join(self.data, "status.json"),
@@ -145,6 +147,7 @@ class R1Restart(Base):
         self.assertEqual((rc, out), (2, ["E_RESTART no fresh heartbeat in 5 s; fix: mm status; mm explain SELF_STALE"]))
         self.assertLess(time.monotonic() - t, 20)
 
+    @mmtest.darwin_only
     def test_restart_retries_a_load_that_fails_right_after_the_unload(self):
         """Seen live 2026-10-14 21:44: bootout ends a service in the background; the bootstrap right after it failed
         and `mm restart` left nothing running."""
@@ -167,6 +170,7 @@ class R1Restart(Base):
         boots = [c for c in self.launchctl() if c[0] == "bootstrap"]
         self.assertEqual(len(boots), 4, "the supervisor's load tried 3 times, then the watchdog's once")
 
+    @mmtest.darwin_only
     def test_restart_says_so_when_a_load_keeps_failing(self):
         with open(self.fake, "a") as f:
             f.write('if a[:1] in (["bootstrap"], ["print"]):\n    sys.exit(5)\n')
@@ -174,6 +178,7 @@ class R1Restart(Base):
         self.assertEqual(rc, 2)
         self.assertTrue(out[0].startswith("E_RESTART load failed: %s=rc5 %s=rc5; fix: mm start; mm status" % (SUP, WD)), out)
 
+    @mmtest.darwin_only
     def test_restart_clear_safe_ends_safe_mode(self):
         mmrecover.enter_safe("test", time.time())
         rc, out, _ = self.run_mm("restart", "--clear-safe", FAKE_HEARTBEAT_PID="4343")
@@ -324,6 +329,7 @@ class R3SafeMode(Base):
 
 
 class R4Paused(Base):
+    @mmtest.needs_proc
     def test_the_record_is_written_before_the_sigstop(self):
         """Changed for rule 47 (design part C, rule 47 and settlement C-5): the pause takes its pids from the process
         that has the slot file open and runs the configured queue launcher, so the paused process is now a real call
@@ -398,6 +404,7 @@ class R4Paused(Base):
         self.assertFalse(proc_stat(p.pid).startswith("T"), "stale over 120 s: continued")
         self.assertIn("resumed paused pids [%d]" % p.pid, open(os.path.join(self.data, "state", "watchdog.log")).read())
 
+    @mmtest.darwin_only
     def test_stop_and_rollback_continue_paused_processes(self):
         for verb in ("stop", "rollback"):
             p = self.sleeper()
@@ -417,6 +424,7 @@ class R5Watchdog(Base):
         self.run_mm("watchdog")
         self.assertLess(mmrecover.watchdog_age(time.time()), 30)
 
+    @mmtest.darwin_only
     def test_stale_watchdog_alert_and_one_kickstart_per_10_minutes(self):
         self.install_record()
         clock = {"t": time.time()}
@@ -467,6 +475,7 @@ class R6Reboot(Base):
         self.sup(boot=lambda: {"boot_time": time.time() - 300, "panics": [], "missing_jobs": []}).tick()
         self.assertNotIn("MAC_REBOOTED", [n for n, _ in self.names()])
 
+    @mmtest.needs_proc
     def test_real_facts(self):
         self.assertGreater(mmrecover.boot_time(), 1.0e9)
         self.assertLess(mmrecover.boot_time(), time.time())
@@ -539,6 +548,7 @@ class R7Heartbeat(Base):
 class C1StartGrace(Base):
     """Install fault 1: the watchdog ran before the supervisor's first status.json and restarted it."""
 
+    @mmtest.darwin_only
     def test_no_restart_and_no_alert_inside_the_start_grace(self):
         now = time.time()
         mmrecover.note_loaded(now - 10)  # mm install or mm start loaded the agents 10 s ago; no status.json yet
@@ -617,6 +627,7 @@ class C2Commands(Base):
             f.write(text)
         return p
 
+    @mmtest.darwin_only
     def test_install_puts_each_commands_folder_on_the_service_path_and_check_proves_it(self):
         tools = os.path.join(self.root, "tools bin")
         os.makedirs(tools)
@@ -676,6 +687,7 @@ class C4Loads(Base):
             for (verb, lab), rc in verb_label_rc.items():
                 f.write('if a[:1] == [%r] and a[-1].endswith(%r):\n    sys.exit(%d)\n' % (verb, lab, rc))
 
+    @mmtest.darwin_only
     def test_install_says_so_when_the_supervisor_does_not_load(self):
         self.fail({("bootstrap", SUP + ".plist"): 5, ("print", SUP): 113})
         rc, out, err = self.run_mm("install", timeout=120)
@@ -686,6 +698,7 @@ class C4Loads(Base):
         rec = json.load(open(os.path.join(self.root, "base", "install.json")))
         self.assertEqual(rec["bootstrap"], [[SUP, 5], [WD, 0]], "the record stays, so rollback works")
 
+    @mmtest.darwin_only
     def test_install_retries_a_failed_load(self):
         counter = os.path.join(self.root, "n")
         with open(self.fake, "a") as f:
@@ -697,6 +710,7 @@ class C4Loads(Base):
         self.assertEqual(rc, 0, out + [err])
         self.assertTrue(out[0].startswith("installed=yes"))
 
+    @mmtest.darwin_only
     def test_watchdog_loads_an_unloaded_supervisor_and_says_so(self):
         self.fail({("print", SUP): 113})
         now = time.time()
@@ -709,6 +723,7 @@ class C4Loads(Base):
         self.assertIn(("SELF_UNLOADED", "ACTION"), self.names())
         self.assertIn("not loaded, bootstrap rc=0", open(os.path.join(self.data, "state", "watchdog.log")).read())
 
+    @mmtest.darwin_only
     def test_watchdog_kickstarts_a_loaded_stale_supervisor(self):
         now = time.time()
         mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps({"time": now - 600, "state": "GREEN"}))
@@ -716,6 +731,7 @@ class C4Loads(Base):
         self.assertEqual([c[0] for c in self.launchctl()], ["print", "kickstart"])
         self.assertNotIn("SELF_UNLOADED", [n for n, _ in self.names()])
 
+    @mmtest.darwin_only
     def test_supervisor_loads_an_unloaded_watchdog(self):
         os.makedirs(os.path.join(self.root, "base"), exist_ok=True)
         mmcore.write_atomic(os.path.join(self.root, "base", "install.json"), json.dumps({"data": self.data}))
@@ -854,6 +870,7 @@ class C5CleanStop(Base):
         self.assertIn("STOP deadline: the tick did not end in 2 s after SIGTERM; killed 1 commands; exit", log)
         self.assertFalse(mmrecover.note_start(time.time(), self.s())[1], "the next start is not unclean")
 
+    @mmtest.darwin_only
     def test_the_plist_gives_launchd_time_and_check_finds_an_old_plist(self):
         import mminstall
         import plistlib

@@ -15,7 +15,7 @@ import mmread
 def machine_view(now, s, queue, profile):
     """The machine's state from status.json (fresh), else from one sample (growth rules unchecked)."""
     cur = mmcore.read_json(mmcore.path("status.json"), None)
-    if isinstance(cur, dict) and now - float(cur.get("time", 0)) < 60:
+    if isinstance(cur, dict) and now - float(cur.get("time", 0)) < s["other.status_fresh_s"]:
         return {"state": cur["state"], "reasons": cur.get("reasons", []), "free_pct": (cur.get("readings") or {}).get("free_pct"),
                 "source": "supervisor"}
     sample, _ = mmread.memory_sample(now)

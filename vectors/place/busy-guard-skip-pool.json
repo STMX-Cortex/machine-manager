@@ -1,0 +1,115 @@
+{
+ "case": "busy-guard-skip-pool",
+ "expected": {
+  "candidate": "ci:example/project",
+  "need_guard": null,
+  "place": "POOL",
+  "reasons": [
+   "state GREEN: all readings in the green band",
+   "expected wait on m1: 44 min",
+   "ci:example/project: 20000 minutes left (read), worst case 82, reserve 300",
+   "guard: skipped (this pool needs no guard round; counts as passed)"
+  ]
+ },
+ "function": "place",
+ "input": {
+  "ctx": {
+   "kinds": {
+    "machine_only": {
+     "merge-wide": "the wide run stays on the machine",
+     "other": "kind 'other' runs on the machine"
+    },
+    "pool": {
+     "go-test": 8,
+     "rust-mutants": 64
+    }
+   },
+   "machine": {
+    "free_pct": 80.0,
+    "id": "m1",
+    "medians": {
+     "go-test": 15.0
+    },
+    "queue": {
+     "busy": [
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "since": 1799999940.0,
+       "slot": ".slot.0"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "since": 1799999940.0,
+       "slot": ".slot.1"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "since": 1799999940.0,
+       "slot": ".slot.2"
+      }
+     ],
+     "slots": 3,
+     "tickets": [
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t0"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t1"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t2"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t3"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t4"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t5"
+      }
+     ]
+    },
+    "reasons": [
+     "all readings in the green band"
+    ],
+    "state": "GREEN"
+   },
+   "now": 1800000000.0,
+   "pools": [
+    {
+     "guard": "skip",
+     "guard_why": null,
+     "id": "ci:example/project",
+     "job_minutes": 40,
+     "minutes_left": 20000,
+     "minutes_source": "read",
+     "plan_minutes": 2,
+     "stop_active": false
+    }
+   ],
+   "wide_kind": "merge-wide"
+  },
+  "req": {
+   "kind": "go-test",
+   "shards": 2
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

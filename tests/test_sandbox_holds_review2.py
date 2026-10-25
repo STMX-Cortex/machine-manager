@@ -58,6 +58,7 @@ class UnreadableQueueFile(r1.PauseBase):
         with self.assertRaises(PermissionError, msg="the fixture is unreadable for this user"):
             open(path).close()
 
+    @mmtest.needs_proc
     def test_an_unreadable_ticket_does_not_stop_the_pause(self):
         call = self.call()
         ticket = make_unreadable(os.path.join(self.q, "queue", "%d-%d" % (time.time_ns(), os.getpid())))
@@ -65,6 +66,7 @@ class UnreadableQueueFile(r1.PauseBase):
         self.tick_red()
         self.assert_paused_exactly(call)
 
+    @mmtest.needs_proc
     def test_an_unreadable_slot_file_does_not_stop_the_pause(self):
         call = self.call()
         slot = make_unreadable(os.path.join(self.q, ".slot.9"))
@@ -88,6 +90,7 @@ class SocketAtAQueuePath(r1.PauseBase):
             os.chdir(old)
         return os.path.join(folder, name)
 
+    @mmtest.needs_proc
     def test_a_socket_at_an_idle_slot_path_counts_as_not_held_and_alerts(self):
         call = self.call()
         path = self.bind(self.q, ".slot.7")
@@ -95,6 +98,7 @@ class SocketAtAQueuePath(r1.PauseBase):
         self.assert_paused_exactly(call)
         self.assert_slot_not_a_file(path)
 
+    @mmtest.needs_proc
     def test_a_socket_ticket_counts_as_not_held_and_alerts(self):
         call = self.call()
         path = self.bind(os.path.join(self.q, "queue"), "%d-%d" % (time.time_ns(), os.getpid()))

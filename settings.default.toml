@@ -111,7 +111,8 @@ cache_5m_share_pct = 10  # %
 cache_5m_min_tokens_m = 1  # M tokens
 recipient_tool_wait_minutes = 12  # min
 load_log_max_age_s = 180  # s
-heartbeat_max_age_s = 90  # s
+heartbeat_max_age_s = 90  # s; status.json older than this is stale (mm status, SELF_STALE, the watchdog)
+status_fresh_s = 60  # s; mm place and the launch gate use status.json's state only when it is younger; default 60; range 15-3600; authority: the owner
 resume_gap_s = 300  # s
 
 [repeat]

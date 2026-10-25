@@ -40,10 +40,11 @@ HELD_SELF_S = 1800
 
 
 class KernelStream:
-    """A child `log stream` that reports the two memorystatus events; restarted when it ends (at most once a minute)."""
+    """A child `log stream` that reports the two memorystatus events; restarted when it ends (at most once a minute).
+    macOS only: where the platform has no `log` (mmread.plat.KERNEL_LOG is None) the supervisor starts no stream."""
 
     def __init__(self, argv=None):
-        self.argv = argv or ["/usr/bin/log", "stream", "--style", "ndjson", "--predicate", KERNEL_PREDICATE]
+        self.argv = argv or [mmread.plat.KERNEL_LOG, "stream", "--style", "ndjson", "--predicate", KERNEL_PREDICATE]
         self.proc, self.events, self.started = None, queue_mod.Queue(), 0.0
 
     def ensure(self):
@@ -411,7 +412,7 @@ class Supervisor:
         self.pool = mmadapters.pool(profile)
         self.delivery = mmadapters.delivery(profile)
         self.settings = mmcore.Settings(real_slots=self.queue.slots_path() if self.queue else None)
-        self.kernel = KernelStream() if kernel else None
+        self.kernel = KernelStream() if kernel and mmread.plat.KERNEL_LOG else None  # no stream: no kernel events
         self.live_spec = profile.get("live_tools") or {}
         self.state = mmcore.read_json(mmcore.path("state", "controller.json"), {}) or {}
         offs = self.state.setdefault("offsets", {})
@@ -780,9 +781,9 @@ class Supervisor:
             held.pop(k)
         for k, h in sorted(held.items()):
             out.append(mmalerts._c(k, h["name"], h["level"], h["text"], command=h.get("command")))
-        # the watchdog: installed runs only (the install record names this data folder)
+        # the watchdog: installed runs only (the install record names this data folder), on a platform with the service
         rec = mmcore.install_record()
-        if not self.dry and rec and os.path.realpath(rec.get("data") or "/") == os.path.realpath(mmcore.data_dir()) \
+        if not self.dry and mmread.plat.SERVICE and rec and os.path.realpath(rec.get("data") or "/") == os.path.realpath(mmcore.data_dir()) \
                 and not os.path.exists(mmcore.path("state", "stopped.json")):
             age = mmrecover.watchdog_age(now)
             if (age if age is not None else now - self.started) > s["self.watchdog_stale_s"]:
@@ -867,8 +868,8 @@ class Supervisor:
                     events.append("timing-failure")
             except ValueError:
                 pass
-        rc, out = mmread.run(["/usr/bin/pmset", "-g", "batt"], timeout=10)
-        self.cache["on_ac"] = mmread.parse_pmset(out) if rc == 0 else None
+        rc, out = mmread.run([mmread.plat.PMSET, "-g", "batt"], timeout=10) if mmread.plat.PMSET else (None, "")
+        self.cache["on_ac"] = mmread.parse_pmset(out) if rc == 0 else None  # None: unknown (no POWER alert)
         stale = {}
         if self.queue:
             try:
@@ -1072,7 +1073,7 @@ class Supervisor:
         mmcore.write_atomic(mmcore.path("status.json"), json.dumps(rec, sort_keys=True))
 
     def _pool_status(self, now, s, gh, active):
-        keys = [k for k, a in active.items() if a.get("name", "").startswith(("GH_", "GUARD")) or k.endswith(":gh")]
+        keys = [k for k in active if self.pool.owns(k)]  # only the pool adapter's own alerts
         rec = self.pool.status(gh, s, now, keys)
         safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in self.pool.id)
         mmcore.write_atomic(mmcore.path("pools", safe + ".json"), json.dumps(rec, sort_keys=True))

@@ -49,11 +49,13 @@ GROUPS = {
     "sandbox_holds_review7": ["test_sandbox_holds_review7"],  # review of C-24, part C: R7C-1 to R7C-3
     "sandbox_holds_c20": ["test_sandbox_holds_c20"],  # C-20: agent values cleaned and quoted in every output
     "sandbox_holds_c22": ["test_sandbox_holds_c22"],  # C-22 bounded lines, C-23 files hold cleaned agent values
+    "consistency": ["test_consistency"],  # queue slots file, pool record alerts, status.json age limits, mm run arguments
     "install": ["test_install"],      # install, stop, start, rollback, init, check (temporary HOME)
     "cli": ["test_cli"],              # golden outputs and limits
     "drill": ["test_drill"],          # the drill's stop rules on a fake reader
     "public": ["test_public"],        # no internal names in the public tree
     "recovery": ["test_recovery"],    # R1-R8: restart, self-check, safe mode, paused processes, reboot, ping
+    "platform": ["test_platform"],    # the platform layer, the Linux path (MM_PLATFORM=linux), fail closed without ps or lsof
     "live": ["test_live"],            # T13: the fast readings agree with the macOS commands, here and now
 }
 SLOW = ("live", "drill")

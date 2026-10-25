@@ -17,7 +17,6 @@ import json
 import os
 import re
 import signal
-import struct
 import time
 import urllib.parse
 import urllib.request
@@ -27,7 +26,7 @@ import mmdecide
 import mmread
 import mmtext
 
-PANIC_DIR = "/Library/Logs/DiagnosticReports"
+PANIC_DIR = mmread.plat.PANIC_DIR  # None: the platform has no panic report folder
 
 
 def log(line, now=None):
@@ -45,8 +44,12 @@ def _lock():
 
 
 def start_time(pid):
-    """The process start time as ps prints it (lstart), or None when the pid is gone or ps cannot read it."""
-    rc, out = mmread.run(["/bin/ps", "-o", "lstart=", "-p", str(int(pid))], timeout=5)
+    """The process start time as ps prints it (lstart), or None when the pid is gone or ps cannot read it (or is
+    missing)."""
+    argv = mmread.plat.ps_lstart_argv(pid)
+    if not argv:
+        return None
+    rc, out = mmread.run(argv, timeout=5)
     return (out.strip() or None) if rc == 0 else None
 
 
@@ -197,16 +200,16 @@ def clear_safe(why):
 # ------------------------------------------------------------------------------------------- the Mac reboot
 
 def boot_time():
-    """kern.boottime (struct timeval) in epoch seconds, or None."""
-    raw = mmread.sysctl_raw("kern.boottime")
-    if raw is None or len(raw) < 16:
+    """The boot time in epoch seconds (macOS kern.boottime, Linux /proc/stat btime: the backend), or None."""
+    return mmread.boot_time()
+
+
+def panic_names(folder=None):
+    """Names of the kernel panic reports in folder (default PANIC_DIR; names only, never the content), or None when
+    the folder is unreadable or the platform has none."""
+    folder = folder or PANIC_DIR
+    if not folder:
         return None
-    sec, usec = struct.unpack("<qq", raw[:16])
-    return sec + usec / 1e6
-
-
-def panic_names(folder=PANIC_DIR):
-    """Names of the kernel panic reports (names only; never the content), or None when the folder is unreadable."""
     try:
         return sorted(n for n in os.listdir(folder) if not n.startswith(".") and "panic" in n.lower())
     except OSError:
@@ -218,7 +221,8 @@ def missing_jobs(expected):
     command line. One ps call."""
     if not expected:
         return []
-    rc, out = mmread.run(["/bin/ps", "-axo", "args="], timeout=10)
+    argv = mmread.plat.PS_ARGS_ARGV
+    rc, out = mmread.run(argv, timeout=10) if argv else (None, "")
     if rc != 0:
         return ["(ps failed)"]
     # command lines agents chose: records end at line feeds; each cut before the patterns (C-22)
