@@ -278,15 +278,16 @@ SCHEMA = {
     # Default 256 MB in 60 s; range 1-100000 MB; authority: the owner.
     "slots.red_sys_comp_growth_mb_60s": ("num", 1, 100000),
     "slots.red_load1_per_core": ("num", 0.1, 100), "slots.red_disk_gb": ("num", 0, 10000),
-    # Default 100000 MB (= off); range 1-100000 MB; authority: the owner. A compressor over it is a critical RED.
-    "slots.red_comp_mb": ("num", 1, 100000),
+    # Default 0 (= off); range 0-100000 MB; authority: the owner. A compressor over it is a critical RED.
+    "slots.red_comp_mb": ("num", 0, 100000),
     # Default 0 (= follow disk.recover_gb); range 0-10000 GB; authority: the owner. The free disk GREEN needs.
     "slots.green_disk_gb": ("num", 0, 10000),
     "slots.sustain_samples": ("int", 1, 10), "slots.cores": ("int", 0, 512),
     "launch_gate.enabled": ("bool", None, None), "launch_gate.max_minutes": ("num", 0, 120),
     "pause_newest_call.enabled": ("bool", None, None), "pause_newest_call.resume_after_green_s": ("num", 10, 3600),
     "pause_newest_call.lsof_timeout_s": ("num", 1, 60),
-    # Default 0 (= no limit); range 0-1440 min; authority: the owner. Never ends a pause during a critical RED.
+    # Default 0 (= no limit); range 0-1440 min; authority: the owner. A pause ends after it only on
+    # slots.sustain_samples clear ticks in a row (every memory reading present, no reason in mmsuper.cap_holds).
     "pause_newest_call.max_minutes": ("num", 0, 1440),
     "banner.enabled": ("bool", None, None),
     "disk.low_gb": ("num", 1, 10000), "disk.recover_gb": ("num", 1, 10000), "disk.trend_hours": ("num", 0.5, 72),

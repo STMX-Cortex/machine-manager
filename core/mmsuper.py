@@ -8,8 +8,10 @@ Modes: observe (settings mode.observe) and the off switch (`mm off`) turn every 
 """
 import collections
 import json
+import hashlib
 import os
 import queue as queue_mod
+import re
 import signal
 import stat
 import subprocess
@@ -361,8 +363,30 @@ class Pauser:
 
 
 def critical(reasons):
-    """A RED reason that pauses the newest call, and during which pause_newest_call.max_minutes never ends a pause."""
+    """A RED reason that pauses the newest call (pause_newest_call.max_minutes never ends a pause during it)."""
     return any(r.startswith(("kernel pressure 4", "swap +", "compressor +", "compressor at ")) for r in reasons)
+
+
+# The other RED memory reasons, as mmdecide.classify builds them: memory is still under pressure, so the cap holds back
+# too, though these never start a pause (review F5).
+CAP_HOLD_PREFIXES = ("kernel memorystatus event", "compressor segments ")
+CAP_HOLD_SWAP = re.compile(r"^swap \S+ of \S+ MB and growing$")
+# The memory readings a tick needs for the cap to count it as clear: each feeds a RED memory reason (review F1).
+CAP_READINGS = ("free_pct", "swap_used_mb", "swap_total_mb", "comp_mb", "pressure", "seg_pct")
+
+
+def cap_holds(mac_state, reasons):
+    """True when pause_newest_call.max_minutes must not end a pause on this tick's state: a critical RED, or a RED
+    with a kernel memorystatus event, swap near its total and growing, or compressor segments over their limit."""
+    return mac_state == "RED" and (critical(reasons) or any(
+        r.startswith(CAP_HOLD_PREFIXES) or CAP_HOLD_SWAP.match(r) for r in reasons))
+
+
+def memory_readings_present(complete, sample):
+    """classify's `complete` and every reading in CAP_READINGS present (a number) in the current sample."""
+    def num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v
+    return bool(complete) and isinstance(sample, dict) and all(num(sample.get(k)) for k in CAP_READINGS)
 
 
 class Supervisor:
@@ -724,7 +748,8 @@ class Supervisor:
                     mmcore.append_line(mmcore.path("state", "errors.log"), mmcore.mask("%s evidence %r" % (mmcore.now_local(now), e)))
 
         # the pause (the launch gate is in the hook)
-        self._gate_and_pause(now, s, mac_state, reasons, actions_on, safe)
+        self._gate_and_pause(now, s, mac_state, reasons, actions_on, safe,
+                             memory_readings_present(complete, win[-1] if win else None))
 
         # files
         active = (mmcore.read_json(store.state_file, {}) or {}).get("active") or {}
@@ -917,7 +942,9 @@ class Supervisor:
         self.state["virtual_slots"] = r["slots"]
         self.log_decision(line)
 
-    def _gate_and_pause(self, now, s, mac_state, reasons, actions_on, safe=None):
+    def _gate_and_pause(self, now, s, mac_state, reasons, actions_on, safe=None, readings_ok=False):
+        """`readings_ok`: this tick has every memory reading (memory_readings_present); without it the tick never
+        counts toward ending a pause at pause_newest_call.max_minutes."""
         gate = self.state.setdefault("gate", {})
         if mac_state == "RED":
             gate.setdefault("red_since", now)
@@ -929,8 +956,7 @@ class Supervisor:
             p = Pauser(self.state)
             if p.st:  # turning pausing off releases what it paused (review F1, 2026-10-20)
                 self.log_decision("%s RESUME pids %s (pausing disabled)" % (mmcore.now_local(now), p.resume("pausing disabled")))
-            self.state.pop("paused_at", None)
-            self.state.pop("paused_call", None)
+            self._drop_pause_time()
             return
         p = Pauser(self.state)
         q = self.cache.get("queue")
@@ -946,6 +972,7 @@ class Supervisor:
             else:
                 got = p.pause(q["busy"], self.queue, s["pause_newest_call.lsof_timeout_s"])
                 if got and got["paused"]:
+                    self._drop_pause_time()
                     self.state["paused_at"] = now  # pause_newest_call.max_minutes counts from here
                     self.state["paused_call"] = got["busy"].get("label") or ""
                     label = mmcore.quoted(got["busy"].get("label") or "")
@@ -974,23 +1001,44 @@ class Supervisor:
         else:
             self.state.pop("green_for_pause", None)
         cap = s.get("pause_newest_call.max_minutes", 0)  # 0: no limit
-        if cap and p.st and now - self.state.setdefault("paused_at", now) >= cap * 60 \
-                and not (mac_state == "RED" and critical(reasons)):
-            # no calm span came in time (the paused call's own memory can hold AMBER): continue it and say so;
-            # never while the reason that pauses still holds
-            call = self.state.get("paused_call") or ""
-            pids = p.resume("max pause time")
-            self.log_decision("%s RESUME pids %s (max %g min paused, state %s)" % (mmcore.now_local(now), pids, cap, mac_state))
-            self.hold("PAUSE_MAX", "PAUSE_MAX", "ATTENTION",
-                      "paused call %s continued after %g min paused with no calm span (pause_newest_call.max_minutes; "
-                      "state %s): pids %s" % (mmcore.quoted(call), cap, mac_state, pids), now + HELD_SELF_S,
-                      command="mm status")
+        if cap and p.st and now - self.state.setdefault("paused_at", now) >= cap * 60:
+            # From the cap time on, count clear ticks: every memory reading present and no RED memory reason that holds
+            # the pause (cap_holds). Any other tick starts the count again (review F1: one tick that only looks calm,
+            # because a reading is missing, never ends a pause).
+            if readings_ok and not cap_holds(mac_state, reasons):
+                self.state["cap_clear_ticks"] = self.state.get("cap_clear_ticks", 0) + 1
+            else:
+                self.state["cap_clear_ticks"] = 0
+            if self.state["cap_clear_ticks"] >= s["slots.sustain_samples"]:
+                self._resume_at_cap(now, cap, mac_state, p)
         if p.st and (mmcore.off_state() or self.dry or safe):
             why = "safe mode" if safe else "off switch"
             self.log_decision("%s RESUME pids %s (%s)" % (mmcore.now_local(now), p.resume(why), why))
         if not p.st:
-            self.state.pop("paused_at", None)
-            self.state.pop("paused_call", None)
+            self._drop_pause_time()
+
+    def _drop_pause_time(self):
+        for k in ("paused_at", "paused_call", "cap_clear_ticks"):
+            self.state.pop(k, None)
+
+    def _resume_at_cap(self, now, cap, mac_state, p):
+        """No calm span came in time (the paused call's own memory can hold AMBER): continue the call and say so.
+        Each capped pause raises its own PAUSE_MAX (keyed by the call and its pause time; review F2)."""
+        call = self.state.get("paused_call") or ""
+        key = "PAUSE_MAX:" + hashlib.sha256(("%s|%r" % (call, self.state.get("paused_at"))).encode(
+            "utf-8", "replace")).hexdigest()[:12]
+        pids = p.resume("max pause time")
+        self.log_decision("%s RESUME pids %s (max %g min paused, state %s)" % (mmcore.now_local(now), pids, cap, mac_state))
+        if pids:
+            text = ("paused call %s continued after %g min paused with no calm span (pause_newest_call.max_minutes; "
+                    "state %s): pids %s" % (mmcore.quoted(call), cap, mac_state, pids))
+        elif p.st:  # the record is still there: the resume itself failed (recovery.log); the next tick tries again
+            text = ("paused call %s reached %g min paused (pause_newest_call.max_minutes; state %s), but the resume "
+                    "failed; it stays paused" % (mmcore.quoted(call), cap, mac_state))
+        else:  # review F3: the call ended while it was stopped; nothing continued
+            text = ("paused call %s was gone at %g min paused (pause_newest_call.max_minutes; state %s): it ended "
+                    "while stopped, no pid to continue" % (mmcore.quoted(call), cap, mac_state))
+        self.hold(key, "PAUSE_MAX", "ATTENTION", text, now + HELD_SELF_S, command="mm status")
 
     def _status(self, now, mac_state, reasons, q, sample, note, active=None, s=None, observe=None, off=None, safe=None):
         """status.json: the machine's status record and the heartbeat, every tick (schemas/status.schema.json)."""

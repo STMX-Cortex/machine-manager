@@ -3,7 +3,7 @@
  "expected": [
   "AMBER",
   [
-   "compressor 99999 MB"
+   "compressor 250000 MB"
   ],
   true
  ],
@@ -12,7 +12,7 @@
   "disk_gb": 100.0,
   "window": [
    {
-    "comp_mb": 99999.0,
+    "comp_mb": 250000.0,
     "free_pct": 80.0,
     "load1": 2.0,
     "load5": 2.0,
@@ -24,7 +24,7 @@
     "t": 1799999940.0
    },
    {
-    "comp_mb": 99999.0,
+    "comp_mb": 250000.0,
     "free_pct": 80.0,
     "load1": 2.0,
     "load5": 2.0,
@@ -39,6 +39,6 @@
  },
  "settings": "base",
  "settings_over": {
-  "slots.red_comp_mb": 100000
+  "slots.red_comp_mb": 0
  }
 }

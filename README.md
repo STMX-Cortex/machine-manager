@@ -93,8 +93,11 @@ setting (`[self]`, `[safe_mode]`, `[heartbeat]`); every decision is a pure funct
    before its SIGSTOP. Every start, safe mode, turning `pause_newest_call.enabled` off, `mm stop`, `mm rollback` and
    the watchdog (when the supervisor is stale over `self.resume_paused_after_s`) send SIGCONT to each recorded pid
    whose start time still matches. A paused call also continues after a long calm (GREEN or STEADY), and after
-   `pause_newest_call.max_minutes` paused (default 0 = no limit), but never on a RED tick with a critical reason
-   (a `RESUME` line with the reason, and `PAUSE_MAX` naming the call).
+   `pause_newest_call.max_minutes` paused (default 0 = no limit). From that time it needs `slots.sustain_samples`
+   clear ticks in a row: every memory reading present (free, swap used and total, compressor, kernel pressure,
+   compressor segments), and no critical reason, kernel memorystatus event, growing swap near its total or
+   compressor segments over their limit. Any other tick starts the count again. It writes a `RESUME` line with the
+   reason, and each capped pause raises its own `PAUSE_MAX` naming the call (or saying the call was gone).
 5. **The watchdog is watched.** Each watchdog run writes `state/watchdog.stamp`; at `self.watchdog_stale_s` the
    supervisor raises `WATCHDOG_STALE` and restarts the watchdog (installed runs only, once per 10 min).
 6. **Mac reboot** (`reboot_check`). At start, a changed `kern.boottime` gives `MAC_REBOOTED`: the uptime, how long the
@@ -141,8 +144,8 @@ sign for RED: kernel pressure at least 2, any swap growth in the last 60 s, or c
 above `slots.red_sys_comp_growth_mb_60s` (default 256 MB). Without a sign, this rule gives AMBER with a
 `no memory sign` reason. The owner can set `slots.red_sys_needs_memory_sign = false` in the data folder's
 `settings.toml` to restore system CPU alone giving RED. Other RED rules still apply independently.
-A compressor over `slots.red_comp_mb` (default 100000 MB = off) is RED `compressor at N MB (near its ceiling)`, a
-critical reason (it pauses the newest call).
+A compressor over `slots.red_comp_mb` (default 0 = off; range 0-100000 MB) is RED `compressor at N MB (near its
+ceiling)`, a critical reason (it pauses the newest call).
 
 GREEN needs load1 strictly below `slots.green_load1_per_core` times the core count (default 0.8, range 0.1-4), as well
 as the load5 band. A slot raise needs `slots.raise_green_minutes` of GREEN while enough calls wait and all slots stay
@@ -230,8 +233,8 @@ cache is large; `TRIM_NEEDED` a trim waits for a drained queue; `TRIM_DONE`, `TR
 `CLEANUP_LIST` candidates for a person; `CODEX95`, `CODEX98`, `CLAUDE98`, `CLAUDE_PROJ`, `FIVE_H` plan usage;
 `CACHE_5M` short prompt-cache writes; `QWAIT` queue calls wait long (one alert: the count and the oldest);
 `HEAD_BLOCK` an exclusive call blocks the queue; `PAUSE_REFUSED` the newest call's slot file is held by a process
-that is not the queue's launcher, or by a read-only lock; `PAUSE_MAX` a paused call continued after
-`pause_newest_call.max_minutes`;
+that is not the queue's launcher, or by a read-only lock; `PAUSE_MAX` a paused call continued (or was gone) after
+`pause_newest_call.max_minutes`, one alert for each capped pause;
 `SLOT_NOT_A_FILE` a queue slot or ticket path is not a regular file; `LINK_SKIPPED` a delete or prune path goes through
 a link; `DELETES_FAILED` a delete rule, the cleanup list or the whole deletes pass failed; `QUEUE_FILE_UNREADABLE`
 queue slot or ticket files cannot be opened or read;

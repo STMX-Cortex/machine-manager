@@ -79,7 +79,8 @@ def classify(window, s, disk_gb=None, kernel_event=False):
     if disk_gb is not None and disk_gb < s["slots.red_disk_gb"]:
         red.append("disk %.0f GB < %g GB" % (disk_gb, s["slots.red_disk_gb"]))
     comp_now = get(cur, "comp_mb")
-    if comp_now is not None and comp_now > s.get("slots.red_comp_mb", 100000):  # default 100000 MB: off
+    red_comp = s.get("slots.red_comp_mb", 0)  # default 0: off
+    if red_comp and comp_now is not None and comp_now > red_comp:
         red.append("compressor at %.0f MB (near its ceiling)" % comp_now)
 
     if pressure is not None and pressure >= 2 and not red:

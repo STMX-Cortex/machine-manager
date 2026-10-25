@@ -3,8 +3,9 @@
 
 1. `names.disk_command` (profile, default ""): DISK_LOW and CLEANUP_LIST name it as their command; without it DISK_LOW
    has no command and CLEANUP_LIST names `mm cleanup`.
-3. `slots.red_comp_mb` (setting, default 100000 = off, range 1-100000): a compressor strictly over it is RED with the
-   reason `compressor at N MB (near its ceiling)`, a critical reason.
+3. `slots.red_comp_mb` (setting, default 0 = off, range 0-100000): a compressor strictly over it is RED with the
+   reason `compressor at N MB (near its ceiling)`, a critical reason (review F4: 0 is off, so no compressor size
+   changes the state at the default).
 4. `slots.green_disk_gb` (setting, default 0 = follow disk.recover_gb, range 0-10000): GREEN needs free disk of at least
    this; it must be 0 or at least `slots.red_disk_gb`.
 
@@ -134,9 +135,31 @@ class DiskCommandSupervisor(Base):
 class RedCompressor(unittest.TestCase):
     def test_default_is_off(self):
         s = base_settings()
-        self.assertEqual(s["slots.red_comp_mb"], 100000)
+        self.assertEqual(s["slots.red_comp_mb"], 0)
         state, reasons, _ = mmdecide.classify(window(comp_mb=99999), s, disk_gb=100)
         self.assertEqual((state, reasons), ("AMBER", ["compressor 99999 MB"]))
+
+    def test_default_keeps_a_steady_large_compressor_amber(self):
+        """Review C1 (F4): base 8043d1d gives AMBER `compressor N MB` for a steady compressor over amber_comp_mb at any
+        size (a Mac with 192-512 GB can hold more than 100000 MB); the defaults keep that, and nothing pauses."""
+        s = base_settings()
+        for comp in (99999, 100000, 100001, 120000, 250000):
+            with self.subTest(comp_mb=comp):
+                state, reasons, complete = mmdecide.classify(window(comp_mb=comp), s, disk_gb=100)
+                self.assertEqual((state, reasons, complete), ("AMBER", ["compressor %d MB" % comp], True))
+                self.assertFalse(mmsuper.critical(reasons))
+
+    def test_zero_is_off_at_any_size(self):
+        s = base_settings(**{"slots.red_comp_mb": 0})
+        self.assertEqual(mmdecide.classify(window(comp_mb=250000), s, disk_gb=100)[:2],
+                         ["AMBER", ["compressor 250000 MB"]])
+
+    def test_the_top_of_the_range_is_a_real_ceiling(self):
+        s = base_settings(**{"slots.red_comp_mb": 100000})
+        self.assertEqual(mmdecide.classify(window(comp_mb=100000), s, disk_gb=100)[:2],
+                         ["AMBER", ["compressor 100000 MB"]])
+        self.assertEqual(mmdecide.classify(window(comp_mb=100001), s, disk_gb=100)[:2],
+                         ["RED", ["compressor at 100001 MB (near its ceiling)"]])
 
     def test_over_the_value_is_red_with_its_reason(self):
         s = base_settings(**{"slots.red_comp_mb": 6000})
@@ -162,9 +185,9 @@ class RedCompressor(unittest.TestCase):
         self.assertFalse(mmsuper.critical(["free 30% < 35%"]))
 
     def test_range(self):
-        for bad in (0, 100001, "6000", True):
+        for bad in (-1, 100001, "6000", True):
             self.assertTrue(mmcore.validate(dict(base_settings(), **{"slots.red_comp_mb": bad})), bad)
-        for good in (1, 6000, 100000):
+        for good in (0, 1, 6000, 100000):
             self.assertEqual(mmcore.validate(dict(base_settings(), **{"slots.red_comp_mb": good})), [], good)
 
 
@@ -242,7 +265,7 @@ class DefaultsChangeNothing(unittest.TestCase):
     def test_new_defaults(self):
         d = mmcore.defaults()
         self.assertEqual((d["slots.red_comp_mb"], d["slots.green_disk_gb"], d["pause_newest_call.max_minutes"]),
-                         (100000, 0, 0))
+                         (0, 0, 0))
         self.assertEqual(mmcore.validate(d), [])
 
     def test_classify_is_the_same_without_the_new_keys(self):

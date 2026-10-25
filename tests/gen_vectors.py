@@ -96,14 +96,14 @@ sys_memory_case("red-sys-memory-sign-disabled", "RED", [SYS_RED],
 sys_memory_case("sys-memory-sign-one-high-sample", "STEADY", ["system CPU not under 25%"], sys_pct=[10.0, 48.0])
 sys_memory_case("red-free-with-sys-no-memory-sign", "RED", ["free 30% < 35%"], free_pct=30.0)
 
-# slots.red_comp_mb (a compressor near its ceiling is a critical RED; default 100000 MB = off) and slots.green_disk_gb
+# slots.red_comp_mb (a compressor near its ceiling is a critical RED; default 0 = off) and slots.green_disk_gb
 # (the free disk GREEN needs; 0 follows disk.recover_gb). Expectations by hand, from the settings' meaning.
 case("classify", "red-compressor-over-ceiling", {"window": series(2, comp_mb=7000.0), "disk_gb": 100.0},
      {"slots.red_comp_mb": 6000}, expected=["RED", ["compressor at 7000 MB (near its ceiling)"], True])
 case("classify", "compressor-at-ceiling-is-not-red", {"window": series(2, comp_mb=6000.0), "disk_gb": 100.0},
      {"slots.red_comp_mb": 6000}, expected=["AMBER", ["compressor 6000 MB"], True])
-case("classify", "compressor-ceiling-default-off", {"window": series(2, comp_mb=99999.0), "disk_gb": 100.0},
-     {"slots.red_comp_mb": 100000}, expected=["AMBER", ["compressor 99999 MB"], True])
+case("classify", "compressor-ceiling-default-off", {"window": series(2, comp_mb=250000.0), "disk_gb": 100.0},
+     {"slots.red_comp_mb": 0}, expected=["AMBER", ["compressor 250000 MB"], True])
 case("classify", "green-disk-own-value-green", {"window": series(3), "disk_gb": 44.0},
      {"slots.green_disk_gb": 30}, expected=["GREEN", ["all readings in the green band"], True])
 case("classify", "steady-green-disk-own-value", {"window": series(3), "disk_gb": 29.9},

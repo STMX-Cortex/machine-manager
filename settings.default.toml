@@ -35,7 +35,7 @@ red_sys_needs_memory_sign = true  # default true; range false|true; authority: t
 red_sys_comp_growth_mb_60s = 256  # MB in 60 s; default 256; range 1-100000 MB; authority: the owner
 red_load1_per_core = 2.0  # x cores
 red_disk_gb = 20  # GB
-red_comp_mb = 100000  # MB; RED "compressor at N MB (near its ceiling)", a critical reason; default 100000 (= off); range 1-100000; authority: the owner
+red_comp_mb = 0  # MB; RED "compressor at N MB (near its ceiling)", a critical reason; 0 = off; default 0; range 0-100000; authority: the owner
 green_disk_gb = 0  # GB free disk GREEN needs; 0 = follow disk.recover_gb; 0 or >= red_disk_gb; default 0; range 0-10000; authority: the owner
 sustain_samples = 2  # samples
 cores = 0  # cores; 0 = the machine's core count
@@ -51,7 +51,9 @@ enabled = false  # bool
 resume_after_green_s = 120  # s
 # The time limit of the lsof that finds the processes holding the newest call's slot file (a failed lsof pauses nothing).
 lsof_timeout_s = 10  # s
-# Continue a paused call after this long even without a calm span, but never on a critical RED tick (RESUME line, PAUSE_MAX).
+# Continue a paused call after this long even without a calm span (RESUME line, PAUSE_MAX), on the
+# slots.sustain_samples-th clear tick in a row from then: every memory reading present, no critical RED reason, no
+# kernel memorystatus event, no growing swap near its total, no compressor segments over their limit.
 max_minutes = 0  # min; 0 = no limit; default 0; range 0-1440; authority: the owner
 
 [disk]
