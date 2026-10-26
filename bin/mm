@@ -23,6 +23,8 @@ CODE = os.path.dirname(HERE)
 sys.path[:0] = [os.path.join(CODE, "core"), os.path.join(CODE, "adapters")]
 import mmcore  # noqa: E402
 
+RESOURCE_JSON_DEPTH_MAX = 128
+
 HELP = """mm - machine-manager. Global: --profile FILE|NAME, --data DIR, --json.
 Agents:
   mm status                 state, slots, memory, disk, alerts (at most 5 lines)
@@ -255,9 +257,23 @@ def cmd_resources(args, as_json, profile):
 
     def load(name):
         try:
-            return mmcore.read_json(mmcore.path(name), None)
+            doc = mmcore.read_json(mmcore.path(name), None)
         except RecursionError:  # nested too deep to parse: no file
             return None
+        # Python versions differ in the nesting their JSON parser accepts. Apply the same limit to both files.
+        stack = [(iter((doc,)), 0)]
+        while stack:
+            values, depth = stack[-1]
+            try:
+                value = next(values)
+            except StopIteration:
+                stack.pop()
+                continue
+            if isinstance(value, (dict, list)):
+                if depth >= RESOURCE_JSON_DEPTH_MAX:
+                    return None
+                stack.append((iter(value.values() if isinstance(value, dict) else value), depth + 1))
+        return doc
     s, now = peek_settings(), time.time()
     st = load("status.json")
     st = st if isinstance(st, dict) else None

@@ -212,6 +212,30 @@ class Verb(Files):
         r = self.mm("resources")
         self.assertEqual((r.returncode, r.stderr, len(r.stdout.splitlines())), (0, "", 1))
 
+    def test_resource_file_depth_limit(self):
+        now = time.time()
+        self.files(now)
+        doc = resources_doc(now, [{"resource": "pool", "id": "nested"}])
+        # The document itself is level 1. Ignore the whole file beyond 128 object or array levels.
+        for depth, count in ((127, 2), (128, 1)):
+            with self.subTest(depth=depth):
+                raw = json.dumps(doc)[:-1] + ', "extra": ' + "[" * depth + "0" + "]" * depth + "}"
+                self.write("resources.json", None, raw=raw)
+                self.assertEqual(len(self.lines()), count)
+                r = self.mm("resources", "--json")
+                self.assertEqual((r.returncode, r.stderr), (0, ""))
+                self.assertEqual(len(no_nan(r.stdout)["resources"]), count)
+
+    def test_deep_status_is_missing(self):
+        now = time.time()
+        doc = status_rec(now)
+        raw = json.dumps(doc)[:-1] + ', "extra": ' + "[" * 128 + "0" + "]" * 128 + "}"
+        self.write("status.json", None, raw=raw)
+        lines = self.lines(rc=3)
+        self.assertEqual(len(lines), 1)
+        self.assertIn('state=UNKNOWN', lines[0])
+        self.assertIn('why="no record time; no status.json"', lines[0])
+
     def test_tick_error_status_is_fresh_unknown(self):
         now = time.time()
         self.files(now, state="UNKNOWN", reasons=["tick error"])

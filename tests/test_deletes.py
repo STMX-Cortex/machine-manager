@@ -65,6 +65,15 @@ class Base(TempData):
         time.sleep(0.3)
         return p
 
+    def fixture_procs(self):
+        """Read real process facts for this test's children; unrelated host builds are outside the fixture."""
+        from mmread import read_ps
+        procs = read_ps()
+        if procs is None:
+            return None
+        pids = {p.pid for p in self.procs}
+        return [p for p in procs if p["pid"] in pids]
+
     def ctx(self, rules, cleanup=(), forbidden=(".records", ".ssh"), protected=()):
         cfg = {"rules": list(rules), "cleanup": list(cleanup), "forbidden_parts": list(forbidden),
                "protected_roots": list(protected)}
@@ -140,8 +149,7 @@ class T14Folders(Base):
     def test_a_live_build_tool_keeps_it(self):
         make(os.path.join(self.tmp, "go-build555"))
         self.named("go")
-        from mmread import read_ps
-        v = self.verbs(self.run_rules([FOLDERS], procs=read_ps))
+        v = self.verbs(self.run_rules([FOLDERS], procs=self.fixture_procs))
         self.assertEqual(v["go-build555"][0], "KEEP")
         self.assertIn("live_tools=", v["go-build555"][1])
         self.assertIn(":go", v["go-build555"][1])
@@ -225,9 +233,8 @@ class T14Other(Base):
         self.assertIn("entries=2", r.lines[0])
         self.assertTrue(r.lines[0].split(" ")[2] == "DELETE")
         make(os.path.join(c, "0b"), files=("old-c",))
-        from mmread import read_ps
         self.named("go")
-        r = self.run_rules([rule], procs=read_ps)
+        r = self.run_rules([rule], procs=self.fixture_procs)
         self.assertEqual(r.lines[0].split(" ")[2], "KEEP")
         self.assertIn("live_tools", r.lines[0])
         self.assertTrue(os.path.exists(os.path.join(c, "0b", "old-c")))
@@ -368,15 +375,19 @@ class T14Trim(Base):
         self.q = self.queue_dir()
         self.c = T14Other.cache(self)
         self.log = os.path.join(self.data, "deletes.log")
+        # Only this test's process can block its fixture cache. Keep the name within Linux ps's 15-byte limit.
+        self.live_name = "mmtrim-" + os.path.basename(self.root)[-8:]
+        self.live = {"names": [self.live_name], "suffixes": [], "path_regexes": []}
 
     def trim(self, wait="1"):
         qa = ad_queue_fifo.Queue(self.profile()["queue"])
         argv = qa.exclusive_argv([sys.executable, "-I", os.path.join(mmtest.BIN, "cachetrim.py"), "--cache", self.c,
                                   "--age", "360", "--wait", wait, "--poll", "0.2", "--log", self.log, "--live",
-                                  json.dumps(LIVE), "--machine", "m1", "--marker-file", "README", "--marker-text", "Go build"])
+                                  json.dumps(self.live), "--machine", "m1", "--marker-file", "README", "--marker-text", "Go build"])
         return subprocess.run(argv, capture_output=True, text=True, timeout=60, env=dict(os.environ, **qa.exclusive_env()))
 
     def test_trim_through_the_queue(self):
+        self.named("go")  # unrelated builds must not affect this fixture's configured guard
         r = self.trim()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(r.stdout.strip(), "trimmed entries=2 bytes=8192")
@@ -389,10 +400,11 @@ class T14Trim(Base):
         self.assertIn("\tX\t", hist, "the trim ran as an exclusive queue call")
 
     def test_live_tool_refuses_the_trim(self):
-        self.named("test2json")
+        self.named(self.live_name)
         r = self.trim()
         self.assertEqual(r.returncode, 3, r.stdout)
         self.assertTrue(r.stdout.startswith("refused live_tools="))
+        self.assertIn(":" + self.live_name, r.stdout)
         self.assertEqual(sorted(os.listdir(os.path.join(self.c, "0a"))), ["old-a", "old-b", "young"])
         self.assertIn("KEEP rule=trim", open(self.log).read())
 
@@ -406,7 +418,7 @@ class T14Trim(Base):
         s = base_settings(**{"trim.drained_minutes": 2})
         prof = self.profile()
         state = {}
-        tr = mmsuper.Trim(state, ad_queue_fifo.Queue(prof["queue"]), dict(prof["trim"], cache=self.c), LIVE, "m1")
+        tr = mmsuper.Trim(state, ad_queue_fifo.Queue(prof["queue"]), dict(prof["trim"], cache=self.c), self.live, "m1")
         t = time.time()
         for i in range(10):  # a waiting call: never drained, so no trim however long
             tr.step(t + i * 60, s, True, False, True, [], self.log)

@@ -128,6 +128,7 @@ resource has no thresholds. Then comes the writer's own `why`. The values still 
 
 A `resources.json` whose `schema_version` is not 1 gives one `resource=file` row (`UNKNOWN`); more than 1000 records
 give the first 999 and one `resource=file` row that counts the rest. Plain floats show exactly (`used_usd=0.04`).
+`mm resources` ignores a status.json or resources.json with more than 128 object or array levels, including the root.
 Outside text (runner names and the like) shows cleaned and quoted as in "Agent-written files", item 6. Exit 0 when the
 machine status is fresh, 3 when status.json is missing or not fresh (the rows are still printed), 2 on a usage error. A
 supervisor that runs code older than `resources.json` writes none: until it restarts, only the machine row shows.
