@@ -629,6 +629,33 @@ timing_case("every-check", {"schedule.tick_s": 15, "other.heartbeat_max_age_s": 
                             "evidence.window_minutes": 5})
 
 
+# Fleet placement keeps the local gate contract and only consumes validated, cached remote candidates.
+FLEET_CTX = {"now": NOW, "wide_kind": "wide", "kinds": {"machine_only": {"other": "machine only"}, "pool": {"go-test": 8}},
+             "machine": {"id": "local", "state": "RED", "reasons": ["fixture"], "queue": None}, "pools": []}
+FLEET_REMOTE = {"id": "remote-a", "state": "GREEN", "eligible": True, "kinds": {"go-test": 8}, "wait_minutes": 0}
+FLEET_ANSWER = {"place": "MACHINE", "candidate": "remote-a", "need_guard": None,
+                "reasons": ["remote machine remote-a: state GREEN, estimated wait 0.0 min",
+                            "fresh remote status; controls remain on that machine"]}
+case("place_fleet", "healthy-remote-relieves-red-local", {"req": {"kind": "go-test", "shards": 1},
+     "ctx": dict(FLEET_CTX, machines=[FLEET_REMOTE])}, expected=FLEET_ANSWER)
+case("place_fleet", "stale-peer-cannot-take-work", {"req": {"kind": "go-test", "shards": 1},
+     "ctx": dict(FLEET_CTX, machines=[dict(FLEET_REMOTE, eligible=False)])},
+     expected={"place": "WAIT", "candidate": None, "need_guard": None,
+               "reasons": ["state RED: fixture", "RED; no pool: "]})
+case("place_fleet", "agent-launch-check-stays-local", {"req": {"kind": "go-test", "agents": 2},
+     "ctx": dict(FLEET_CTX, machines=[FLEET_REMOTE])},
+     expected={"place": "WAIT", "candidate": None, "need_guard": None,
+               "reasons": ["state RED: fixture", "RED: no agent launch now (2 asked)"]})
+case("place_fleet", "kind-must-be-explicitly-supported", {"req": {"kind": "go-test", "shards": 1},
+     "ctx": dict(FLEET_CTX, machines=[dict(FLEET_REMOTE, kinds={"py-suite": 1})])},
+     expected={"place": "WAIT", "candidate": None, "need_guard": None,
+               "reasons": ["state RED: fixture", "RED; no pool: "]})
+case("place_fleet", "local-wins-an-equal-wait", {"req": {"kind": "go-test", "shards": 1},
+     "ctx": dict(FLEET_CTX, machine=dict(FLEET_CTX["machine"], state="GREEN", queue={"slots": 2, "busy": [], "tickets": []}),
+                 machines=[FLEET_REMOTE])}, expected={"place": "MACHINE", "candidate": "local", "need_guard": None,
+                 "reasons": ["state GREEN: fixture", "expected wait on local: 0 min <= 20"]})
+
+
 def write_settings():
     """vectors/_settings/base.json from the code's settings table (mmtest.base_settings); test_vectors checks it."""
     os.makedirs(os.path.join(VEC, "_settings"), exist_ok=True)

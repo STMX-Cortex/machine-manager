@@ -10,8 +10,8 @@ Keep the live supervisor on the machine it watches. Run the final macOS checks o
 3. Read [PORTING.md](PORTING.md) for the decision vectors, schemas, and contracts.
 4. Ask the owner to select the next feature. The roadmap does not authorize all its work at once.
 
-Multiple GitHub pools, general `command`/`static` pool adapters, and the resource record contract are implemented.
-The roadmap covers multiple machines and monitoring tools. Collection work remains.
+Multiple GitHub pools, general `command`/`static` adapters, and read-only fleet collection/placement are implemented.
+Live systemd and peer-host validation still require the owner's target machines. Monitoring integration remains.
 Use the README roadmap as the source when its details change.
 
 ## Tools

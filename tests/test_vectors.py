@@ -152,7 +152,7 @@ class Schemas(unittest.TestCase):
 
     def test_schema_files_load_and_settings_schema_matches_code(self):
         names = sorted(f[:-12] for f in os.listdir(mmschema.SCHEMAS) if f.endswith(".schema.json"))
-        self.assertEqual(names, ["alert", "delete-line", "off", "override", "placement", "placement-request", "pool-read", "profile",
+        self.assertEqual(names, ["alert", "delete-line", "fleet", "off", "override", "placement", "placement-request", "pool-read", "profile",
                                  "reading", "resource", "settings", "status"])
         self.assertEqual(mmschema.load("settings"), mmcore.settings_json_schema(), "regenerate schemas/settings.schema.json")
         self.assertEqual(mmschema.validate(mmcore.defaults(), mmschema.load("settings")), [])

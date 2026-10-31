@@ -1,0 +1,53 @@
+{
+ "case": "kind-must-be-explicitly-supported",
+ "expected": {
+  "candidate": null,
+  "need_guard": null,
+  "place": "WAIT",
+  "reasons": [
+   "state RED: fixture",
+   "RED; no pool: "
+  ]
+ },
+ "function": "place_fleet",
+ "input": {
+  "ctx": {
+   "kinds": {
+    "machine_only": {
+     "other": "machine only"
+    },
+    "pool": {
+     "go-test": 8
+    }
+   },
+   "machine": {
+    "id": "local",
+    "queue": null,
+    "reasons": [
+     "fixture"
+    ],
+    "state": "RED"
+   },
+   "machines": [
+    {
+     "eligible": true,
+     "id": "remote-a",
+     "kinds": {
+      "py-suite": 1
+     },
+     "state": "GREEN",
+     "wait_minutes": 0
+    }
+   ],
+   "now": 1800000000.0,
+   "pools": [],
+   "wide_kind": "wide"
+  },
+  "req": {
+   "kind": "go-test",
+   "shards": 1
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

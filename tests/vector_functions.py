@@ -52,6 +52,7 @@ FUNCTIONS = {
                                                                                          set(i.get("active", [])))),
     "delete_guard": lambda i, s: mmdecide.delete_guard(i),
     "place": lambda i, s: mmdecide.place(i["req"], i["ctx"], s),
+    "place_fleet": lambda i, s: mmdecide.place_fleet(i["req"], i["ctx"], s),
     "drill_stop": lambda i, s: mmdecide.drill_stop(i, s),
     "expected_wait": lambda i, s: mmdecide.expected_wait(i["q"], i["medians"], i["default"], i["now"]),
     "replay": lambda i, s: mmreplay.replay(i["samples"], i["start_slots"], s, i.get("kernel_times", [])),

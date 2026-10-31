@@ -1,0 +1,53 @@
+{
+ "case": "agent-launch-check-stays-local",
+ "expected": {
+  "candidate": null,
+  "need_guard": null,
+  "place": "WAIT",
+  "reasons": [
+   "state RED: fixture",
+   "RED: no agent launch now (2 asked)"
+  ]
+ },
+ "function": "place_fleet",
+ "input": {
+  "ctx": {
+   "kinds": {
+    "machine_only": {
+     "other": "machine only"
+    },
+    "pool": {
+     "go-test": 8
+    }
+   },
+   "machine": {
+    "id": "local",
+    "queue": null,
+    "reasons": [
+     "fixture"
+    ],
+    "state": "RED"
+   },
+   "machines": [
+    {
+     "eligible": true,
+     "id": "remote-a",
+     "kinds": {
+      "go-test": 8
+     },
+     "state": "GREEN",
+     "wait_minutes": 0
+    }
+   ],
+   "now": 1800000000.0,
+   "pools": [],
+   "wide_kind": "wide"
+  },
+  "req": {
+   "agents": 2,
+   "kind": "go-test"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}
