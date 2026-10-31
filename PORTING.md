@@ -103,7 +103,9 @@ Resource record caps are reader limits, not validity rules (a longer list or tex
 
 1. Readings never block a tick for long: every outside command has a time limit.
    Generic command readers also have byte and depth bounds. They run in dedicated child sessions with a known
-   leader kept unreaped until cleanup. Stop, failure and completion terminate only their registered owned group;
+   leader kept alive until cleanup. The command exit status travels through a private descriptor closed in the
+   command itself, so killing the leader cannot overwrite the result. Stop, failure and completion terminate only
+   their registered owned group;
    this command-lifecycle cleanup does not change the target checks or signal whitelist for queue pause/resume.
 2. Mask secrets before anything reaches an alert, evidence, status or output (`mask` vectors). Paths are kept: the
    long-random-word rule never cuts into a word that starts with `/`, `~/`, `./` or `../`. A value is masked before

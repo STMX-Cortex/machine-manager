@@ -58,6 +58,9 @@ The workflow uses the test fixtures and does not install a persistent supervisor
 These hosted runner checks cover platform compatibility. Real systemd user service
 recovery and collection/placement between the owner's machines still need target-host
 validation before deployment.
+Hosted macOS kernels may omit compressor segment sysctls. The live suite reports that
+capability check as a skip only when `sysctl` confirms an unknown key; the remaining
+readings still run. The supervisor keeps missing readings unknown and retains its guards.
 
 ## Owner steps
 
