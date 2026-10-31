@@ -2,6 +2,12 @@
 
 `mm` watches this machine and its job queue. Ask it before heavy work; read its alerts; never fight it.
 
+## Cloud development
+
+Read [CLOUD.md](CLOUD.md) for setup, test commands, and the Mac checks that remain.
+An isolated Cloud checkout has no live Mac supervisor. Do not copy its profile or runtime data.
+Use the test fixtures. Do not install a supervisor to run the tests.
+
 ## Commands
 
 | Command | Use |

@@ -447,6 +447,8 @@ you add any resource with a profile entry, and a new kind of resource needs one 
 
 ## Tests
 
+For Codex Cloud setup and the checks that still need a Mac, see [CLOUD.md](CLOUD.md).
+
 ```sh
 python3 -I tests/run_tests.py            # every group; one result file per group in tests/results/
 python3 -I tests/run_vectors.py          # the language-neutral vectors only
