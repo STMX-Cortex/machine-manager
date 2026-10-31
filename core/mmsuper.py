@@ -907,7 +907,7 @@ class Supervisor:
         if pool is None:
             return False
         w = mmcore.read_json(pool.watch_file(), {}) or {}
-        if any(not v.get("done_at") for v in w.values()):
+        if isinstance(w, dict) and any(isinstance(v, dict) and not v.get("done_at") for v in w.values()):
             return self.due("gh_watch:" + pool.id if pool.scoped else "gh_watch", s["github.watch_interval_s"], now)
         return False
 

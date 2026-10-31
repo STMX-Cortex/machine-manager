@@ -119,6 +119,44 @@ class Pools(TempData):
         self.assertFalse(os.path.exists(ad_ci_github.watch_file()))
         self.assertEqual(mmcore.read_json(first.watch_file())["123"]["note"], "first")
 
+    def test_malformed_watch_state_cannot_break_other_pool_or_supervisor(self):
+        first, second = self.adapters()
+        mmcore.write_atomic(first.watch_file(), json.dumps({"123": "broken", "456": {"done_at": "broken"}}))
+        ad_ci_github.watch_add(789, "second", self.now, second.id)
+        with mock.patch.object(mmread, "disk_free_gb", return_value=500):
+            sup = mmsuper.Supervisor(self.profile_pools(), kernel=False, sizes=False, slow_jobs=False,
+                                     clock=lambda: self.now, sampler=calm, check_readings=False)
+            self.assertFalse(sup._watch_pending(self.now, self.s(), first))
+            self.assertTrue(sup._watch_pending(self.now, self.s(), second))
+            sup.tick()
+
+        def read(cfg, s, now, watch):
+            self.assertEqual(watch, {"456": {"done_at": None}})
+            return dict(reading(now), watched=watch)
+
+        with mock.patch.object(ad_ci_github, "read_all", read):
+            result = first.job(self.s(), self.now)
+        self.assertIn("watched", result["errors"])
+        self.assertEqual(mmcore.read_json(first.watch_file()), {"456": {"done_at": None}})
+        self.assertEqual(mmcore.read_json(second.watch_file())["789"]["note"], "second")
+
+    def test_watch_metadata_added_during_read_survives_status_update(self):
+        pool = self.adapters()[0]
+        ad_ci_github.watch_add(123, "old note", self.now, pool.id)
+
+        def read(cfg, s, now, watch):
+            ad_ci_github.watch_add(123, "new note", now + 1, pool.id)
+            ad_ci_github.watch_add(456, "new run", now + 1, pool.id)
+            watch["123"].update(status="completed", conclusion="success", done_at=now)
+            return dict(reading(now), watched=watch)
+
+        with mock.patch.object(ad_ci_github, "read_all", read):
+            pool.job(self.s(), self.now)
+        watch = mmcore.read_json(pool.watch_file())
+        self.assertEqual((watch["123"]["note"], watch["123"]["added"]), ("new note", self.now + 1))
+        self.assertEqual(watch["123"]["status"], "completed")
+        self.assertEqual(watch["456"]["note"], "new run")
+
     def test_placement_tries_next_guard_and_prints_only_selected_pool_commands(self):
         pools = self.adapters()
         for p in pools:
@@ -185,6 +223,40 @@ class Pools(TempData):
         self.assertIn("POOL:one:SOURCE_STALE:gh", active)
         self.assertNotIn("POOL:two:SOURCE_STALE:gh", active)
         self.assertEqual(mmcore.read_json(mmcore.path("pools", "two.json"))["state"], "GREEN")
+
+    def test_malformed_snapshot_does_not_stop_healthy_pool_or_machine_status(self):
+        profile = self.profile_pools()
+        first, second = self.adapters()
+        invalid = [dict(reading(self.now), time="broken"), dict(reading(self.now), time=float("inf")),
+                   dict(reading(self.now), time=10**400), dict(reading(self.now), time=True),
+                   dict(reading(self.now), billing={"minutes": "broken", "gross": 0}),
+                   dict(reading(self.now), runs={"failed_1h": ["broken"]}),
+                   dict(reading(self.now), errors={"billing": {"unexpected": "object"}}),
+                   dict(reading(self.now), watched={"123": {"done_at": "broken"}})]
+        for data in invalid:
+            with self.subTest(data=data), mock.patch.object(mmread, "disk_free_gb", return_value=500):
+                mmcore.write_atomic(first.cache_file(), json.dumps(data))
+                self.write_read(second)
+                sup = mmsuper.Supervisor(profile, kernel=False, sizes=False, slow_jobs=False, clock=lambda: self.now,
+                                         sampler=calm, check_readings=False)
+                sup.started -= 7200
+                sup.tick()
+                self.assertEqual(mmcore.read_json(mmcore.path("pools", "one.json"))["state"], "UNKNOWN")
+                self.assertEqual(mmcore.read_json(mmcore.path("pools", "two.json"))["state"], "GREEN")
+                self.assertEqual(mmcore.read_json(mmcore.path("status.json"))["heartbeat"]["tick"], 1)
+                active = mmcore.read_json(mmcore.path("alerts-state.json"))["active"]
+                self.assertIn("POOL:one:SOURCE_STALE:gh", active)
+                self.assertNotIn("POOL:two:SOURCE_STALE:gh", active)
+
+    def test_malformed_billing_cache_does_not_block_placement_on_other_pool(self):
+        pools = self.adapters()
+        self.write_read(pools[1])
+        mmcore.write_atomic(pools[0].cache_file(), json.dumps(dict(reading(self.now), time="broken")))
+        self.status()
+        with mock.patch.object(ad_ci_github, "gh_run", return_value=(1, "unavailable")), \
+                mock.patch.object(ad_ci_github.Pool, "guard", return_value=(0, "fits")):
+            rec = mmplace.place({"kind": "go-test", "shards": 1}, self.s(), self.profile_pools(), pool=pools, now=self.now)
+        self.assertEqual((rec["place"], rec["candidate"]), ("POOL", "two"))
 
     def test_failed_worker_does_not_discard_successful_other_pool_read(self):
         def job(pool, settings, now):
