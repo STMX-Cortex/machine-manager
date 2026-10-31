@@ -931,11 +931,22 @@ class R8Never(unittest.TestCase):
                     yield p, open(p).read()
 
     def test_no_reboot_shutdown_or_other_signal(self):
-        cmd = re.compile(r"""["'](?:/sbin/|/usr/sbin/)?(?:reboot|shutdown|halt)["' ]|killpg|SIGKILL""")
+        cmd = re.compile(r"""["'](?:/sbin/|/usr/sbin/)?(?:reboot|shutdown|halt)["' ]""")
         for p, text in self.sources():
             for n, line in enumerate(text.splitlines(), 1):
                 self.assertIsNone(cmd.search(line), "%s:%d: %s" % (p, n, line.strip()))
+                if "killpg" in line or "SIGKILL" in line:
+                    self.assertEqual(os.path.basename(p), "mmread.py")
+                    self.assertEqual(line.strip(), "os.killpg(p.pid, signal.SIGKILL)")
             for node in ast.walk(ast.parse(text)):
+                if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "killpg":
+                    self.assertEqual(os.path.basename(p), "mmread.py")
+                    tree = ast.parse(text)
+                    helper = next(f for f in tree.body if isinstance(f, ast.FunctionDef) and f.name == "_kill_owned_group")
+                    self.assertLess(helper.lineno, node.lineno)
+                    self.assertLessEqual(node.lineno, helper.end_lineno)
+                    self.assertTrue(any(isinstance(x, ast.If) and ast.unparse(x.test) == "p not in _LIVE_GROUPS" and
+                                        any(isinstance(y, ast.Return) for y in x.body) for x in ast.walk(helper)))
                 if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "kill" and \
                         getattr(node.func.value, "id", None) == "os":
                     self.assertIn(ast.unparse(node.args[1]), {"0", "signal.SIGSTOP", "signal.SIGCONT"},

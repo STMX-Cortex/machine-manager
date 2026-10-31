@@ -355,6 +355,29 @@ def place(req, ctx, s):
     no_all = []
     for p in ctx.get("pools", []):
         shards = req.get("shards", 1)
+        if p.get("generic"):
+            no = []
+            if isinstance(shards, bool) or not isinstance(shards, int) or shards < 1:
+                no_all.append("%s: shards must be a positive integer" % p["id"])
+                continue
+            if shards > kinds["pool"][kind]:
+                no_all.append("%s: %d shards > %d" % (p["id"], shards, kinds["pool"][kind]))
+                continue
+            worst = p["plan_cost"] + shards * p["job_cost"]
+            if p.get("capacity_left") is None:
+                no.append("capacity left unknown (%s)" % p.get("source"))
+            elif p["capacity_left"] - worst <= p["reserve"]:
+                no.append("%s left %g - worst case %g <= reserve %g" %
+                          (p["unit"], p["capacity_left"], worst, p["reserve"]))
+            if p.get("stop_active"):
+                no.append("GUARD_STOP is active")
+            if p.get("guard_why"):
+                no.append(p["guard_why"])
+            if no:
+                no_all.append("%s: %s" % (p["id"], "; ".join(no)))
+                continue
+            return _ans("POOL", p["id"], out + [wtxt, "%s: %g %s left (%s), worst case %g, reserve %g" % (
+                p["id"], p["capacity_left"], p["unit"], p.get("source"), worst, p["reserve"])])
         worst = p["plan_minutes"] + shards * p["job_minutes"]
         reserve = p.get("reserve_minutes", s["github.reserve_minutes"])
         no = []
