@@ -47,6 +47,18 @@ Test service commands use fixtures. They do not authorize commands against a rea
 The suite writes one report per group in `tests/results/`. Git ignores these reports.
 Copy useful reports into the task result before its saved state expires.
 
+## GitHub Actions
+
+The `Tests` workflow runs the full suite and decision vectors for every pull request
+and push to `main`, on Ubuntu 24.04 and macOS 15 with Python 3.11 and 3.14.
+Each matrix job runs independently, reports failures and skip reasons in its job summary,
+and uploads `tests/results/` as an artifact for 14 days, including on test failure.
+The workflow uses the test fixtures and does not install a persistent supervisor.
+
+These hosted runner checks cover platform compatibility. Real systemd user service
+recovery and collection/placement between the owner's machines still need target-host
+validation before deployment.
+
 ## Owner steps
 
 1. Commit and push these instructions before Cloud needs to read them from GitHub.
