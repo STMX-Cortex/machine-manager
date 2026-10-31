@@ -189,6 +189,24 @@ class GenericPools(TempData):
         self.assertIn("timed out", why)
         self.assertLess(time.monotonic()-started, 0.5)
 
+    def test_command_status_survives_group_cleanup_and_early_stdout_close(self):
+        for rc in (0, 7):
+            with self.subTest(rc=rc):
+                code = "import os,sys,time; print('done',flush=True); os.close(1); time.sleep(.05); sys.exit(%d)" % rc
+                real_cleanup = mmread._kill_owned_group
+                cleaned = []
+
+                def cleanup(p):
+                    result = real_cleanup(p)
+                    if result:
+                        cleaned.append(p.wait(timeout=1))
+                    return result
+
+                with mock.patch.object(mmread, "_kill_owned_group", side_effect=cleanup):
+                    result = mmread.run_bounded([sys.executable, "-I", "-c", code])
+                self.assertEqual(result, (rc, b'done\n', None))
+                self.assertEqual(cleaned, [-9], "cleanup kills the reserved leader after the command completes")
+
     def test_bounded_reader_is_registered_for_supervisor_stop(self):
         marker = Path(self.root) / "reader-started"
         code = "import pathlib,time;pathlib.Path(" + repr(str(marker)) + ").write_text('ready');time.sleep(10)"

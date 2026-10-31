@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        python: ['3.11', '3.14']
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install Linux tools
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v git || ! command -v ps || ! command -v lsof; then
+            sudo apt-get update
+            sudo apt-get install --yes git procps lsof
+          fi
+
+      - name: Record environment and check tools
+        run: |
+          mkdir -p tests/results
+          {
+            git rev-parse HEAD
+            python --version
+            python -I -c 'import platform; print(platform.platform())'
+            /usr/bin/git --version
+            command -v ps
+            command -v lsof
+          } | tee tests/results/environment.txt
+
+      - name: Run full test suite
+        env:
+          MM_TEST_TMP: ${{ runner.temp }}/mm-tests
+        run: python -u -I tests/run_tests.py | tee tests/results/suite.log
+
+      - name: Run decision vectors
+        if: ${{ !cancelled() }}
+        run: python -I tests/run_vectors.py | tee tests/results/vectors.log
+
+      - name: Summarize results and skips
+        if: ${{ !cancelled() }}
+        run: |
+          python -I - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          from pathlib import Path
+
+          print('```text')
+          for path in sorted(Path('tests/results').glob('*.txt')):
+              lines = path.read_text().splitlines()
+              if path.name == 'environment.txt':
+                  print('\n'.join(lines))
+              elif lines and ' FAIL:' in lines[0]:
+                  print('\n'.join(lines))
+              elif lines:
+                  print(lines[0])
+                  for line in lines[1:]:
+                      if '... skipped ' in line or line.startswith(('FAIL:', 'ERROR:')):
+                          print(line)
+          for name in ('suite.log', 'vectors.log'):
+              path = Path('tests/results') / name
+              if path.exists() and (lines := path.read_text().splitlines()):
+                  print(lines[-1])
+          print('```')
+          PY
+
+      - name: Upload test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: test-reports-${{ matrix.os }}-python-${{ matrix.python }}
+          path: tests/results/
+          if-no-files-found: warn
+          retention-days: 14
