@@ -32,12 +32,12 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python }}
 
@@ -64,7 +64,7 @@ jobs:
       - name: Run full test suite
         env:
           MM_TEST_TMP: ${{ runner.temp }}/mm-tests
-        run: python -I tests/run_tests.py | tee tests/results/suite.log
+        run: python -u -I tests/run_tests.py | tee tests/results/suite.log
 
       - name: Run decision vectors
         if: ${{ !cancelled() }}
@@ -73,13 +73,15 @@ jobs:
       - name: Summarize results and skips
         if: ${{ !cancelled() }}
         run: |
-          python -I - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          python -I - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           from pathlib import Path
 
           print('```text')
           for path in sorted(Path('tests/results').glob('*.txt')):
               lines = path.read_text().splitlines()
               if path.name == 'environment.txt':
+                  print('\n'.join(lines))
+              elif lines and ' FAIL:' in lines[0]:
                   print('\n'.join(lines))
               elif lines:
                   print(lines[0])
@@ -95,7 +97,7 @@ jobs:
 
       - name: Upload test reports
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: test-reports-${{ matrix.os }}-python-${{ matrix.python }}
           path: tests/results/
