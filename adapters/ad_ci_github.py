@@ -199,17 +199,22 @@ def read_all(cfg, s, now, watch):
 
 # ------------------------------------------------------------------------------------------- gh-watch
 
-def watch_file():
+def watch_file(pool_id=None):
+    if pool_id is not None:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", pool_id):
+            raise ValueError("invalid pool id")
+        return mmcore.path("state", "pools", pool_id, "watch.json")
     return mmcore.path("state", "gh-watch.json")
 
 
-def watch_add(run_id, note, now):
+def watch_add(run_id, note, now, pool_id=None):
     if not re.fullmatch(r"[0-9]{1,20}", str(run_id)):
         raise ValueError("a run id is digits only")
-    with mmcore.Locked(mmcore.path("state", "gh-watch.lock")):
-        w = mmcore.read_json(watch_file(), {}) or {}
+    file = watch_file(pool_id)
+    with mmcore.Locked(file + ".lock" if pool_id else mmcore.path("state", "gh-watch.lock")):
+        w = mmcore.read_json(file, {}) or {}
         w[str(run_id)] = {"added": now, "note": note[:200], "status": None, "conclusion": None, "done_at": None}
-        mmcore.write_atomic(watch_file(), json.dumps(w, sort_keys=True))
+        mmcore.write_atomic(file, json.dumps(w, sort_keys=True))
 
 
 def poll_watched(watch, now, repo):
@@ -234,15 +239,16 @@ def poll_watched(watch, now, repo):
     return watch
 
 
-def save_watch(watch):
-    with mmcore.Locked(mmcore.path("state", "gh-watch.lock")):
-        cur = mmcore.read_json(watch_file(), {}) or {}
+def save_watch(watch, pool_id=None):
+    file = watch_file(pool_id)
+    with mmcore.Locked(file + ".lock" if pool_id else mmcore.path("state", "gh-watch.lock")):
+        cur = mmcore.read_json(file, {}) or {}
         for rid, w in watch.items():
             if rid in cur:  # keep runs added meanwhile; update the ones read
                 cur[rid].update(w)
         # forget runs done more than a day ago
         cur = {k: v for k, v in cur.items() if not v.get("done_at") or time.time() - v["done_at"] < 86400}
-        mmcore.write_atomic(watch_file(), json.dumps(cur, sort_keys=True))
+        mmcore.write_atomic(file, json.dumps(cur, sort_keys=True))
 
 
 # ------------------------------------------------------------------------------------------- alerts
@@ -397,28 +403,44 @@ class Pool:
     def __init__(self, cfg):
         self.cfg = cfg
         self.id = cfg["pool_id"]
+        self.scoped = bool(cfg.get("_multi_pool"))
+        self.prefix = "POOL:%s:" % self.id if self.scoped else ""
+
+    def settings(self, s):
+        """Each pool inherits global thresholds, with its own capacity and reserve when configured."""
+        return dict(s, **{"github." + k: self.cfg[k] for k in ("reserve_minutes", "included_minutes") if k in self.cfg})
+
+    def cache_file(self):
+        return mmcore.path("state", "pools", self.id, "github.json") if self.scoped else mmcore.path("state", "github.json")
+
+    def watch_file(self):
+        return watch_file(self.id if self.scoped else None)
 
     def read(self, s, now, watch):
-        return read_all(self.cfg, s, now, watch)
+        return read_all(self.cfg, self.settings(s), now, watch)
 
     def conditions(self, gh, s, now, mk, owner):
-        return conditions(gh, s, now, mk, owner)
+        found = conditions(gh, self.settings(s), now, mk, owner)
+        if self.scoped:
+            found = [dict(c, key=self.prefix + c["key"], text="pool %s: %s" % (self.id, c["text"])) for c in found]
+        return found
 
     def good_keys(self, gh):
-        return good_keys(gh)
+        return [self.prefix + key for key in good_keys(gh)]
 
     def owns(self, key):
-        return owns(key)
+        return key.startswith(self.prefix) and owns(key[len(self.prefix):])
 
     def job(self, s, now):
         """One full read in a worker thread: the watched runs too; writes state/github.json."""
-        watch = mmcore.read_json(watch_file(), {}) or {}
+        watch = mmcore.read_json(self.watch_file(), {}) or {}
         res = read_all(self.cfg, s, now, watch)
-        save_watch(res.get("watched") or {})
-        mmcore.write_atomic(mmcore.path("state", "github.json"), json.dumps(res, sort_keys=True))
+        save_watch(res.get("watched") or {}, self.id if self.scoped else None)
+        mmcore.write_atomic(self.cache_file(), json.dumps(res, sort_keys=True))
         return res
 
     def status(self, gh, s, now, alerts=()):
+        s = self.settings(s)
         st, why = pool_state(gh, s, now)
         b = (gh or {}).get("billing") or {}
         r = (gh or {}).get("runs") or {}
@@ -429,10 +451,11 @@ class Pool:
                              "alerts": list(alerts), "read_time": (gh or {}).get("time")}, mid=self.id)
 
     def resources(self, gh, s, now):
-        return pool_resources(gh, s, now, self.id)
+        return pool_resources(gh, self.settings(s), now, self.id)
 
     def minutes_left(self, s, now):
-        gh = mmcore.read_json(mmcore.path("state", "github.json"), None)
+        s = self.settings(s)
+        gh = mmcore.read_json(self.cache_file(), None)
         if isinstance(gh, dict) and gh.get("billing") and now - gh.get("time", 0) < s["github.stale_minutes"] * 60:
             return s["github.included_minutes"] - gh["billing"]["minutes"], "the supervisor's read"
         rc, out = gh_run(["api", self.cfg["billing_path"]])

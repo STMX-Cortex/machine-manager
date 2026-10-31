@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The platform layer (core/mmplat.py) and the Linux path in its reduced form, tested on any machine.
+"""The platform layer (core/mmplat.py) and Linux backend, with fixture commands and temporary data folders.
 
-1. The choice: MM_PLATFORM, sys.platform, the data folder, the E_PLATFORM lines.
+1. The choice: MM_PLATFORM, sys.platform, the data folder and the common command surface.
 2. The Linux backend's pure parsers on fixture text (/proc/stat, /proc/<pid>/cmdline), and that it loads no ctypes.
-3. Every module loads with MM_PLATFORM=linux, and `mm` runs there: the service verbs and the drill refuse with
-   E_PLATFORM and never run launchctl, `mm status` without status.json, `mm run --dry-run` writes status.json, `mm check`
-   names the platform and fails on no LaunchAgent check, the watchdog restarts nothing.
+3. Every module loads with MM_PLATFORM=linux without macOS bindings. Linux commands never run launchctl;
+   dry runs write real Linux readings, and check skips LaunchAgent files. Linux-specific memory, process and
+   systemd lifecycle proofs also live in test_linux.py.
 4. Fail closed: with no lsof or no ps nothing is deleted, trimmed or paused (on every platform).
 Every fixture lives in the test's own temporary folder; the only processes signalled are ones the test started."""
 import contextlib
@@ -71,9 +71,7 @@ class Choice(unittest.TestCase):
             self.assertIsNone(mmplat.refusal("install"))
         with mock.patch.object(mmplat, "DARWIN", False), mock.patch.object(mmplat, "PLATFORM", "linux"):
             for verb in ("install", "rollback", "stop", "start", "restart", "drill"):
-                line = mmplat.refusal(verb)
-                self.assertTrue(line.startswith("E_PLATFORM mm %s is not built for linux yet; fix: " % verb), line)
-                self.assertEqual(len(line.splitlines()), 1)
+                self.assertIsNone(mmplat.refusal(verb), verb)
             for verb in ("run", "status", "check", "watchdog", "hook", "place"):
                 self.assertIsNone(mmplat.refusal(verb), verb)
 
@@ -108,9 +106,10 @@ class LinuxParsers(unittest.TestCase):
         self.assertIsNone(mmplat_linux.parse_cmdline(None))
 
     def test_unknown_readings_and_no_macos_symbols(self):
-        self.assertEqual(set(mmplat_linux.memory_readings().values()), {None})
+        self.assertIsNone(mmplat_linux.memory_readings()["comp_mb"])
         self.assertIsNone(mmplat_linux.sysctl_int("hw.ncpu"))
-        self.assertIsNone(mmplat_linux.swapusage())
+        with mock.patch.object(mmplat_linux, "_read", return_value=None):
+            self.assertIsNone(mmplat_linux.swapusage())
         self.assertIsNone(mmplat_linux.vm_stats())
         self.assertGreaterEqual(mmplat_linux.CORES, 1)
         src = fixture(os.path.join(os.pardir, os.pardir, "core", "mmplat_linux.py"))
@@ -150,8 +149,7 @@ class LinuxImports(unittest.TestCase):
                 "assert mmread.plat.__name__ == 'mmplat_linux'\n"
                 "assert 'ctypes' not in sys.modules and 'mmplat_darwin' not in sys.modules, 'a macOS binding loaded'\n"
                 "s, _ = mmread.memory_sample(0)\n"
-                "assert all(s[k] is None for k in ('free_pct', 'swap_used_mb', 'swap_total_mb', 'comp_mb', 'pressure', "
-                "'seg_pct')), s\n"
+                "assert s['linux'] == 1 and s['comp_mb'] is None and s['seg_pct'] is None, s\n"
                 "assert mmread.command_readings() == {} and mmread.check_readings()[0] == []\n"
                 "print('ok', len(%r))\n" % MODULES)
         r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=60,
@@ -180,13 +178,13 @@ class LinuxCli(TempData):
     def assert_no_launchctl(self):
         self.assertFalse(os.path.exists(self.calls), "launchctl ran on linux")
 
-    def test_service_verbs_and_the_drill_refuse(self):
-        for args in (["install"], ["rollback"], ["stop"], ["start"], ["restart"], ["drill", "memory"]):
+    def test_service_verbs_use_systemd_and_drill_keeps_its_guards(self):
+        for args in (["install"], ["stop"], ["start"], ["rollback"]):
             r = self.linux(*args)
-            lines = r.stdout.strip().splitlines()
-            self.assertEqual(r.returncode, 2, (args, r.stdout, r.stderr))
-            self.assertEqual(len(lines), 1, lines)
-            self.assertTrue(lines[0].startswith("E_PLATFORM mm %s is not built for linux yet; fix: " % args[0]), lines)
+            self.assertEqual(r.returncode, 0, (args, r.stdout, r.stderr))
+        r = self.linux("drill", "memory")
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertTrue(r.stdout.startswith("E_DRILL"), r.stdout)
         self.assert_no_launchctl()
         self.assertFalse(os.path.exists(os.path.join(self.root, "home", "Library")), "no LaunchAgents folder")
         self.assertFalse(os.path.exists(os.path.join(self.root, "base", "install.json")))
@@ -217,7 +215,7 @@ class LinuxCli(TempData):
         self.assertEqual(st["mode"], "dry")
         self.assertEqual(st["heartbeat"]["tick"], 2)
         self.assertIn(st["state"], ("UNKNOWN", "GREEN", "STEADY", "AMBER", "RED"))
-        for k in ("free_pct", "swap_used_mb", "swap_total_mb", "comp_mb", "pressure"):
+        for k in ("comp_mb",):
             self.assertIsNone(st["readings"][k], k)
         self.assertEqual(st["sampler"], "fast", "no fallback sampler on linux")
         active = (mmcore.read_json(os.path.join(self.data, "alerts-state.json"), {}) or {}).get("active") or {}
@@ -230,7 +228,7 @@ class LinuxCli(TempData):
         self.assertEqual((ctl.get("readings_check") or {}).get("problems"), [])
         r = self.linux("status")
         self.assertEqual(r.returncode, 0, r.stdout)
-        self.assertIn("free_pct=none", r.stdout)
+        self.assertIn("free_pct=", r.stdout)
         self.assert_no_launchctl()
 
     def test_check_names_the_platform(self):
@@ -242,7 +240,7 @@ class LinuxCli(TempData):
             plistlib.dump({"Label": "x", "ExitTimeOut": 5, "EnvironmentVariables": {"PATH": "/nonexistent"}}, f)
         r = self.linux("check")
         out = r.stdout.strip().splitlines()
-        self.assertTrue(any(l.startswith("W_PLATFORM linux runs in a reduced form") for l in out), out)
+        self.assertFalse(any(l.startswith("W_PLATFORM linux runs in a reduced form") for l in out), out)
         self.assertFalse([l for l in out if l.startswith(("E_PLIST", "E_READINGS"))], out)
         self.assertEqual(r.returncode, 0, out)
         self.assertEqual(out[-1], "check=ok")
@@ -376,8 +374,12 @@ class FailClosedReads(unittest.TestCase):
             self.assertIsNone(mmread.read_ps())
         with mock.patch.object(mmread.plat, "PS_ARGV", ["/nonexistent/ps", "-axo", "pid="]):
             self.assertIsNone(mmread.read_ps())
-        with mock.patch.object(mmread.plat, "ps_lstart_argv", lambda pid: None):
-            self.assertIsNone(mmrecover.start_time(os.getpid()))
+        if mmread.plat.SERVICE == "systemd":
+            with mock.patch.object(mmread.plat, "proc_start", lambda pid: None):
+                self.assertIsNone(mmrecover.start_time(os.getpid()))
+        else:
+            with mock.patch.object(mmread.plat, "ps_lstart_argv", lambda pid: None):
+                self.assertIsNone(mmrecover.start_time(os.getpid()))
         with mock.patch.object(mmread.plat, "PS_ARGS_ARGV", None):
             self.assertEqual(mmrecover.missing_jobs([{"name": "x", "match": "x"}]), ["(ps failed)"])
 

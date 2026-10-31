@@ -37,6 +37,8 @@
  "hook.subagent_model_scan_mb": 16,
  "launch_gate.enabled": false,
  "launch_gate.max_minutes": 5,
+ "linux.psi_critical_pct": 10,
+ "linux.psi_warn_pct": 10,
  "mode.observe": true,
  "mode.slot_writes": "off",
  "mode.slots_file": "",

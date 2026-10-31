@@ -60,26 +60,43 @@ Code and live data are apart. The code folder is this repository. The live data 
 
 ## Platforms
 
-`mm` runs on macOS in full. On Linux it loads and runs in a reduced form:
+macOS uses system calls for readings and LaunchAgents for its services. Linux uses `/proc`, cgroup memory limits,
+and per-user systemd services. Both use the same queue controller, placement, guards, alerts and recovery logic.
 
-1. The memory readings (free, swap, compressor, kernel pressure, segments) are unknown. Load, CPU ticks
-   (`/proc/stat`), the core count, the boot time and free disk are read. The static facts `mm resources` shows come
-   from `/proc/cpuinfo` (`model name`, else `Hardware` or `Processor`) and `/proc/meminfo` (`MemTotal`); there is no
-   P and E core split (none). After `self.bad_reading_ticks` ticks with
-   missing readings the self-check turns safe mode on, so no automatic action runs.
-2. The macOS-only parts are skipped: the kernel `log stream`, `pmset` (power unknown), the readings check
-   (`schedule.readings_check_hours`) and the fallback sampler (no `READINGS_MISMATCH`), the evidence bundle's macOS
-   commands (its `readings.txt` says so), the banner, the panic report names. `{user_tmp}` is the system temp folder.
-3. `mm install`, `mm rollback`, `mm stop`, `mm start`, `mm restart` and `mm drill` refuse with one `E_PLATFORM` line.
-   Run `mm run` in the foreground. The watchdog restarts nothing. `mm check` prints `W_PLATFORM` and skips the
-   LaunchAgent checks.
-4. The data folder is `$XDG_DATA_HOME/machine-manager/<profile>/`, else `~/.local/share/machine-manager/<profile>/`.
-   `MM_BASE`, `MM_DATA` and `--data` still choose another.
-5. Without `ps` or `lsof`, nothing is deleted, trimmed or paused.
+On Linux:
 
-The Linux memory readings and rules, the Linux process layer and a systemd service come in later stages.
-`MM_PLATFORM=linux` (or `darwin`) replaces the detected platform. It is a test hook, like `MM_LAUNCHCTL`: the Linux path
-runs on a Mac (`tests/test_platform.py`).
+1. Available memory is `MemAvailable / MemTotal`, and swap is `SwapTotal - SwapFree` from `/proc/meminfo`.
+   cgroup v1 and v2 memory limits, including ancestor limits and delegated mounts, bound the available room and
+   reported RAM. Remaining cgroup room is conservative: charged page cache counts as used. An unreadable or malformed
+   cgroup bound is unknown, never unlimited. Missing essential readings trigger the existing safe-mode checks.
+2. Memory pressure uses kernel PSI `some` and `full` `avg10` percentages. `linux.psi_warn_pct` (default 10) maps
+   `some` to warning pressure; `linux.psi_critical_pct` (default 10) maps `full` to critical pressure. If the kernel
+   has no `/proc/pressure/memory`, available-memory and swap rules still work. A supported PSI source that fails is
+   unknown and blocks automatic recovery/slot increases until healthy. Compressor readings stay `none`; compressor
+   rules do not apply. Linux uses its native system CPU samples even when a queue has no macOS sampler log.
+3. Process names use executable paths where readable, retaining program aliases. Truncated names cannot hide a
+   matching live tool from cleanup guards. Pause/resume records use boot ID and process start ticks. Linux 5.3+ pidfds
+   pin signal targets and prevent signalling a recycled PID; without pidfd support pausing fails closed. The existing
+   regular-file, write-opener, launcher and process-tree checks still apply. No `ps` or `lsof` means the affected
+   delete/trim/pause operations refuse safely.
+4. `mm install`, `stop`, `start`, `restart` and `rollback` use `systemctl --user`. The supervisor has automatic restart
+   and an after-stop recovery command; an independent watchdog service/timer recovers a stale supervisor. Install
+   requires a reachable user manager and observe mode. Units live in `$XDG_CONFIG_HOME/systemd/user/`, else
+   `~/.config/systemd/user/`; no root service is installed. Stop failures preserve unit files. `mm run` also works
+   in the foreground on machines without systemd, including development containers. `mm drill memory` uses the Linux
+   memory capacity and keeps the same preconditions and load limits; running it still needs owner authorization.
+5. Data lives in `$XDG_DATA_HOME/machine-manager/<profile>/`, else `~/.local/share/machine-manager/<profile>/`.
+   `MM_BASE`, `MM_DATA` and `--data` still override this. Power, the macOS kernel log stream, desktop notifications,
+   panic reports and macOS command cross-checks are platform-specific and skipped on Linux; unknown readings are
+   not fabricated. Linux memory pressure comes from PSI rather than a kernel log stream.
+
+For a Linux install, use the same `mm init`, `mm check` and `mm install` commands above from a normal user session.
+If the service must keep running after logout, the owner can configure systemd user lingering; the tool never
+changes login policy. Logs are available through `journalctl --user -u <label>.service` and
+`journalctl --user -u <label>-watchdog.service`. The label is `service.label_prefix` in the profile.
+
+`MM_PLATFORM=linux` (or `darwin`) overrides detection for tests; `MM_SYSTEMCTL` and `MM_LAUNCHCTL` replace service
+commands with fixtures. Cloud tests never install or start a persistent service.
 
 ## Status
 
@@ -88,7 +105,7 @@ mm status        # at most 5 lines: state, mode, slots; readings; alert counts; 
 mm alerts        # one line per active alert: LEVEL ID text | do: command (agent values cleaned and quoted)
 mm explain ID    # one alert in full, with its evidence folder
 mm place --kind go-test --shards 4      # place=MACHINE|POOL|WAIT, why= lines, do= lines (never run by the tool)
-mm resources     # one line per resource: the machine, the pool, its runners, the usage services
+mm resources     # one line per resource: the machine, every pool, its runners, the usage services
 ```
 
 Output is plain `key=value` lines; `--json` gives one JSON object. Errors are one line: `E_CODE what; fix: how`.
@@ -116,7 +133,7 @@ resource has no thresholds. Then comes the writer's own `why`. The values still 
    holding slots) `queued` (waiting calls); `cores`, `p_cores`, `e_cores`, `cpu_model`, `ram_mb` (the static facts, read
    once at the supervisor's start), `ram_avail_mb` (free % of `ram_mb`; none without the free reading), `disk_gb_total`,
    `disk_free_gb`, `cpu_pct` (all CPU busy), `idle` (the `IDLE_ROOM` rule: yes, with `idle_min`).
-2. `resource=pool` (the `ci` adapter): `unit=minutes`, `total` (`github.included_minutes`), `left`, `reserve`, the
+2. `resource=pool` (each configured pool adapter): `unit=minutes`, `total` (`github.included_minutes`), `left`, `reserve`, the
    runs `running` and `queued`, `used_usd`, `allowed_usd`; its read rule is `github.stale_minutes`.
 3. `resource=runner` (`parent=` the pool), with the profile's `ci.runner_labels`: `GREEN` online and idle, `STEADY`
    online and busy, `RED` offline, else `UNKNOWN`; `online`, `busy`. When the runner list cannot be read, one row
@@ -212,6 +229,50 @@ Clean-up list rule types (`deletes.cleanup`) are `git_worktrees`, `git_branches`
 A `git_worktrees` rule may set `keep = ["journal-*"]`: case-sensitive `fnmatch` patterns on each tree folder's
 base name. The first matching pattern gives a KEEP item with reason `kept by the profile (keep: <pattern>)`,
 no command and no inner cache candidates. An empty list, or no `keep`, preserves the usual merged-and-clean rule.
+
+## Pools
+
+Use `[[pools]]` for more than one GitHub Actions pool. Each entry has an `id`, an `adapter`, and the same GitHub
+fields as the existing `[ci]` section (`repo`, `billing_path`, `guard_argv`, guard arguments and command templates).
+Replace `[ci]` with the entries; combining both forms is an error. Existing `[ci]` profiles keep their behavior,
+alert keys and files.
+
+```toml
+[[pools]]
+id = "primary"
+adapter = "github-gh"
+repo = "example/project"
+billing_path = "/organizations/example/settings/billing/usage"
+guard_argv = ["/path/to/ci-budget-guard"]
+guard_args = { default = ["--kind", "{kind}", "--shards", "{shards}"] }
+scratch_command = "prepare-ci-branch {branch}"
+reserve_minutes = 300
+
+[[pools]]
+id = "secondary"
+adapter = "github-gh"
+repo = "other-example/project"
+billing_path = "/organizations/other-example/settings/billing/usage"
+guard_argv = ["/path/to/other-ci-budget-guard"]
+guard_args = { default = ["--kind", "{kind}", "--shards", "{shards}"] }
+scratch_command = "prepare-other-ci-branch {branch}"
+reserve_minutes = 600
+```
+
+An id is 1..80 ASCII letters, digits, dots, `-` or `_`, starts with a letter or digit, and is unique without regard
+to case. Optional `included_minutes` and `reserve_minutes` override `github.included_minutes` and
+`github.reserve_minutes` for that pool. All other GitHub settings, including stop/near thresholds and read
+intervals, inherit the global `[github]` settings. A capacity override does not change those alert thresholds.
+Use a budget guard for each pool that enforces the account's actual limits.
+
+Each pool has its own worker, cached read (`state/pools/<id>/github.json`), status (`pools/<id>.json`), watched runs
+(`state/pools/<id>/watch.json`), and alert keys (`POOL:<id>:...`). A failed or stale pool does not invalidate another
+pool's read. `mm resources` shows every configured pool and its runners. `mm place` tries pools in profile order,
+checks each pool's reserve and budget-stop alert, and tries the next pool if a guard refuses. It prints only the
+selected pool's commands and never dispatches them itself.
+
+With multiple pools, select the pool when watching a run: `mm watch 123456 --pool secondary --note go-test`.
+Placement's printed watch command already includes `--pool`. With one entry the pool is selected automatically.
 
 ## Settings
 
@@ -422,24 +483,21 @@ Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFI
 
 ## Roadmap
 
-Today the tool watches one machine and one CI pool (GitHub Actions). Four parts come next. The rule for each part:
+Today the tool watches one machine and any configured list of GitHub Actions pools. Multiple-pool configuration,
+separate reads, alerts, reserves and placement are implemented (see Pools). Three parts remain. The rule for each part:
 you add any resource with a profile entry, and a new kind of resource needs one adapter file at most.
 
-1. **A list of pools.** The profile takes `[[pools]]` entries (each with an `id` and an `adapter`) in place of the
-   one `[ci]` section. The supervisor reads each pool apart. Each pool has its own status file, alert keys and
-   reserve. `mm place` already takes a list of candidates. Until then the supervisor asks only the `ci`, `delivery` and
-   `queue` adapters for resource records. Estimate: 1.5 to 2 hours.
-2. **Any kind of pool.** One pool contract for every resource: the capacity left in its own unit (minutes, credits,
+1. **Any kind of pool.** One pool contract for every resource: the capacity left in its own unit (minutes, credits,
    tasks or slots), a reserve, the cost of a job, the queued and running work, and the start command. Two general
    adapters: `command` (a script prints the pool's state as JSON, checked against a schema, so a new resource needs
    only the script and a profile entry) and `static` (a fixed capacity). Examples: a second CI system, a cloud
    machine, a cloud agent service. The record contract exists (`schemas/resource.schema.json`: capacity in its own
    unit, reserve, load, values, freshness), and `mm resources` shows any record that keeps it. Still to come: the cost
    of a job, the start command, and the `command` and `static` adapters. Estimate: 1.5 to 2 hours.
-3. **Many machines.** Each machine runs its own `mm` and writes its `status.json`. A collector reads them over the
+2. **Many machines.** Each machine runs its own `mm` and writes its `status.json`. A collector reads them over the
    network, and placement chooses across machines and pools. Safety actions stay local on each machine and never
    depend on the network. Estimate: 1 to 2 days.
-4. **At large scale, a monitor watches and `mm` controls.** When scale comes, connect `mm` to Prometheus and Grafana,
+3. **At large scale, a monitor watches and `mm` controls.** When scale comes, connect `mm` to Prometheus and Grafana,
    and grow only its control part, because large-scale monitoring is already solved for free, and control for AI-agent
    fleets is not. `mm` exports its readings as Prometheus metrics. Prometheus stores them, and Grafana draws the graphs
    and sends the alerts; each runs as its own program. `mm` keeps the decisions: the slots, the placement, the guards

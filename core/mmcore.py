@@ -262,6 +262,7 @@ class Locked:
 
 # Each checked value: (type, minimum, maximum). Types: "int", "num", "bool", "str", "choice:a|b".
 SCHEMA = {
+    "linux.psi_warn_pct": ("num", 0.1, 100), "linux.psi_critical_pct": ("num", 0.1, 100),
     "mode.slot_writes": ("choice:off|test|live", None, None),
     "mode.slots_file": ("str", None, None), "mode.observe": ("bool", None, None),
     # The schedule (README.md, Schedules); each default is the interval the code had before it was a setting;

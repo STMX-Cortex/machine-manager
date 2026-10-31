@@ -73,6 +73,8 @@ class Child:
 
 
 def total_mb():
+    if mmread.plat.SERVICE == "systemd":
+        return mmread.machine_facts().get("ram_mb") or 0
     return (mmread.sysctl_int("hw.memsize") or 0) / 2**20
 
 

@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """machine-manager setup: init, check, install, stop, start, rollback.
 
-install writes two LaunchAgents (the supervisor, KeepAlive; the watchdog, every schedule.watchdog_s, default 60 s:
-the setting takes effect at the next install), adds the hook entries to the
-Claude Code settings file the profile names (delivery.settings_file), and records everything in base_dir()/install.json.
+install writes two LaunchAgents on macOS, or a supervisor service, watchdog service and independent watchdog timer
+under the user's systemd configuration on Linux. The watchdog runs every schedule.watchdog_s (default 60 s;
+reinstall to change the installed interval). Hook entries go in delivery.settings_file, and the install record in
+base_dir()/install.json.
 Before it changes a file it keeps a copy `<file>.bak-before-machine-manager-<time>`. Rollback undoes all of it.
-MM_LAUNCHCTL replaces launchctl and HOME moves ~/Library/LaunchAgents (tests use both; they never touch the real ones).
-macOS only (launchd): on a platform without the service (mmread.plat.SERVICE is None) bin/mm refuses these verbs with
-E_PLATFORM, launchctl() runs nothing, and check() names the platform and skips the LaunchAgent checks.
+MM_LAUNCHCTL and MM_SYSTEMCTL replace service commands in tests; temporary HOME/XDG folders isolate unit files.
+Linux uses systemctl --user, requires an available user manager, and never invokes sudo or a system-wide install.
 """
 import json
 import os
@@ -67,7 +67,29 @@ def launchctl(args):
 
 
 def agents_dir():
+    if mmread.plat.SERVICE == "systemd":
+        import mmsystemd
+        return mmsystemd.directory()
     return os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents")
+
+
+def unload(label):
+    if mmread.plat.SERVICE == "systemd":
+        import mmsystemd
+        rc = mmsystemd.stop(label)
+        owned = any(os.path.exists(os.path.join(agents_dir(), label + suffix)) for suffix in (".service", ".timer"))
+        if rc != 0 and (owned or mmsystemd.loaded(label)):
+            raise mmcore.MMError("E_STOP", "systemd could not stop %s (rc=%s)" % (label, rc),
+                                 "check systemctl --user status; unit files were kept")
+        return 0 if rc != 0 and not owned else rc
+    return launchctl(["bootout", "gui/%d/%s" % (os.getuid(), label)])[0]
+
+
+def kickstart(label):
+    if mmread.plat.SERVICE == "systemd":
+        import mmsystemd
+        return mmsystemd.restart(label)
+    return launchctl(["kickstart", "-k", "gui/%d/%s" % (os.getuid(), label)])[0]
 
 
 def labels(profile):
@@ -100,10 +122,12 @@ def external_commands(profile):
     """The commands the service runs by name or path from the profile: gh (CI adapter github-gh), ci.guard_argv,
     trim.warm_argv, and the deletes rules' argv and command."""
     names = []
-    ci = profile.get("ci") or {}
-    if ci.get("adapter") == "github-gh":
+    import mmadapters
+    configs = mmadapters.pool_configs(profile)
+    if any(ci.get("adapter") == "github-gh" for ci in configs):
         names.append("gh")
-    for argv in (ci.get("guard_argv"), (profile.get("trim") or {}).get("warm_argv")):
+    argvs = [ci.get("guard_argv") for ci in configs] + [(profile.get("trim") or {}).get("warm_argv")]
+    for argv in argvs:
         if argv:
             names.append(argv[0])
     for r in (profile.get("deletes") or {}).get("rules", []):
@@ -127,7 +151,7 @@ def resolve_commands(names, search_path):
 
 
 def service_path(profile, search_path=None):
-    """The PATH of the LaunchAgents: the profile's service.path_extra, the folder of each external command as the
+    """The service PATH: the profile's service.path_extra, the folder of each external command as the
     owner's PATH finds it now, then the system folders. Returns (path, {command: absolute path or None})."""
     found = resolve_commands(external_commands(profile), os.environ.get("PATH", "") if search_path is None else search_path)
     dirs = []
@@ -281,8 +305,7 @@ def init(name, folder=None):
 
 
 def check(profile_file=None, online=False):
-    """One line per problem in the profile and the settings, plus the macOS readings check. [] = all fine.
-    Where the platform has no service, a W_PLATFORM line names it (the LaunchAgent checks are skipped)."""
+    """Profile, adapter, settings and service checks, plus the macOS readings cross-check. [] = all fine."""
     import mmadapters
     import mmplat
     import mmschema
@@ -297,7 +320,7 @@ def check(profile_file=None, online=False):
     raw = mmcore.load_toml(prof["_file"])
     for p in mmschema.validate(raw, mmschema.load("profile")):
         out.append("E_PROFILE %s; fix: correct %s" % (p, prof["_file"]))
-    for part, fn in (("queue", mmadapters.queue), ("ci", mmadapters.pool), ("delivery", mmadapters.delivery)):
+    for part, fn in (("queue", mmadapters.queue), ("pools", mmadapters.pools), ("delivery", mmadapters.delivery)):
         try:
             fn(prof)
         except mmcore.MMError as e:
@@ -323,12 +346,25 @@ def check(profile_file=None, online=False):
 def timing_context(profile):
     """mmdecide.timing_warnings's ctx: the platform runs the services (the watchdog's checks), the profile names a CI
     pool (the pool's check)."""
-    return {"service": bool(mmread.plat.SERVICE), "pool": bool((profile.get("ci") or {}).get("adapter"))}
+    import mmadapters
+    return {"service": bool(mmread.plat.SERVICE), "pool": bool(mmadapters.pool_configs(profile))}
 
 
 def watchdog_interval_lines(profile, s):
     """W_SCHEDULE when the installed watchdog's StartInterval is not schedule.watchdog_s (the setting takes effect at
     mm install). launchd only; no line when the plist is missing or cannot be read."""
+    if mmread.plat.SERVICE == "systemd":
+        timer = os.path.join(agents_dir(), labels(profile)[1] + ".timer")
+        try:
+            with open(timer) as f:
+                match = re.search(r"^OnUnitActiveSec=(\d+)s$", f.read(), re.M)
+        except OSError:
+            return []
+        got = int(match[1]) if match else None
+        if got == s["schedule.watchdog_s"]:
+            return []
+        return ["W_SCHEDULE the installed watchdog's OnUnitActiveSec is %s, schedule.watchdog_s is %d; fix: mm install again "
+                "(with mode.observe = true)" % ("unset" if got is None else got, s["schedule.watchdog_s"])]
     if mmread.plat.SERVICE != "launchd":
         return []
     try:
@@ -350,6 +386,17 @@ def install(profile, settings_src=None, observe_only=True):
     bad = [x for x in py if x.startswith("E_")]
     if bad:
         raise mmcore.MMError("E_PYTHON", bad[0].split(" ", 1)[1].split("; fix: ")[0], "run mm with python3.11 or newer")
+    if mmread.plat.SERVICE == "systemd":
+        import mmsystemd
+        for label in labels(profile):
+            mmsystemd.valid_label(label)
+        rc, _ = mmsystemd.control("show-environment")
+        if rc != 0:
+            raise mmcore.MMError("E_INSTALL", "systemd user manager unavailable", "log in with a user session; use mm run in the foreground meanwhile")
+    # Validate hooks before modifying units or settings.
+    hooks = mmcore.expand((profile.get("delivery") or {}).get("settings_file") or "")
+    if hooks and os.path.exists(hooks) and not isinstance(mmcore.read_json(hooks, None), dict):
+        raise mmcore.MMError("E_HOOKS", "%s is not a JSON object" % hooks, "correct the file, then retry")
     data = mmcore.data_dir()
     os.makedirs(os.path.join(data, "state"), exist_ok=True)
     rec = {"time": mmcore.now_local(), "profile": profile["_file"], "data": data, "code": mmcore.CODE, "backups": [],
@@ -379,15 +426,29 @@ def install(profile, settings_src=None, observe_only=True):
     sup, wd = labels(profile)
     # The installed supervisor may write the queue's slot file; the settings decide whether it does
     # (mode.observe false and mode.slot_writes "live"). A run by hand without the flag never writes it.
-    for label, args, keep in ((sup, ("run", "--allow-live-slots"), True), (wd, ("watchdog",), False)):
-        f = os.path.join(agents_dir(), label + ".plist")
+    files = {label + ".plist": plist(label, args, env, keep, s["schedule.watchdog_s"])
+             for label, args, keep in ((sup, ("run", "--allow-live-slots"), True), (wd, ("watchdog",), False))} \
+        if mmread.plat.SERVICE == "launchd" else {
+            n: content.encode() for n, content in mmsystemd.units(sup, wd, mm_argv(), env, s["schedule.watchdog_s"], EXIT_TIMEOUT_S).items()}
+    if mmread.plat.SERVICE == "systemd":
+        # Stop an earlier install before replacing units. Missing units are harmless here.
+        for label in (wd, sup):
+            unload(label)
+    for name, content in files.items():
+        f = os.path.join(agents_dir(), name)
         b = backup(f)
         if b:
             rec["backups"].append([f, b])
         with open(f + ".new", "wb") as fh:
-            fh.write(plist(label, args, env, keep, s["schedule.watchdog_s"]))  # the interval: the watchdog only
+            fh.write(content)
         os.replace(f + ".new", f)
         rec["plists"].append(f)
+    rec["service"] = mmread.plat.SERVICE
+    if mmread.plat.SERVICE == "systemd":
+        rec["units"] = list(rec["plists"])
+        rc, _ = mmsystemd.control("daemon-reload")
+        if rc != 0:
+            raise mmcore.MMError("E_INSTALL", "systemd daemon-reload failed", "check systemctl --user status, then mm install again")
     hf = mmcore.expand((profile.get("delivery") or {}).get("settings_file") or "")
     if hf:
         doc = mmcore.read_json(hf, None) if os.path.exists(hf) else {}
@@ -405,7 +466,8 @@ def install(profile, settings_src=None, observe_only=True):
     import mmrecover
     mmrecover.note_loaded(time.time())
     for label in (sup, wd):
-        launchctl(["bootout", "gui/%d/%s" % (os.getuid(), label)])
+        if mmread.plat.SERVICE == "launchd":
+            unload(label)
         rec.setdefault("bootstrap", []).append([label, bootstrap(label)])
     mmcore.write_atomic(os.path.join(mmcore.base_dir(), "install.json"), json.dumps(rec, indent=1))
     bad = [(lb, rc) for lb, rc in rec["bootstrap"] if rc != 0]
@@ -417,6 +479,9 @@ def install(profile, settings_src=None, observe_only=True):
 
 def is_loaded(label):
     """launchctl print finds the service (rc 0); 113 = not loaded."""
+    if mmread.plat.SERVICE == "systemd":
+        import mmsystemd
+        return mmsystemd.loaded(label)
     rc, _ = launchctl(["print", "gui/%d/%s" % (os.getuid(), label)])
     return rc == 0
 
@@ -430,7 +495,7 @@ def stop(profile, reason="stopped by hand", alert=True):
     mmcore.write_atomic(mmcore.path("state", "stopped.json"), json.dumps({"time": time.time(), "reason": reason}))
     out = []
     for label in (wd, sup):
-        rc, _ = launchctl(["bootout", "gui/%d/%s" % (os.getuid(), label)])
+        rc = unload(label)
         out.append((label, rc))
     mmrecover.resume_paused("stop: " + reason)
     st = mmcore.Settings().load()
@@ -459,9 +524,12 @@ def start(profile):
 
 
 def bootstrap(label, tries=10, wait_s=1.0):
-    """Load one LaunchAgent. A bootout ends a service in the background, and a bootstrap right after it fails
+    """Enable/start a user systemd unit, or load one LaunchAgent. A bootout ends a service in the background, and a bootstrap right after it fails
     (seen 2026-10-14: `mm restart` left nothing running), so a failed bootstrap is retried; at the end a service that
     is loaded counts as done. Returns the last rc (0 = loaded)."""
+    if mmread.plat.SERVICE == "systemd":
+        import mmsystemd
+        return mmsystemd.start(label)
     f = os.path.join(agents_dir(), label + ".plist")
     rc = None
     for i in range(tries):
@@ -473,18 +541,25 @@ def bootstrap(label, tries=10, wait_s=1.0):
 
 
 def rollback(profile):
-    """Unload and remove our LaunchAgents, remove our hook entries (a backup first), forget the install record.
+    """Unload and remove our service files, remove our hook entries (a backup first), forget the install record.
     The data folder stays (its alerts and logs are the record). Returns lines for the caller to print."""
     import mmrecover
     lines = []
     sup, wd = labels(profile)
+    stopped = {label: unload(label) for label in (wd, sup)} if mmread.plat.SERVICE == "systemd" else None
     for label in (wd, sup):
-        rc, _ = launchctl(["bootout", "gui/%d/%s" % (os.getuid(), label)])
-        f = os.path.join(agents_dir(), label + ".plist")
-        if os.path.exists(f):
-            b = backup(f)
-            os.remove(f)
-            lines.append("removed=%s backup=%s bootout_rc=%s" % (f, b, rc))
+        rc = stopped[label] if stopped is not None else unload(label)
+        suffixes = (".timer", ".service") if mmread.plat.SERVICE == "systemd" and label == wd else \
+            ((".service",) if mmread.plat.SERVICE == "systemd" else (".plist",))
+        for suffix in suffixes:
+            f = os.path.join(agents_dir(), label + suffix)
+            if os.path.exists(f):
+                b = backup(f)
+                os.remove(f)
+                lines.append("removed=%s backup=%s bootout_rc=%s" % (f, b, rc))
+    if mmread.plat.SERVICE == "systemd":
+        import mmsystemd
+        mmsystemd.control("daemon-reload")
     resumed = mmrecover.resume_paused("rollback")
     if resumed:
         lines.append("resumed=%s" % ",".join(str(p) for p in resumed))

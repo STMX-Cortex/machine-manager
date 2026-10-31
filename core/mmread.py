@@ -292,10 +292,18 @@ def live_named(procs, spec):
     out = []
     for p in procs:
         base = os.path.basename(p["comm"])
+        if p.get("name_truncated") and (any(n.startswith(base) for n in names) or suffixes or regs):
+            out.append(p)  # Linux comm truncation must not hide a live tool from a delete/trim guard.
+            continue
         # a guard's pattern (deletes and trims wait for a live run): a name too long to see whole counts as a match,
         # so the guard fails closed (C-22a)
         live_re = regs and (mmtext.too_long(p["comm"]) or any(mmtext.search(r, p["comm"]) for r in regs))
-        if base in names or (suffixes and base.endswith(suffixes)) or live_re:
+        alias = p.get("name_alias", "")
+        alias_match = alias and (alias in names or (suffixes and alias.endswith(suffixes)) or
+                                 (len(alias) >= 15 and any(n.startswith(alias) for n in names)))
+        if alias_match:
+            out.append(dict(p, comm=alias))  # show the name that actually matched the guard
+        elif base in names or (suffixes and base.endswith(suffixes)) or live_re:
             out.append(p)
     return out
 
@@ -317,7 +325,21 @@ def read_ps():
     if not plat.PS_ARGV:
         return None
     rc, out = run(plat.PS_ARGV, timeout=10)
-    return parse_ps(out) if rc == 0 else None
+    if rc != 0:
+        return None
+    procs = parse_ps(out)
+    if plat.SERVICE == "systemd":
+        for p in procs:
+            p["start_time"] = plat.proc_start(p["pid"])
+            exe = plat.proc_exe(p["pid"])
+            if exe:
+                p["name_alias"] = os.path.basename(p["comm"])
+                p["comm"] = exe.removesuffix(" (deleted)")
+            elif len(os.path.basename(p["comm"])) >= 15:
+                p["name_truncated"] = True
+            if plat.proc_parent(p["pid"]) != p["ppid"] or plat.proc_start(p["pid"]) != p["start_time"]:
+                p["start_time"] = None  # a stale ps row cannot choose a replacement process for a pause
+    return procs
 
 
 def file_writers(path_, timeout):

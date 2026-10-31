@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """machine-manager self-recovery: the paused-process record, unclean starts and the crash-loop guard, safe mode,
-the Mac reboot check, the watchdog's stamp and the outside dead-man ping.
+the machine reboot check, the watchdog's stamp and the outside dead-man ping.
 
 The decisions are the pure functions in mmdecide (sample_problems, self_check, crash_loop, resume_targets,
 reboot_check); this module gathers their facts and keeps their files in the data folder:
@@ -11,7 +11,7 @@ reboot_check); this module gathers their facts and keeps their files in the data
   state/boot.json      the boot time, the last tick, state and slots, the panic report names
   state/watchdog.stamp the watchdog's last run (its time as text)
   state/recovery.log   one line per recovery step
-The tool never reboots the Mac and never signals a process it did not pause itself.
+The tool never reboots the machine and never signals a process it did not pause itself.
 """
 import json
 import os
@@ -44,8 +44,9 @@ def _lock():
 
 
 def start_time(pid):
-    """The process start time as ps prints it (lstart), or None when the pid is gone or ps cannot read it (or is
-    missing)."""
+    """Birth identity: Linux boot id plus /proc start ticks, or macOS ps lstart; None when unreadable or gone."""
+    if getattr(mmread.plat, "SERVICE", None) == "systemd":
+        return mmread.plat.proc_start(pid)
     argv = mmread.plat.ps_lstart_argv(pid)
     if not argv:
         return None
@@ -56,6 +57,18 @@ def start_time(pid):
 def read_paused():
     d = mmcore.read_json(paused_file(), {})
     return {str(k): v for k, v in d.items()} if isinstance(d, dict) else {}
+
+
+def signal_process(pid, expected, sig):
+    if sig not in (signal.SIGSTOP, signal.SIGCONT):
+        raise ValueError("only pause and resume signals are permitted")
+    if mmread.plat.SERVICE == "systemd":
+        return mmread.plat.signal_process(pid, expected, sig)
+    if start_time(pid) != expected:
+        raise ProcessLookupError("process identity changed")
+    if sig == signal.SIGSTOP:
+        return os.kill(pid, signal.SIGSTOP)
+    return os.kill(pid, signal.SIGCONT)
 
 
 def add_paused(entries):
@@ -100,7 +113,7 @@ def resume_paused(why, now=None, legacy=None):
                         continue
                     if current != expected:
                         continue
-                    os.kill(pid, signal.SIGCONT)
+                    signal_process(pid, expected, signal.SIGCONT)
                     done.append(pid)
                 except ProcessLookupError:
                     pass
@@ -142,7 +155,7 @@ def starting_status(now, mid=None):
 
 
 def note_loaded(now):
-    """`mm install` and `mm start` mark the time they load the LaunchAgents (the watchdog's start grace counts from it)."""
+    """Mark service loading by install/start (the watchdog's start grace counts from this time)."""
     mmcore.write_atomic(mmcore.path("state", "loaded.json"), json.dumps({"time": now}))
 
 
@@ -197,7 +210,7 @@ def clear_safe(why):
     return cur
 
 
-# ------------------------------------------------------------------------------------------- the Mac reboot
+# ------------------------------------------------------------------------------------------- the machine reboot
 
 def boot_time():
     """The boot time in epoch seconds (macOS kern.boottime, Linux /proc/stat btime: the backend), or None."""
