@@ -94,10 +94,17 @@ class TempData(unittest.TestCase):
         self.root = tempfile.mkdtemp(prefix=self.id().split(".")[-1][:30] + "-", dir=TMP_BASE)
         self.data = os.path.join(self.root, "data")
         os.makedirs(os.path.join(self.data, "state"))
-        self._env = {k: os.environ.get(k) for k in ("MM_DATA", "MM_BASE", "MM_PROFILE", "HOME", "MM_LAUNCHCTL")}
+        self._env = {k: os.environ.get(k) for k in ("MM_DATA", "MM_BASE", "MM_PROFILE", "HOME", "MM_LAUNCHCTL",
+                                                  "MM_SYSTEMCTL", "XDG_CONFIG_HOME")}
         os.environ.update(MM_DATA=self.data, MM_BASE=os.path.join(self.root, "base"), MM_PROFILE=PROFILE,
                           HOME=os.path.join(self.root, "home"))
         os.makedirs(os.environ["HOME"])
+        os.environ["XDG_CONFIG_HOME"] = os.path.join(self.root, "config")
+        systemctl = os.path.join(self.root, "systemctl-fixture")
+        with open(systemctl, "w") as f:
+            f.write('#!/bin/sh\nexit 0\n')
+        os.chmod(systemctl, 0o700)
+        os.environ["MM_SYSTEMCTL"] = systemctl
         # a fake gh: `--version` works, every other call fails (no test reads GitHub)
         self.fake_gh = os.path.join(self.root, "fake-gh")
         with open(self.fake_gh, "w") as f:

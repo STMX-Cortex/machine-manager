@@ -14,12 +14,24 @@ FAR_PAST = -1e18
 
 # ------------------------------------------------------------------------------------------- the Mac state
 
+def linux_sample(sample, s):
+    """Normalize Linux PSI into the common normal/warn/critical pressure levels. Preserve unknown readings."""
+    if not sample.get("linux"):
+        return sample
+    some, full = sample.get("psi_some_pct"), sample.get("psi_full_pct")
+    valid = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and 0 <= x <= 100
+    pressure = (4 if full >= s["linux.psi_critical_pct"] else 2 if some >= s["linux.psi_warn_pct"] else 1) \
+        if valid(some) and valid(full) else None
+    return dict(sample, pressure=pressure)
+
+
 def classify(window, s, disk_gb=None, kernel_event=False):
     """The machine state from recent memory samples (oldest first). Each sample: t (s), free_pct, swap_used_mb,
     swap_total_mb, comp_mb, pressure, seg_pct, load1, load5, sys_pct (missing keys are None).
     Returns [state, reasons, complete]; complete is False when an essential reading is missing (then no raise)."""
     if not window:
         return ["UNKNOWN", ["no readings"], False]
+    window = [linux_sample(x, s) for x in window]
     cur = window[-1]
     n = s["slots.sustain_samples"]
 
@@ -100,7 +112,9 @@ def classify(window, s, disk_gb=None, kernel_event=False):
     if sustained("sys_pct", s["slots.amber_sys_pct"]):
         amber.append("system CPU > %g%% in %d samples" % (s["slots.amber_sys_pct"], n))
 
-    complete = all(get(cur, k) is not None for k in ("free_pct", "swap_used_mb", "comp_mb", "load1", "load5"))
+    keys = ("free_pct", "swap_total_mb", "swap_used_mb", "load1", "load5") + (("pressure",) if cur.get("psi_supported", 1) else ()) if cur.get("linux") else \
+        ("free_pct", "swap_used_mb", "comp_mb", "load1", "load5")
+    complete = all(get(cur, k) is not None for k in keys)
     if red:
         return ["RED", red, complete]
     if amber:
@@ -342,13 +356,14 @@ def place(req, ctx, s):
     for p in ctx.get("pools", []):
         shards = req.get("shards", 1)
         worst = p["plan_minutes"] + shards * p["job_minutes"]
+        reserve = p.get("reserve_minutes", s["github.reserve_minutes"])
         no = []
         if shards > kinds["pool"][kind]:
             no.append("%d shards > %d" % (shards, kinds["pool"][kind]))
         if p.get("minutes_left") is None:
             no.append("minutes left unknown (%s)" % p.get("minutes_source"))
-        elif p["minutes_left"] - worst <= s["github.reserve_minutes"]:
-            no.append("minutes left %.0f - worst case %d <= reserve %g" % (p["minutes_left"], worst, s["github.reserve_minutes"]))
+        elif p["minutes_left"] - worst <= reserve:
+            no.append("minutes left %.0f - worst case %d <= reserve %g" % (p["minutes_left"], worst, reserve))
         if p.get("stop_active"):
             no.append("GUARD_STOP is active")
         if p.get("guard_why"):
@@ -361,7 +376,7 @@ def place(req, ctx, s):
                 no.append("guard %s: %s" % ({1: "refused", 2: "cannot read"}.get(g["rc"], "rc=%s" % g["rc"]), g["line"][:160]))
         if not no:
             return _ans("POOL", p["id"], out + [wtxt, "%s: %.0f minutes left (%s), worst case %d, reserve %g" % (
-                p["id"], p["minutes_left"], p.get("minutes_source"), worst, s["github.reserve_minutes"]),
+                p["id"], p["minutes_left"], p.get("minutes_source"), worst, reserve),
                 "guard: " + (GUARD_SKIP if p["guard"] == "skip" else p["guard"]["line"][:160])])
         no_all.append("%s: %s" % (p["id"], "; ".join(no)))
     if st == "RED":
@@ -481,7 +496,9 @@ def sample_problems(sample):
         return v
 
     vals = {}
-    for k in SAMPLE_KEYS:
+    keys = tuple(k for k in SAMPLE_KEYS if k != "comp_mb" and (k != "pressure" or sample.get("psi_supported", 1))) \
+        if sample.get("linux") else SAMPLE_KEYS
+    for k in keys:
         v = num(k)
         if v is None:
             out.append("%s missing" % k)

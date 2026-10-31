@@ -308,16 +308,36 @@ class Pauser:
         slot = queue.slot_file(newest["slot"])
         out = {"busy": newest, "slot": slot, "paused": [], "refused": [], "failed": None, "not_a_file": None}
         try:
-            regular = stat.S_ISREG(os.lstat(slot).st_mode)
+            slot_stat = os.lstat(slot)
         except FileNotFoundError:
             return out  # the call ended and its file is gone: nothing to pause
         except OSError as e:
             out["failed"] = "lstat failed (%s)" % e.__class__.__name__
             return out
-        if not regular:
+        if not stat.S_ISREG(slot_stat.st_mode):
             out["not_a_file"] = slot
             return out
-        openers = mmread.file_writers(slot, lsof_timeout)
+        if mmread.plat.SERVICE != "systemd":
+            return self._pause_slot(queue, lsof_timeout, out, slot)
+        try:
+            fd = os.open(slot, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        except OSError as e:
+            out["failed"] = "slot open failed (%s)" % e.__class__.__name__
+            return out
+        try:
+            pinned = os.fstat(fd)
+            if not stat.S_ISREG(pinned.st_mode) or (pinned.st_dev, pinned.st_ino) != (slot_stat.st_dev, slot_stat.st_ino):
+                out["failed"] = "slot changed before opener verification"
+                return out
+            # lsof resolves this descriptor in our process, not a mutable queue pathname. Keep it pinned through
+            # both opener reads and the final identity checks, so a symlink swap cannot select a different file.
+            return self._pause_slot(queue, lsof_timeout, out, "/proc/%d/fd/%d" % (os.getpid(), fd), pinned)
+        finally:
+            os.close(fd)
+
+    def _pause_slot(self, queue, lsof_timeout, out, query, pinned=None):
+        slot = out["slot"]
+        openers = mmread.file_writers(query, lsof_timeout)
         if openers is None:
             out["failed"] = "lsof failed"
             return out
@@ -327,15 +347,37 @@ class Pauser:
                                  "show its holder)")
             return out  # else the call ended between the queue read and now: nothing to pause
         # a relative launcher word is resolved against the process's working folder (asked only when needed)
-        launchers = [pid for pid in openers
-                     if queue.runs_launcher(mmread.proc_argv(pid), lambda pid=pid: mmread.proc_cwd(pid, lsof_timeout))]
+        births = {pid: self.start_time(pid) for pid in openers}
+        launchers = [pid for pid in openers if births[pid]
+                     and (mmread.plat.SERVICE != "systemd" or mmread.plat.proc_interpreter(pid, queue.launcher()[0]))
+                     and queue.runs_launcher(mmread.proc_argv(pid), lambda pid=pid: mmread.proc_cwd(pid, lsof_timeout))
+                     and self.start_time(pid) == births[pid]]
+        if pinned is not None and launchers:
+            current_openers = mmread.file_writers(query, lsof_timeout)
+            if current_openers is None:
+                out["failed"] = "lsof recheck failed"
+                return out
+            # An opener may have exited before its first birth read. A replacement launcher must prove that it
+            # holds this pinned file while the captured birth is still current.
+            launchers = [pid for pid in launchers if pid in current_openers and self.start_time(pid) == births[pid]]
+            try:
+                current_slot = os.lstat(slot)
+            except OSError:
+                out["failed"] = "slot disappeared during opener verification"
+                return out
+            if (current_slot.st_dev, current_slot.st_ino) != (pinned.st_dev, pinned.st_ino):
+                out["failed"] = "slot changed during opener verification"
+                return out
         procs = mmread.read_ps() if launchers else []  # this moment's process tree, never an older reading
         if procs is None:
             out["failed"] = "ps failed"
             out["refused"] = sorted(set(openers) - set(launchers))
             return out
         tree, seen = [], set()  # each launcher, then its descendants (an opener among them inherited the file)
+        snapshot = {p["pid"]: p for p in procs}
         for pid in launchers:
+            if self.start_time(pid) != births[pid]:
+                continue
             for d in mmread.descendants(procs, pid):
                 if d not in seen:  # a set: a large process tree stays linear (C-21)
                     seen.add(d)
@@ -343,7 +385,9 @@ class Pauser:
         out["refused"] = [pid for pid in openers if pid not in seen]
         plan = {}
         for pid in tree:
-            st = self.start_time(pid)
+            st = snapshot.get(pid, {}).get("start_time") if mmread.plat.SERVICE == "systemd" else self.start_time(pid)
+            if pid in births and st != births[pid]:
+                continue
             if st:
                 plan[str(pid)] = st
         if not plan:
@@ -352,7 +396,7 @@ class Pauser:
         failed = []
         for pid in plan:
             try:
-                os.kill(int(pid), signal.SIGSTOP)
+                mmrecover.signal_process(int(pid), plan[pid], signal.SIGSTOP)
             except OSError:
                 failed.append(pid)
         if failed:
@@ -409,7 +453,11 @@ def memory_readings_present(complete, sample):
     """classify's `complete` and every reading in CAP_READINGS present (a number) in the current sample."""
     def num(v):
         return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v
-    return bool(complete) and isinstance(sample, dict) and all(num(sample.get(k)) for k in CAP_READINGS)
+    if not isinstance(sample, dict):
+        return False
+    keys = ("free_pct", "swap_used_mb", "swap_total_mb") + (("pressure",) if sample.get("psi_supported", 1) else ()) \
+        if sample.get("linux") else CAP_READINGS
+    return bool(complete) and all(num(sample.get(k)) for k in keys)
 
 
 def pause_readings_present(complete, window):
@@ -431,7 +479,8 @@ class Supervisor:
         self.check_on = check_readings and sampler is None
         self.sizes = sizes
         self.queue = mmadapters.queue(profile)
-        self.pool = mmadapters.pool(profile)
+        self.pools = mmadapters.pools(profile)
+        self.pool = self.pools[0] if self.pools else None  # legacy single-pool API
         self.delivery = mmadapters.delivery(profile)
         self.settings = mmcore.Settings(real_slots=self.queue.slots_path() if self.queue else None)
         self.kernel = KernelStream() if kernel and mmread.plat.KERNEL_LOG else None  # no stream: no kernel events
@@ -462,10 +511,13 @@ class Supervisor:
         self.slow_jobs = slow_jobs
         self.delete_ctx = mmdelete.Ctx(profile.get("deletes") or {}, extra=delete_extra)
         self.bg = Worker(sizes_job)
-        self.gh = Worker(self.pool.job) if self.pool else None
+        self.pool_workers = {p.id: Worker(p.job) for p in self.pools}
+        self.gh = self.pool_workers[self.pool.id] if self.pool else None
         self.deletes = Worker(deletes_job)
         self.trim = Trim(self.state, self.queue, profile.get("trim") or {}, self.live_spec, self.mid)
-        self.cache["github"] = mmcore.read_json(mmcore.path("state", "github.json"), None)
+        self.pool_reads = {p.id: p.load_cache() if callable(getattr(p, "load_cache", None)) else
+                           mmcore.read_json(p.cache_file(), None) for p in self.pools}
+        self.cache["github"] = self.pool_reads[self.pool.id] if self.pool and not self.pool.scoped else None
         self.cache["deletes"] = mmcore.read_json(mmcore.path("state", "deletes-last.json"), None)
         self.counts = mmcore.read_json(mmcore.path("state", "counts.json"), {}) or {}
         self.free_pct = None
@@ -605,6 +657,7 @@ class Supervisor:
         # fast memory sample, every tick
         sampler = mmread.command_sample if self.fallback else self.sampler
         sample, self.ticks = sampler(now, self.ticks)
+        sample = mmdecide.linux_sample(sample, s)
         sample["sys_pct_interval"] = sample.pop("sys_pct", None)
         self.reading_problems = mmdecide.sample_problems(sample)
         if "sys_pct_fixture" in sample:
@@ -613,7 +666,7 @@ class Supervisor:
         # the sys rule uses the queue sampler's top-based value (the measure its thresholds use) when fresh
         if "sys_pct" not in sample:
             sample["sys_pct"] = lp["sys_pct"] if lp and ll_age is not None and ll_age < 150 else (
-                None if self.queue else sample["sys_pct_interval"])
+                None if self.queue and not sample.get("linux") else sample["sys_pct_interval"])
         self.window.append(sample)
         while self.window and now - self.window[0]["t"] > 1900:
             self.window.popleft()
@@ -694,21 +747,27 @@ class Supervisor:
             snap["cache_gb"] = (sz.get("sizes") or {}).get("cache")
             snap["cache5m"] = sz.get("cache5m")
 
-        # the pool reads, in a worker thread
-        if self.slow_jobs and self.gh:
-            got = self.gh.take()
-            if got is not None:
-                self.cache["github"] = got
-                for k in self.pool.good_keys(got):  # a good read clears its SOURCE_STALE now, not 5 min later
-                    store.clear(k)
-            if self.due("gh", s["github.read_interval_s"], now) or self._watch_pending(now, s):
-                self.gh.kick(s, now)
+        # Each pool has its own worker, snapshot, clock and alert keys. One slow read does not hold up the others.
+        for pool in self.pools:
+            worker = self.pool_workers[pool.id] if pool.scoped else self.gh
+            key = "gh:" + pool.id if pool.scoped else "gh"
+            ps = pool.settings(s)
+            if self.slow_jobs and worker is not None:
+                got = worker.take()
+                if got is not None:
+                    self.pool_reads[pool.id] = got
+                    if not pool.scoped:
+                        self.cache["github"] = got
+                    for k in pool.good_keys(got):
+                        store.clear(k)
+                if self.due(key, ps["github.read_interval_s"], now) or self._watch_pending(now, ps, pool):
+                    worker.kick(s, now)
+            read = self.pool_reads.get(pool.id) if pool.scoped else self.cache.get("github")
+            first_read_pending = read is None and now - self.started < ps["github.stale_minutes"] * 60
+            if not first_read_pending:
+                for c in pool.conditions(read, s, now, mmalerts._c, self.p["names"].get("owner", "the owner")):
+                    snap.setdefault("pool_conditions", []).append(c)
         gh = self.cache.get("github")
-        first_read_pending = gh is None and now - self.started < s["github.stale_minutes"] * 60
-        if self.pool and not first_read_pending:  # a fresh start is not a stale source
-            names = self.p["names"]
-            for c in self.pool.conditions(gh, s, now, mmalerts._c, names.get("owner", "the owner")):
-                snap.setdefault("pool_conditions", []).append(c)
         # the deletion scan (WOULD-DELETE unless deletes are on) and the cleanup list
         deletes_on = s["deletes.enabled"] and actions_on
         if self.slow_jobs:
@@ -788,8 +847,9 @@ class Supervisor:
         active = (mmcore.read_json(store.state_file, {}) or {}).get("active") or {}
         self._status(now, mac_state, reasons, q, sample, "ok", active, s, observe, off, safe,
                      idle_minutes=snap.get("idle_minutes"))
-        if self.pool:
-            self._pool_status(now, s, gh, active)
+        for pool in self.pools:
+            read = self.pool_reads.get(pool.id) if pool.scoped else gh
+            self._pool_status(now, s, read, active, pool)
         self._resources(now, s, gh, q)
         if self.due("metrics", s["schedule.metrics_s"], now):  # a metrics.csv row and counts.json
             self._metrics(now, sample, mac_state, q)
@@ -825,7 +885,7 @@ class Supervisor:
                         self.state["watchdog_unloaded"] = rc
                         mmrecover.log("WATCHDOG_UNLOADED %s; bootstrap rc=%s" % (text, rc), now)
                     else:
-                        rc, _ = mminstall.launchctl(["kickstart", "-k", "gui/%d/%s" % (os.getuid(), wd)])
+                        rc = mminstall.kickstart(wd)
                         mmrecover.log("WATCHDOG_STALE %s; kickstart rc=%s" % (text, rc), now)
                 if self.state.get("watchdog_unloaded") is not None:
                     out.append(mmalerts._c("SELF_UNLOADED:watchdog", "SELF_UNLOADED", "ACTION",
@@ -843,11 +903,19 @@ class Supervisor:
                 self.ping.kick(s["heartbeat.url"], s["heartbeat.timeout_s"])
         return out
 
-    def _watch_pending(self, now, s):
-        import ad_ci_github
-        w = mmcore.read_json(ad_ci_github.watch_file(), {}) or {}
-        if any(not v.get("done_at") for v in w.values()):
-            return self.due("gh_watch", s["github.watch_interval_s"], now)
+    def _watch_pending(self, now, s, pool=None):
+        pool = pool or self.pool
+        if pool is None:
+            return False
+        if callable(getattr(pool, "load_watch", None)):
+            w = pool.load_watch()
+        else:
+            watch_file = pool.watch_file() if callable(getattr(pool, "watch_file", None)) else None
+            if not watch_file:
+                return False
+            w = mmcore.read_json(watch_file, {}) or {}
+        if isinstance(w, dict) and any(isinstance(v, dict) and not v.get("done_at") for v in w.values()):
+            return self.due("gh_watch:" + pool.id if pool.scoped else "gh_watch", s["github.watch_interval_s"], now)
         return False
 
     def _proc_facts(self, now):
@@ -1096,7 +1164,7 @@ class Supervisor:
             "busy": len((q or {}).get("busy", [])), "waiting": len((q or {}).get("tickets", [])),
             "readings": {k: (round(sample[k], 2) if isinstance(sample.get(k), float) else sample.get(k))
                          for k in ("free_pct", "swap_used_mb", "swap_total_mb", "comp_mb", "pressure", "load5", "sys_pct",
-                                   "cpu_pct")},
+                                   "cpu_pct", "psi_some_pct", "psi_full_pct")},
             "disk_gb": None if self.cache.get("disk") is None else round(self.cache["disk"], 1),
             "sampler": "commands" if self.fallback else "fast",
             "alerts": counts,
@@ -1106,10 +1174,11 @@ class Supervisor:
             "heartbeat": {"pid": os.getpid(), "tick": self.tick_n, "note": note}}, mid=self.mid)
         mmcore.write_atomic(mmcore.path("status.json"), json.dumps(rec, sort_keys=True))
 
-    def _pool_status(self, now, s, gh, active):
-        keys = [k for k in active if self.pool.owns(k)]  # only the pool adapter's own alerts
-        rec = self.pool.status(gh, s, now, keys)
-        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in self.pool.id)
+    def _pool_status(self, now, s, gh, active, pool=None):
+        pool = pool or self.pool
+        keys = [k for k in active if pool.owns(k)]  # only this pool adapter's alerts
+        rec = pool.status(gh, s, now, keys)
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in pool.id)
         mmcore.write_atomic(mmcore.path("pools", safe + ".json"), json.dumps(rec, sort_keys=True))
 
     def _resources(self, now, s, gh, q):
@@ -1117,7 +1186,11 @@ class Supervisor:
         (mmdecide.cap_records), each with this tick's time (schemas/resource.schema.json). Written on every good tick,
         even when empty; a failure costs one errors.log line, never the rest of the tick."""
         try:
-            recs = (mmadapters.records(self.pool, gh, s, now, "ci")
+            pool_records = []
+            for pool in self.pools:
+                read = self.pool_reads.get(pool.id) if pool.scoped else gh
+                pool_records += mmadapters.records(pool, read, s, now, "pool:" + pool.id if pool.scoped else "ci")
+            recs = (pool_records
                     + mmadapters.records(self.delivery, self.cache.get("usage"), s, now, "delivery")
                     + mmadapters.records(self.queue, q, s, now, "queue"))
             recs = [dict(r, time=now) for r in mmdecide.cap_records(recs, now)]

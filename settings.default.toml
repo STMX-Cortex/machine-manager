@@ -192,3 +192,8 @@ slots = 5  # slots
 url = ""  # https URL
 every_min = 5  # min
 timeout_s = 10  # s
+
+[linux]
+# Memory PSI avg10: some (one or more tasks stalled) warns; full (all tasks stalled) is critical.
+psi_warn_pct = 10
+psi_critical_pct = 10

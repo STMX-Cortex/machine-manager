@@ -46,20 +46,28 @@ def place(req, s, profile, queue=None, pool=None, now=None):
     machine = {"id": mmcore.machine_id(profile), "state": mv["state"], "reasons": mv["reasons"], "free_pct": mv["free_pct"],
                "queue": q, "medians": queue.medians() if queue is not None else {}}
     active = {v.get("name") for v in ((mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}).get("active") or {}).values()}
-    pools, gargs = [], None
-    if pool is not None:
-        left, src = pool.minutes_left(s, now)
-        gargs, gwhy = pool.guard_args(req)
-        pools.append({"id": pool.id, "minutes_left": left, "minutes_source": src, "plan_minutes": pool.cfg.get("plan_minutes", 2),
-                      "job_minutes": pool.cfg.get("job_minutes", 40), "guard": None, "guard_why": gwhy,
-                      "stop_active": "GUARD_STOP" in active})
+    adapters = pool if isinstance(pool, list) else ([pool] if pool is not None else [])
+    pools, guard_args, by_id = [], {}, {}
+    active_rows = ((mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}).get("active") or {})
+    for candidate in adapters:
+        left, src = candidate.minutes_left(s, now)
+        gargs, gwhy = candidate.guard_args(req)
+        guard_args[candidate.id], by_id[candidate.id] = gargs, candidate
+        ps = candidate.settings(s)
+        stopped = (any(candidate.owns(key) and value.get("name") == "GUARD_STOP" for key, value in active_rows.items())
+                   if candidate.scoped else "GUARD_STOP" in active)
+        pools.append({"id": candidate.id, "minutes_left": left, "minutes_source": src,
+                      "plan_minutes": candidate.cfg.get("plan_minutes", 2),
+                      "job_minutes": candidate.cfg.get("job_minutes", 40), "reserve_minutes": ps["github.reserve_minutes"],
+                      "guard": None, "guard_why": gwhy, "stop_active": stopped})
     ctx = {"now": now, "kinds": {"machine_only": profile["kinds"].get("machine_only", {}), "pool": profile["kinds"].get("pool", {})},
            "wide_kind": profile["kinds"].get("wide") or None, "machine": machine, "pools": pools}
     shown = dict(req, kind=mmcore.quoted(req["kind"]))  # a profile's kind is bare and stays as it is
     ans = mmdecide.place(shown, ctx, s)
-    if ans["need_guard"]:
-        rc, line = pool.guard(gargs)
-        pools[0]["guard"] = {"rc": rc, "line": mmcore.clean(mmcore.mask(line))}
+    while ans["need_guard"]:
+        ident = ans["need_guard"]
+        rc, line = by_id[ident].guard(guard_args[ident])
+        next(row for row in pools if row["id"] == ident)["guard"] = {"rc": rc, "line": mmcore.clean(mmcore.mask(line))}
         ans = mmdecide.place(shown, ctx, s)
     if mv["source"] != "supervisor":
         ans["reasons"].append("state source: " + mv["source"])
@@ -67,8 +75,11 @@ def place(req, s, profile, queue=None, pool=None, now=None):
     if ans["place"] == "POOL" and changed:
         ans["reasons"].append("commands withheld: a request word held a character outputs replace")
     elif ans["place"] == "POOL":
+        pool = by_id[ans["candidate"]]
         watch = "mm watch <run-id> --note %s" % shlex.quote(req["kind"])
-        cmds = pool.commands(req, gargs or [], watch)
+        if pool.scoped:
+            watch += " --pool " + shlex.quote(pool.id)
+        cmds = pool.commands(req, guard_args[pool.id] or [], watch)
     rec = mmcore.stamp({"kind": "placement", "time": now, "request": req, "place": ans["place"], "candidate": ans["candidate"],
                         "reasons": ans["reasons"], "commands": cmds}, profile)
     return rec
