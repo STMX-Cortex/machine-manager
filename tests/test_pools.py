@@ -258,6 +258,36 @@ class Pools(TempData):
             rec = mmplace.place({"kind": "go-test", "shards": 1}, self.s(), self.profile_pools(), pool=pools, now=self.now)
         self.assertEqual((rec["place"], rec["candidate"]), ("POOL", "two"))
 
+    def test_deep_or_oversized_pool_cache_is_unavailable_without_blocking_other_placement(self):
+        pools = self.adapters()
+        self.write_read(pools[1])
+        self.status()
+        invalid = [b'{"nested":' + b"[" * 2000 + b"0" + b"]" * 2000 + b"}",
+                   b" " * (ad_ci_github.CACHE_BYTES + 1),
+                   b'{"time":1,"time":2}', b'{"time":NaN}', b"\xff"]
+        for raw in invalid:
+            with self.subTest(prefix=raw[:40]):
+                Path(pools[0].cache_file()).parent.mkdir(parents=True, exist_ok=True)
+                Path(pools[0].cache_file()).write_bytes(raw)
+                self.assertIsNone(pools[0].load_cache())
+                self.assertEqual(pools[0].status(pools[0].load_cache(), self.s(), self.now)["state"], "UNKNOWN")
+                with mock.patch.object(ad_ci_github, "gh_run", return_value=(1, "unavailable")), \
+                        mock.patch.object(ad_ci_github.Pool, "guard", return_value=(0, "fits")):
+                    rec = mmplace.place({"kind": "go-test", "shards": 1}, self.s(), self.profile_pools(), pool=pools, now=self.now)
+                self.assertEqual((rec["place"], rec["candidate"]), ("POOL", "two"))
+
+    def test_deep_watch_cache_recovers_without_breaking_the_pool_read(self):
+        pool = self.adapters()[0]
+        path = Path(pool.watch_file())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'{"nested":' + b"[" * 2000 + b"0" + b"]" * 2000 + b"}")
+        self.assertEqual(pool.load_watch(), {})
+        with mock.patch.object(ad_ci_github, "read_all", return_value=reading(self.now)):
+            result = pool.job(self.s(), self.now)
+        self.assertIn("watched", result["errors"])
+        self.assertEqual(pool.load_watch(), {})
+        self.assertEqual(pool.status(result, self.s(), self.now)["state"], "AMBER")
+
     def test_failed_worker_does_not_discard_successful_other_pool_read(self):
         def job(pool, settings, now):
             if pool.id == "one":

@@ -27,6 +27,8 @@ RUN_FIELDS = "databaseId,workflowName,headBranch,status,conclusion,createdAt,sta
 QUEUED = ("queued", "waiting", "pending", "requested")
 FAILED = ("failure", "timed_out", "startup_failure")
 MAX_JOB_READS = 5
+CACHE_BYTES = 2 << 20
+CACHE_DEPTH = 32
 
 
 def gh_run(argv, timeout=60):
@@ -228,7 +230,7 @@ def watch_add(run_id, note, now, pool_id=None):
         raise ValueError("a run id is digits only")
     file = watch_file(pool_id)
     with mmcore.Locked(file + ".lock" if pool_id else mmcore.path("state", "gh-watch.lock")):
-        w = _watch_records(mmcore.read_json(file, {}))
+        w = _watch_records(_cache_object(file))
         w[str(run_id)] = {"added": now, "note": note[:200], "status": None, "conclusion": None, "done_at": None}
         mmcore.write_atomic(file, json.dumps(w, sort_keys=True))
 
@@ -258,7 +260,7 @@ def poll_watched(watch, now, repo):
 def save_watch(watch, pool_id=None):
     file = watch_file(pool_id)
     with mmcore.Locked(file + ".lock" if pool_id else mmcore.path("state", "gh-watch.lock")):
-        cur = _watch_records(mmcore.read_json(file, {}))
+        cur = _watch_records(_cache_object(file))
         for rid, w in watch.items():
             if rid in cur:  # keep runs added meanwhile; update the ones read
                 # The command may re-add a run with a new note while the API read is in flight. Its current
@@ -369,6 +371,41 @@ def _snapshot_number(value):
         return False
 
 
+def _cache_object(path):
+    """A bounded cached JSON object. A bad file is unavailable, never an initialization failure."""
+    try:
+        raw = mmread.read_regular(path, CACHE_BYTES + 1)
+        if raw is None or len(raw) > CACHE_BYTES:
+            return None
+
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate cache key")
+                result[key] = value
+            return result
+
+        def constant(_):
+            raise ValueError("nonfinite cache number")
+
+        result = json.loads(raw, object_pairs_hook=unique, parse_constant=constant)
+        if not isinstance(result, dict):
+            return None
+        stack = [(result, 0)]
+        while stack:
+            node, depth = stack.pop()
+            if isinstance(node, (dict, list)):
+                if depth >= CACHE_DEPTH:
+                    return None
+                stack.extend((value, depth + 1) for value in (node.values() if isinstance(node, dict) else node))
+            elif isinstance(node, (int, float)) and not isinstance(node, bool) and not _snapshot_number(node):
+                return None
+        return result
+    except (OSError, UnicodeError, ValueError, RecursionError):
+        return None
+
+
 def usable_snapshot(read):
     """A cached adapter read, or None when it cannot be used safely.
 
@@ -475,8 +512,14 @@ class Pool:
     def cache_file(self):
         return mmcore.path("state", "pools", self.id, "github.json") if self.scoped else mmcore.path("state", "github.json")
 
+    def load_cache(self):
+        return _cache_object(self.cache_file())
+
     def watch_file(self):
         return watch_file(self.id if self.scoped else None)
+
+    def load_watch(self):
+        return _watch_records(_cache_object(self.watch_file()))
 
     def read(self, s, now, watch):
         return read_all(self.cfg, self.settings(s), now, watch)
@@ -495,10 +538,10 @@ class Pool:
 
     def job(self, s, now):
         """One full read in a worker thread: the watched runs too; writes state/github.json."""
-        raw_watch = mmcore.read_json(self.watch_file(), {}) or {}
+        raw_watch = _cache_object(self.watch_file())
         watch = _watch_records(raw_watch)
         res = read_all(self.cfg, s, now, watch)
-        if raw_watch != watch:
+        if raw_watch != watch and (raw_watch is not None or os.path.lexists(self.watch_file())):
             res.setdefault("errors", {})["watched"] = "watched-run state was malformed; unusable entries ignored"
         save_watch(res.get("watched") or {}, self.id if self.scoped else None)
         mmcore.write_atomic(self.cache_file(), json.dumps(res, sort_keys=True))
@@ -521,7 +564,7 @@ class Pool:
 
     def minutes_left(self, s, now):
         s = self.settings(s)
-        gh = mmcore.read_json(self.cache_file(), None)
+        gh = self.load_cache()
         # Placement needs only the age and consumed minutes. Keep the legacy minimal billing record usable even
         # when it has no gross amount or run summary; malformed time/usage still cannot block another pool.
         billing = gh.get("billing") if isinstance(gh, dict) else None
