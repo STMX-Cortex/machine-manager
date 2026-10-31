@@ -487,6 +487,8 @@ def cmd_watch(args, as_json):
         return err("E_USAGE", "watch needs --pool with multiple pools", "mm watch <run-id> --pool <id>")
     else:
         selected = configured[0] if configured else None
+    if selected is not None and not getattr(selected, "supports_watch", True):
+        return err("E_USAGE", "pool %r does not support watched runs" % selected.id, "use watch with a github-gh pool")
     scoped_id = selected.id if selected is not None and selected.scoped else None
     try:
         ad_ci_github.watch_add(args[0], note, time.time(), scoped_id)

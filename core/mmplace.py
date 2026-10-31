@@ -50,6 +50,13 @@ def place(req, s, profile, queue=None, pool=None, now=None):
     pools, guard_args, by_id = [], {}, {}
     active_rows = ((mmcore.read_json(mmcore.path("alerts-state.json"), {}) or {}).get("active") or {})
     for candidate in adapters:
+        if hasattr(candidate, "candidate"):
+            row = candidate.candidate(req, s, now)
+            row["stop_active"] = row.get("stop_active", False) or any(
+                candidate.owns(key) and value.get("name") == "GUARD_STOP" for key, value in active_rows.items())
+            pools.append(row)
+            guard_args[candidate.id], by_id[candidate.id] = candidate.guard_args(req)[0], candidate
+            continue
         left, src = candidate.minutes_left(s, now)
         gargs, gwhy = candidate.guard_args(req)
         guard_args[candidate.id], by_id[candidate.id] = gargs, candidate

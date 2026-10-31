@@ -1,0 +1,77 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "Read-only command pool status: capacity and load in the pool's configured unit",
+ "type": "object",
+ "required": [
+  "schema_version",
+  "read_time",
+  "state",
+  "capacity",
+  "load"
+ ],
+ "properties": {
+  "schema_version": {
+   "const": 1
+  },
+  "read_time": {
+   "type": "number",
+   "minimum": 0
+  },
+  "state": {
+   "enum": [
+    "GREEN",
+    "STEADY",
+    "AMBER",
+    "RED",
+    "UNKNOWN"
+   ]
+  },
+  "capacity": {
+   "type": "object",
+   "required": [
+    "unit",
+    "total",
+    "left"
+   ],
+   "properties": {
+    "unit": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+    },
+    "total": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 1000000000000000
+    },
+    "left": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 1000000000000000
+    }
+   },
+   "additionalProperties": false
+  },
+  "load": {
+   "type": "object",
+   "required": [
+    "running",
+    "queued"
+   ],
+   "properties": {
+    "running": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "queued": {
+     "type": "integer",
+     "minimum": 0
+    }
+   },
+   "additionalProperties": false
+  },
+  "why": {
+   "type": "string"
+  }
+ },
+ "additionalProperties": false
+}

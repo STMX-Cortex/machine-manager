@@ -232,8 +232,9 @@ no command and no inner cache candidates. An empty list, or no `keep`, preserves
 
 ## Pools
 
-Use `[[pools]]` for more than one GitHub Actions pool. Each entry has an `id`, an `adapter`, and the same GitHub
-fields as the existing `[ci]` section (`repo`, `billing_path`, `guard_argv`, guard arguments and command templates).
+Use `[[pools]]` for GitHub Actions, fixed capacity, or a resource read by a script. Each entry has an `id` and an
+`adapter`. A `github-gh` entry has the same GitHub fields as the existing `[ci]` section (`repo`, `billing_path`,
+`guard_argv`, guard arguments and command templates).
 Replace `[ci]` with the entries; combining both forms is an error. Existing `[ci]` profiles keep their behavior,
 alert keys and files.
 
@@ -260,19 +261,98 @@ reserve_minutes = 600
 ```
 
 An id is 1..80 ASCII letters, digits, dots, `-` or `_`, starts with a letter or digit, and is unique without regard
-to case. Optional `included_minutes` and `reserve_minutes` override `github.included_minutes` and
+to case. For `github-gh`, optional `included_minutes` and `reserve_minutes` override `github.included_minutes` and
 `github.reserve_minutes` for that pool. All other GitHub settings, including stop/near thresholds and read
 intervals, inherit the global `[github]` settings. A capacity override does not change those alert thresholds.
 Use a budget guard for each pool that enforces the account's actual limits.
 
-Each pool has its own worker, cached read (`state/pools/<id>/github.json`), status (`pools/<id>.json`), watched runs
-(`state/pools/<id>/watch.json`), and alert keys (`POOL:<id>:...`). A failed or stale pool does not invalidate another
+Each pool has its own worker, cached read under `state/pools/<id>/`, status (`pools/<id>.json`), and alert keys
+(`POOL:<id>:...`). GitHub pools also have watched runs (`state/pools/<id>/watch.json`). A failed or stale pool does not invalidate another
 pool's read. `mm resources` shows every configured pool and its runners. `mm place` tries pools in profile order,
 checks each pool's reserve and budget-stop alert, and tries the next pool if a guard refuses. It prints only the
 selected pool's commands and never dispatches them itself.
 
-With multiple pools, select the pool when watching a run: `mm watch 123456 --pool secondary --note go-test`.
-Placement's printed watch command already includes `--pool`. With one entry the pool is selected automatically.
+With multiple pools, select a GitHub pool when watching a run: `mm watch 123456 --pool secondary --note go-test`.
+GitHub placement's printed watch command already includes `--pool`. With one entry the pool is selected automatically.
+`mm watch` does not apply to `static` or `command` pools.
+
+
+### General pool adapters
+
+`static` describes a fixed capacity maintained by the owner. Its `left` defaults to `total`; `mm` does not decrement
+it after printing a placement recommendation. Use `command` when actual use needs to be read from another system.
+Both use capacity, reserve and job cost in their own `unit` (`credits`, `tasks`, `slots`, or another lower-case word).
+
+```toml
+[[pools]]
+id = "agent-credits"
+adapter = "static"
+unit = "credits"
+total = 100
+left = 80
+reserve = 10
+job_cost = 2
+plan_cost = 1
+start_argv = ["agent-submit", "--kind", "{kind}", "--shards", "{shards}"]
+
+[[pools]]
+id = "cloud-tasks"
+adapter = "command"
+unit = "tasks"
+reserve = 2
+job_cost = 1
+read_argv = ["/opt/example/read-cloud-capacity"]
+start_argv = ["cloud-submit", "--kind", "{kind}", "--sha", "{sha}"]
+timeout_s = 10
+max_bytes = 65536
+read_interval_s = 60
+stale_after_s = 300
+```
+
+A job kind must still appear in `[kinds.pool]`, whose value limits the shard count. The job cost is
+`plan_cost + shards * job_cost`; `plan_cost` defaults to 0. Optional `job_costs = { go-test = 3 }` overrides
+`job_cost` for named kinds. Placement requires enough remaining capacity to stay above the pool's reserve after
+that full cost. Costs and capacity are never compared across different units.
+
+`start_argv` is an argument list in the trusted profile. The executable word is literal; its arguments may use
+`{kind}`, `{shards}`, `{sha}`, `{branch}`,
+`{crate}`, `{diff_base}`, `{race}`, `{packages}`, and `{pool}`. Each filled argument is shell-quoted before display.
+A required request value that is missing prevents that placement. `mm place` prints the selected start command;
+it never executes it. A read command's output cannot supply or change a start command.
+
+For SSH submission, add `ssh_argv = ["ssh", "build-host"]` and keep `start_argv` as the remote argument list.
+`ssh_argv` contains 2..64 fixed nonempty words, starts with an executable whose basename is `ssh`, and allows no
+placeholders or control characters. The template fills `start_argv`, quotes it once into a single remote command,
+then quotes the SSH transport and that final command for display. A direct `ssh` executable in `start_argv` and
+shell `-c` modes are rejected. Other wrappers that interpret arguments as source require explicit care: the
+template engine fills arguments, not arbitrary embedded shell snippets.
+
+
+A `command` script prints one JSON object matching `schemas/pool-read.schema.json`, for example:
+
+```json
+{"schema_version":1,"read_time":1800000000,"state":"GREEN","capacity":{"unit":"tasks","total":20,"left":12},"load":{"running":3,"queued":0}}
+```
+
+`read_time` is the resource's read time in epoch seconds. It must be fresh, and `capacity.unit` must match the
+profile. Total and remaining capacity are finite nonnegative numbers, with `left <= total`; queued and running
+counts are nonnegative integers. Supported states are `GREEN`, `STEADY`, `AMBER`, `RED`, and `UNKNOWN`; `why` is an
+optional explanation. A stale, malformed, nonfinite, oversized or failed read yields `UNKNOWN` and cannot be placed.
+A pool in `RED` or `UNKNOWN` is unavailable for placement.
+
+The supervisor reads command pools in background workers. Placement uses those cached snapshots and never runs
+the read script itself. A command pool stays `UNKNOWN` until the first successful supervisor read. Static profile
+capacity is available immediately, without a supervisor read.
+
+Read scripts must only report resource status. Each runs in a private child session; timeout, excessive output,
+supervisor stop and successful completion clean up its remaining process group. Cleanup never selects a group
+from script output or request text. Scripts must not detach background services into another session.
+
+Reads have a time limit (default 10 s, range 0.1..30) and an output limit (default 65536 bytes, range
+1024..1048576). `read_cwd` optionally selects the script's working directory. `read_interval_s` defaults to 60 s
+(range 1..3600; at most one read is started per supervisor tick), and `stale_after_s` defaults to 300 s
+(range 1..86400). A read failure affects only that pool. `mm resources` continues to read cached files without
+running scripts or contacting a remote service. Optional `location` defaults to `cloud`.
 
 ## Settings
 
@@ -484,16 +564,13 @@ Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFI
 ## Roadmap
 
 Today the tool watches one machine and any configured list of GitHub Actions pools. Multiple-pool configuration,
-separate reads, alerts, reserves and placement are implemented (see Pools). Three parts remain. The rule for each part:
+separate reads, alerts, reserves and placement are implemented (see Pools). General adapters are also implemented.
+The rule for each part:
 you add any resource with a profile entry, and a new kind of resource needs one adapter file at most.
 
-1. **Any kind of pool.** One pool contract for every resource: the capacity left in its own unit (minutes, credits,
-   tasks or slots), a reserve, the cost of a job, the queued and running work, and the start command. Two general
-   adapters: `command` (a script prints the pool's state as JSON, checked against a schema, so a new resource needs
-   only the script and a profile entry) and `static` (a fixed capacity). Examples: a second CI system, a cloud
-   machine, a cloud agent service. The record contract exists (`schemas/resource.schema.json`: capacity in its own
-   unit, reserve, load, values, freshness), and `mm resources` shows any record that keeps it. Still to come: the cost
-   of a job, the start command, and the `command` and `static` adapters. Estimate: 1.5 to 2 hours.
+1. **Any kind of pool: implemented.** `command` reads bounded, schema-checked JSON from a script; `static` describes
+   fixed capacity. Both use capacity, reserve and per-job cost in the resource's own unit. `mm place` prints the
+   configured start command, and `mm resources` shows the cached resource record. See General pool adapters.
 2. **Many machines.** Each machine runs its own `mm` and writes its `status.json`. A collector reads them over the
    network, and placement chooses across machines and pools. Safety actions stay local on each machine and never
    depend on the network. Estimate: 1 to 2 days.

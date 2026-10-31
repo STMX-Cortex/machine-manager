@@ -11,6 +11,9 @@ import os
 import re
 import stat
 import subprocess
+import selectors
+import signal
+import sys
 import threading
 import time
 
@@ -21,6 +24,7 @@ plat = mmplat.backend()  # the platform backend: its readings and command paths
 
 
 _LIVE, _LIVE_LOCK = set(), threading.Lock()
+_LIVE_GROUPS = set()
 
 
 def run(argv, timeout=10, env=None):
@@ -47,16 +51,92 @@ def run(argv, timeout=10, env=None):
             _LIVE.discard(p)
 
 
-def kill_children():
-    """Kill every command run() has running now (any thread). Returns how many."""
+def _kill_owned_group(p):
+    """Only a group created by run_bounded's dedicated child session can reach this cleanup path.
+    The tiny supervisor child is not reaped before cleanup, so its reserved PID cannot identify a new group.
+    """
     with _LIVE_LOCK:
-        live = [p for p in _LIVE if p.poll() is None]
+        if p not in _LIVE_GROUPS:
+            return False
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        _LIVE_GROUPS.discard(p)
+        return True
+
+
+def kill_children():
+    """End owned command groups and other active run() commands on supervisor stop."""
+    with _LIVE_LOCK:
+        live = [p for p in _LIVE if p in _LIVE_GROUPS or p.poll() is None]
     for p in live:
         try:
-            p.kill()
+            if not _kill_owned_group(p):
+                p.kill()
         except OSError:
             pass
     return len(live)
+
+
+# Keep a known session leader until the reader exits. Its stdout stays open even when a reader closes its own
+# output early. os._exit closes it only at process exit, avoiding a reaped/reused group id during cleanup.
+_READER_CHILD = ("import os,subprocess,sys\n"
+                 "try: rc=subprocess.call(sys.argv[1:])\n"
+                 "except OSError: rc=127\n"
+                 "os._exit(rc if 0 <= rc <= 255 else 1)\n")
+
+
+def run_bounded(argv, timeout=10, max_bytes=65536, cwd=None):
+    """Read-only adapter command with bounded stdout/time, no shell/stdin, and cleanup of its owned child group.
+    Returns (rc, bytes, error). The private session joins the stop registry; no outside process group is signalled.
+    """
+    try:
+        p = subprocess.Popen([sys.executable, "-I", "-c", _READER_CHILD, *argv], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=cwd, start_new_session=True)
+    except (OSError, subprocess.SubprocessError):
+        return None, b"", "read command could not start"
+    with _LIVE_LOCK:
+        _LIVE.add(p)
+        _LIVE_GROUPS.add(p)
+    chunks, size, error = [], 0, None
+    deadline = time.monotonic() + timeout
+    try:
+        os.set_blocking(p.stdout.fileno(), False)
+        with selectors.DefaultSelector() as selector:
+            selector.register(p.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    error = "read command timed out"
+                    break
+                try:
+                    part = os.read(p.stdout.fileno(), min(65536, max_bytes + 1 - size))
+                except BlockingIOError:
+                    continue
+                if not part:
+                    break
+                chunks.append(part)
+                size += len(part)
+                if size > max_bytes:
+                    error = "read command exceeded %d bytes" % max_bytes
+                    break
+        _kill_owned_group(p)
+        p.wait(timeout=1)
+        if error:
+            return None, b"", error
+        return p.returncode, b"".join(chunks), None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None, b"", "read command output unavailable"
+    finally:
+        _kill_owned_group(p)
+        try:
+            p.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        p.stdout.close()
+        with _LIVE_LOCK:
+            _LIVE.discard(p)
 
 
 # --------------------------------------------------------------------------------------------- system calls (backend)
