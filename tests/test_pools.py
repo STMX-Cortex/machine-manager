@@ -126,7 +126,7 @@ class Pools(TempData):
         with mock.patch.object(mmread, "disk_free_gb", return_value=500):
             sup = mmsuper.Supervisor(self.profile_pools(), kernel=False, sizes=False, slow_jobs=False,
                                      clock=lambda: self.now, sampler=calm, check_readings=False)
-            self.assertFalse(sup._watch_pending(self.now, self.s(), first))
+            self.assertTrue(sup._watch_pending(self.now, self.s(), first), "invalid completion time is retried")
             self.assertTrue(sup._watch_pending(self.now, self.s(), second))
             sup.tick()
 
@@ -287,6 +287,44 @@ class Pools(TempData):
         self.assertIn("watched", result["errors"])
         self.assertEqual(pool.load_watch(), {})
         self.assertEqual(pool.status(result, self.s(), self.now)["state"], "AMBER")
+
+    def test_deep_or_oversized_cache_does_not_break_initialization_or_healthy_pool(self):
+        profile = self.profile_pools()
+        first, second = self.adapters()
+        invalid = [b'{"nested":' + b"[" * 2000 + b"0" + b"]" * 2000 + b"}",
+                   b" " * (ad_ci_github.CACHE_BYTES + 1)]
+        for raw in invalid:
+            with self.subTest(prefix=raw[:40]), mock.patch.object(mmread, "disk_free_gb", return_value=500):
+                Path(first.cache_file()).parent.mkdir(parents=True, exist_ok=True)
+                Path(first.cache_file()).write_bytes(raw)
+                self.write_read(second)
+                # A legacy cache left behind after a switch to [[pools]] is unused and must not be parsed.
+                Path(mmcore.path("state", "github.json")).write_bytes(raw)
+                sup = mmsuper.Supervisor(profile, kernel=False, sizes=False, slow_jobs=False, clock=lambda: self.now,
+                                         sampler=calm, check_readings=False)
+                sup.started -= 7200
+                sup.tick()
+                self.assertIsNone(sup.pool_reads["one"])
+                self.assertEqual(sup.pool_reads["two"]["billing"]["minutes"], 100)
+                self.assertEqual(mmcore.read_json(mmcore.path("pools", "one.json"))["state"], "UNKNOWN")
+                self.assertEqual(mmcore.read_json(mmcore.path("pools", "two.json"))["state"], "GREEN")
+                self.assertEqual(mmcore.read_json(mmcore.path("status.json"))["heartbeat"]["tick"], 1)
+
+    def test_deep_legacy_cache_and_watch_file_do_not_break_supervisor(self):
+        pool = mmadapters.pool(self.profile())
+        raw = b'{"nested":' + b"[" * 2000 + b"0" + b"]" * 2000 + b"}"
+        Path(pool.cache_file()).write_bytes(raw)
+        Path(pool.watch_file()).write_bytes(raw)
+        with mock.patch.object(mmread, "disk_free_gb", return_value=500):
+            sup = mmsuper.Supervisor(self.profile(), kernel=False, sizes=False, slow_jobs=False,
+                                     clock=lambda: self.now, sampler=calm, check_readings=False)
+            self.assertFalse(sup._watch_pending(self.now, self.s(), pool))
+            sup.started -= 7200
+            sup.tick()
+        self.assertIsNone(sup.cache["github"])
+        self.assertEqual(mmcore.read_json(mmcore.path("status.json"))["heartbeat"]["tick"], 1)
+        active = mmcore.read_json(mmcore.path("alerts-state.json"))["active"]
+        self.assertIn("SOURCE_STALE:gh", active)
 
     def test_failed_worker_does_not_discard_successful_other_pool_read(self):
         def job(pool, settings, now):

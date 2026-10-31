@@ -515,8 +515,9 @@ class Supervisor:
         self.gh = self.pool_workers[self.pool.id] if self.pool else None
         self.deletes = Worker(deletes_job)
         self.trim = Trim(self.state, self.queue, profile.get("trim") or {}, self.live_spec, self.mid)
-        self.cache["github"] = mmcore.read_json(mmcore.path("state", "github.json"), None)
-        self.pool_reads = {p.id: mmcore.read_json(p.cache_file(), None) for p in self.pools}
+        self.pool_reads = {p.id: p.load_cache() if callable(getattr(p, "load_cache", None)) else
+                           mmcore.read_json(p.cache_file(), None) for p in self.pools}
+        self.cache["github"] = self.pool_reads[self.pool.id] if self.pool and not self.pool.scoped else None
         self.cache["deletes"] = mmcore.read_json(mmcore.path("state", "deletes-last.json"), None)
         self.counts = mmcore.read_json(mmcore.path("state", "counts.json"), {}) or {}
         self.free_pct = None
@@ -906,7 +907,13 @@ class Supervisor:
         pool = pool or self.pool
         if pool is None:
             return False
-        w = mmcore.read_json(pool.watch_file(), {}) or {}
+        if callable(getattr(pool, "load_watch", None)):
+            w = pool.load_watch()
+        else:
+            watch_file = pool.watch_file() if callable(getattr(pool, "watch_file", None)) else None
+            if not watch_file:
+                return False
+            w = mmcore.read_json(watch_file, {}) or {}
         if isinstance(w, dict) and any(isinstance(v, dict) and not v.get("done_at") for v in w.values()):
             return self.due("gh_watch:" + pool.id if pool.scoped else "gh_watch", s["github.watch_interval_s"], now)
         return False
