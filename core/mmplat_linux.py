@@ -208,7 +208,10 @@ def cgroup_memory():
     groups = [line.split(":", 2) for line in raw.decode("utf-8", "replace").splitlines()]
     unified = next((x[2] for x in groups if len(x) == 3 and x[:2] == ["0", ""]), None)
     legacy = next((x[2] for x in groups if len(x) == 3 and "memory" in x[1].split(",")), None)
-    entry = unified if unified is not None else legacy
+    # On hybrid systems the explicit v1 memory membership owns the controller; the v2 hierarchy can contain
+    # unrelated controllers and no memory bounds at all.
+    use_unified = legacy is None
+    entry = unified if use_unified else legacy
     if entry is None:
         return None, None
     candidates = []
@@ -217,7 +220,7 @@ def cgroup_memory():
         left, right = before.split(), after.split()
         if not sep or len(left) < 5 or len(right) < 3:
             continue
-        wanted = right[0] == "cgroup2" if unified is not None else right[0] == "cgroup" and "memory" in right[2].split(",")
+        wanted = right[0] == "cgroup2" if use_unified else right[0] == "cgroup" and "memory" in right[2].split(",")
         if not wanted:
             continue
         root, mount = _mount_word(left[3]), _mount_word(left[4])
@@ -231,7 +234,7 @@ def cgroup_memory():
     if not candidates:
         return 0, None
     _, root, path = min(candidates)  # the widest view retains ancestor limits hidden by a subtree bind mount
-    cap_name, used_name = ("memory.max", "memory.current") if unified is not None else ("memory.limit_in_bytes", "memory.usage_in_bytes")
+    cap_name, used_name = ("memory.max", "memory.current") if use_unified else ("memory.limit_in_bytes", "memory.usage_in_bytes")
     limits, rooms, unknown = [], [], False
     while True:
         maximum, current = _read(path + "/" + cap_name, 128), _read(path + "/" + used_name, 128)
@@ -240,11 +243,11 @@ def cgroup_memory():
             # present-but-unreadable root bound cannot establish safety.
             if not os.path.isdir(path) or os.path.lexists(path + "/" + cap_name):
                 unknown = True
-        elif maximum.strip() == b"max" and unified is not None:
+        elif maximum.strip() == b"max" and use_unified:
             pass
         elif maximum.strip().isdigit():
             cap_bytes = int(maximum.strip())
-            if unified is not None or cap_bytes < 1 << 60:  # v1's PAGE_COUNTER_MAX means unlimited
+            if use_unified or cap_bytes < 1 << 60:  # v1's PAGE_COUNTER_MAX means unlimited
                 cap = cap_bytes / 2**20
                 limits.append(cap)
                 if current and current.strip().isdigit():

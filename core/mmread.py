@@ -299,6 +299,9 @@ def live_named(procs, spec):
         # so the guard fails closed (C-22a)
         live_re = regs and (mmtext.too_long(p["comm"]) or any(mmtext.search(r, p["comm"]) for r in regs))
         alias = p.get("name_alias", "")
+        if p.get("alias_truncated") and (suffixes or regs):
+            out.append(dict(p, comm=alias))
+            continue
         alias_match = alias and (alias in names or (suffixes and alias.endswith(suffixes)) or
                                  (len(alias) >= 15 and any(n.startswith(alias) for n in names)))
         if alias_match:
@@ -334,6 +337,7 @@ def read_ps():
             exe = plat.proc_exe(p["pid"])
             if exe:
                 p["name_alias"] = os.path.basename(p["comm"])
+                p["alias_truncated"] = len(p["name_alias"]) >= 15
                 p["comm"] = exe.removesuffix(" (deleted)")
             elif len(os.path.basename(p["comm"])) >= 15:
                 p["name_truncated"] = True

@@ -308,16 +308,36 @@ class Pauser:
         slot = queue.slot_file(newest["slot"])
         out = {"busy": newest, "slot": slot, "paused": [], "refused": [], "failed": None, "not_a_file": None}
         try:
-            regular = stat.S_ISREG(os.lstat(slot).st_mode)
+            slot_stat = os.lstat(slot)
         except FileNotFoundError:
             return out  # the call ended and its file is gone: nothing to pause
         except OSError as e:
             out["failed"] = "lstat failed (%s)" % e.__class__.__name__
             return out
-        if not regular:
+        if not stat.S_ISREG(slot_stat.st_mode):
             out["not_a_file"] = slot
             return out
-        openers = mmread.file_writers(slot, lsof_timeout)
+        if mmread.plat.SERVICE != "systemd":
+            return self._pause_slot(queue, lsof_timeout, out, slot)
+        try:
+            fd = os.open(slot, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        except OSError as e:
+            out["failed"] = "slot open failed (%s)" % e.__class__.__name__
+            return out
+        try:
+            pinned = os.fstat(fd)
+            if not stat.S_ISREG(pinned.st_mode) or (pinned.st_dev, pinned.st_ino) != (slot_stat.st_dev, slot_stat.st_ino):
+                out["failed"] = "slot changed before opener verification"
+                return out
+            # lsof resolves this descriptor in our process, not a mutable queue pathname. Keep it pinned through
+            # both opener reads and the final identity checks, so a symlink swap cannot select a different file.
+            return self._pause_slot(queue, lsof_timeout, out, "/proc/%d/fd/%d" % (os.getpid(), fd), pinned)
+        finally:
+            os.close(fd)
+
+    def _pause_slot(self, queue, lsof_timeout, out, query, pinned=None):
+        slot = out["slot"]
+        openers = mmread.file_writers(query, lsof_timeout)
         if openers is None:
             out["failed"] = "lsof failed"
             return out
@@ -332,6 +352,22 @@ class Pauser:
                      and (mmread.plat.SERVICE != "systemd" or mmread.plat.proc_interpreter(pid, queue.launcher()[0]))
                      and queue.runs_launcher(mmread.proc_argv(pid), lambda pid=pid: mmread.proc_cwd(pid, lsof_timeout))
                      and self.start_time(pid) == births[pid]]
+        if pinned is not None and launchers:
+            current_openers = mmread.file_writers(query, lsof_timeout)
+            if current_openers is None:
+                out["failed"] = "lsof recheck failed"
+                return out
+            # An opener may have exited before its first birth read. A replacement launcher must prove that it
+            # holds this pinned file while the captured birth is still current.
+            launchers = [pid for pid in launchers if pid in current_openers and self.start_time(pid) == births[pid]]
+            try:
+                current_slot = os.lstat(slot)
+            except OSError:
+                out["failed"] = "slot disappeared during opener verification"
+                return out
+            if (current_slot.st_dev, current_slot.st_ino) != (pinned.st_dev, pinned.st_ino):
+                out["failed"] = "slot changed during opener verification"
+                return out
         procs = mmread.read_ps() if launchers else []  # this moment's process tree, never an older reading
         if procs is None:
             out["failed"] = "ps failed"

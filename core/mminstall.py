@@ -422,6 +422,11 @@ def install(profile, settings_src=None, observe_only=True):
                         for n, p in sorted(found.items()) if not p]
     rec["warnings"] += mmdecide.timing_warnings(timing_context(profile), s)  # none at the defaults
     env = {"MM_PROFILE": profile["_file"], "MM_DATA": data, "PATH": path_}
+    if mmread.plat.SERVICE == "systemd":
+        # A user manager does not inherit the invoking shell's directory overrides. Keep record discovery and
+        # watchdog timer lookup anchored to the same directories used by the installer.
+        env["MM_BASE"] = mmcore.base_dir()
+        env["XDG_CONFIG_HOME"] = os.path.dirname(os.path.dirname(mmsystemd.directory()))
     os.makedirs(agents_dir(), exist_ok=True)
     sup, wd = labels(profile)
     # The installed supervisor may write the queue's slot file; the settings decide whether it does

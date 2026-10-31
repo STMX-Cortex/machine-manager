@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import signal
 import shutil
+import shlex
 import subprocess
 import sys
 import unittest
@@ -111,6 +112,18 @@ class Memory(unittest.TestCase):
         with mock.patch.object(linux, "_read", side_effect=lambda p, *a: files.get(p)):
             self.assertEqual(linux.cgroup_memory(), (100, 10))
 
+    def test_hybrid_cgroup_uses_the_v1_memory_controller(self):
+        files = {"/proc/self/cgroup": b"0::/unified\n5:memory:/limited\n",
+                 "/proc/self/mountinfo": b"1 0 0:1 / /sys/fs/cgroup/unified rw - cgroup2 cgroup rw\n"
+                                         b"2 0 0:2 / /sys/fs/cgroup/memory rw - cgroup cgroup rw,memory\n",
+                 "/sys/fs/cgroup/memory/memory.limit_in_bytes": str(1 << 62).encode(),
+                 "/sys/fs/cgroup/memory/limited/memory.limit_in_bytes": b"104857600",
+                 "/sys/fs/cgroup/memory/limited/memory.usage_in_bytes": b"94371840"}
+        with mock.patch.object(linux, "_read", side_effect=lambda p, *a: files.get(p)), \
+                mock.patch.object(linux.os.path, "isdir", return_value=True), \
+                mock.patch.object(linux.os.path, "lexists", return_value=False):
+            self.assertEqual(linux.cgroup_memory(), (100, 10))
+
     def test_full_mount_keeps_parent_limit_when_subtree_is_also_mounted(self):
         files = {"/proc/self/cgroup": b"0::/parent/job\n",
                  "/proc/self/mountinfo": b"1 0 0:1 / /sys/fs/cgroup rw - cgroup2 cgroup rw\n2 0 0:1 /parent/job /view rw - cgroup2 cgroup rw\n",
@@ -146,6 +159,17 @@ class Processes(unittest.TestCase):
     def test_truncated_name_cannot_hide_live_tool(self):
         p = {"pid": 1, "comm": "very-long-build", "name_truncated": True}
         self.assertEqual(mmread.live_named([p], {"names": ["very-long-build-tool"]}), [p])
+
+    def test_readable_executable_does_not_hide_a_truncated_test_alias(self):
+        with mock.patch.object(mmread, "plat", linux), \
+                mock.patch.object(mmread, "run", return_value=(0, "123 1 1024 0.0 very-long-build\n")), \
+                mock.patch.object(linux, "proc_start", return_value="birth"), \
+                mock.patch.object(linux, "proc_parent", return_value=1), \
+                mock.patch.object(linux, "proc_exe", return_value="/usr/bin/sleep"):
+            procs = mmread.read_ps()
+        self.assertTrue(procs[0]["alias_truncated"])
+        for spec in ({"suffixes":[".test"]}, {"path_regexes":[r"/build/.+\.test$"]}):
+            self.assertEqual([p["pid"] for p in mmread.live_named(procs, spec)], [123], spec)
 
 
 class Services(TempData):
@@ -197,6 +221,19 @@ class Services(TempData):
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("systemd user manager unavailable", r.stdout)
         self.assertFalse((Path(os.environ["XDG_CONFIG_HOME"]) / "systemd/user").exists())
+
+    def test_units_preserve_install_record_and_unit_directory_overrides(self):
+        self.assertEqual(self.linux("install").returncode, 0)
+        folder = Path(os.environ["XDG_CONFIG_HOME"]) / "systemd/user"
+        unit = folder / "com.example.machine-manager-test.service"
+        env = {"HOME": os.environ["HOME"]}
+        for line in unit.read_text().splitlines():
+            if line.startswith("Environment="):
+                key, value = shlex.split(line.split("=", 1)[1])[0].split("=", 1)
+                env[key] = value
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(mmsystemd.directory(), str(folder))
+            self.assertEqual(mmcore.install_record()["data"], self.data)
 
     def test_failed_enable_is_reported_and_can_be_rolled_back(self):
         r = self.linux("install", FAIL_SYSTEMCTL="enable")
@@ -263,6 +300,45 @@ class Services(TempData):
             self.assertEqual(got["paused"], [])
             send.assert_not_called()
             self.assertEqual(mmrecover.read_paused(), {})
+
+    @unittest.skipUnless(sys.platform == "linux", "requires real /proc descriptors")
+    def test_opener_reused_before_birth_capture_must_still_hold_the_slot(self):
+        import ad_queue_fifo
+        queue = ad_queue_fifo.Queue(self.profile()["queue"])
+        Path(queue.slot_file(".slot.0")).write_text("fixture")
+        with mock.patch.object(mmread, "file_writers", side_effect=[[123], []]), \
+                mock.patch.object(mmread.plat, "proc_interpreter", return_value=True, create=True), \
+                mock.patch.object(queue, "runs_launcher", return_value=True), \
+                mock.patch.object(mmsuper.Pauser, "start_time", return_value="replacement"), \
+                mock.patch.object(mmread, "read_ps", return_value=[{"pid":123,"ppid":1,"start_time":"replacement"}]), \
+                mock.patch.object(mmrecover, "signal_process") as send:
+            got = mmsuper.Pauser().pause([{"since":1,"slot":".slot.0"}], queue, 5)
+        self.assertEqual(got["paused"], [])
+        self.assertEqual(got["refused"], [123])
+        send.assert_not_called()
+
+    @unittest.skipUnless(sys.platform == "linux", "requires real /proc descriptors")
+    def test_lsof_uses_a_pinned_slot_when_the_path_is_replaced(self):
+        import ad_queue_fifo
+        queue = ad_queue_fifo.Queue(self.profile()["queue"])
+        slot = Path(queue.slot_file(".slot.0"))
+        slot.write_text("original")
+        seen = []
+        def writers(query, timeout):
+            seen.append(Path(query).read_text())
+            if len(seen) == 1:
+                slot.unlink()
+                slot.write_text("replacement")
+            return [123]
+        with mock.patch.object(mmread, "file_writers", side_effect=writers), \
+                mock.patch.object(mmread.plat, "proc_interpreter", return_value=True, create=True), \
+                mock.patch.object(queue, "runs_launcher", return_value=True), \
+                mock.patch.object(mmsuper.Pauser, "start_time", return_value="birth"), \
+                mock.patch.object(mmrecover, "signal_process") as send:
+            got = mmsuper.Pauser().pause([{"since":1,"slot":".slot.0"}], queue, 5)
+        self.assertEqual(seen, ["original", "original"])
+        self.assertIn("slot changed", got["failed"])
+        send.assert_not_called()
 
     def test_linux_readings_do_not_enter_safe_mode_for_missing_compressor(self):
         now = [1000]
