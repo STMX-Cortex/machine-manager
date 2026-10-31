@@ -163,7 +163,11 @@ class TempData(unittest.TestCase):
         import subprocess
         e = dict(os.environ)
         e.update(env or {})
-        return subprocess.run(MM + list(args), capture_output=True, text=True, timeout=timeout, env=e)
+        command = MM + list(args)
+        if args and args[0] == "check":
+            # Profile/settings/CLI checks use stable readings. test_live separately checks the actual host sampler.
+            command = [sys.executable, "-I", os.path.join(FIX, "check-command.py"), *args]
+        return subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=e)
 
 
 def load_fixture(name, year=2026):
