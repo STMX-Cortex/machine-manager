@@ -11,7 +11,9 @@ Keep the live supervisor on the machine it watches. Run the final macOS checks o
 4. Ask the owner to select the next feature. The roadmap does not authorize all its work at once.
 
 Multiple GitHub pools, general `command`/`static` adapters, and read-only fleet collection/placement are implemented.
-Live systemd and peer-host validation still require the owner's target machines. Monitoring integration remains.
+`mm metrics` exports cached machine/resource readings in Prometheus format (METRICS.md).
+Live systemd and peer-host validation still require the owner's target machines. Prometheus collection/hosting,
+Grafana dashboards, and broader storage discovery remain roadmap work.
 Use the README roadmap as the source when its details change.
 
 ## Tools

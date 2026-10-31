@@ -290,6 +290,11 @@ def _cached(profile, now):
     return out
 
 
+def cached_statuses(profile, now):
+    """Configured peer ids and validated snapshots (None when unavailable), from cache only."""
+    return [(cfg["id"], status) for cfg, row, status, why in _cached(profile, now)]
+
+
 def views(profile, now, s):
     out = []
     for cfg, row, status, why in _cached(profile, now):

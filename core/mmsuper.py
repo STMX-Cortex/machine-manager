@@ -1165,7 +1165,7 @@ class Supervisor:
             "slots": (q or {}).get("slots"), "slots_would": self.state.get("virtual_slots"),
             "busy": len((q or {}).get("busy", [])), "waiting": len((q or {}).get("tickets", [])),
             "readings": {k: (round(sample[k], 2) if isinstance(sample.get(k), float) else sample.get(k))
-                         for k in ("free_pct", "swap_used_mb", "swap_total_mb", "comp_mb", "pressure", "load5", "sys_pct",
+                         for k in ("free_pct", "swap_used_mb", "swap_total_mb", "comp_mb", "pressure", "seg_pct", "load5", "sys_pct",
                                    "cpu_pct", "psi_some_pct", "psi_full_pct")},
             "disk_gb": None if self.cache.get("disk") is None else round(self.cache["disk"], 1),
             "sampler": "commands" if self.fallback else "fast",

@@ -109,6 +109,7 @@ mm resources     # one line per resource: the machine, every pool, its runners, 
 ```
 
 Output is plain `key=value` lines; `--json` gives one JSON object. Errors are one line: `E_CODE what; fix: how`.
+`mm metrics` is a text-format export for Prometheus; see [METRICS.md](METRICS.md) for its metrics and freshness rules.
 
 `mm resources` reads files only: the machine from status.json, every other resource from `resources.json` (the
 supervisor writes it each tick from every adapter's records), plus the profile and the settings. No reading, no child
@@ -619,11 +620,17 @@ you add any resource with a profile entry, and a new kind of resource needs one 
 2. **Many machines: implemented.** `[[machines]]`, `mm collect`, cached resource rows and fleet placement read each
    machine's `status.json` over HTTP(S). Safety actions stay local. Live peer hosting and cross-host operation still
    need deployment validation on the owner's machines.
-3. **At large scale, a monitor watches and `mm` controls.** When scale comes, connect `mm` to Prometheus and Grafana,
-   and grow only its control part, because large-scale monitoring is already solved for free, and control for AI-agent
-   fleets is not. `mm` exports its readings as Prometheus metrics. Prometheus stores them, and Grafana draws the graphs
-   and sends the alerts; each runs as its own program. `mm` keeps the decisions: the slots, the placement, the guards
-   and the usage meters, across the whole fleet. Estimate: none yet; this part starts only when scale comes.
+3. **At large scale, a monitor watches and `mm` controls.** The first step, `mm metrics`, exports cached machine,
+   peer and resource readings as Prometheus text ([METRICS.md](METRICS.md)). Next: configure Prometheus collection
+   and hosting, then Grafana dashboards and alerts. Each runs as its own program. `mm` keeps the decisions: the slots,
+   the placement, the guards and the usage meters across the fleet. Monitoring does not acquire control authority.
+4. **Storage across Linux and macOS: planned.** Discover mounted filesystems and report capacity and available space
+   for each, with stable identities and bounded record counts. Follow with device read/write byte and operation rates,
+   and optional latency or device-health readings where the platform exposes them. Keep filesystem capacity separate
+   from device I/O: several mounts can share one device or storage pool. Missing or unsupported readings stay unknown.
+   Collect and export the records across machines without changing storage or adding automatic storage actions.
+   Today only the main filesystem's capacity and free space are reported per machine; broader discovery is separate
+   from the first Prometheus metrics export.
 
 ## Tests
 

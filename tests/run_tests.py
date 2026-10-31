@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 GROUPS = {
+    "metrics": ["test_metrics"],
     "generic_pools": ["test_generic_pools"],
     "fleet": ["test_fleet"],
     "linux": ["test_linux"],

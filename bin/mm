@@ -36,6 +36,7 @@ Agents:
   mm wait [--min-level attention|action]   block until an unseen alert (run it under a monitor)
   mm resources              one line per resource: machine, pools, runners, services (files only)
   mm collect                collect remote machine statuses into the local fleet cache
+  mm metrics                Prometheus metrics from cached snapshots (files only)
   mm settings show [KEY|SECTION]   the settings in force, each with its default (read-only)
 Owner:
   mm off [--reason TEXT] | mm on      every automatic action off or on; on also ends safe mode
@@ -257,6 +258,15 @@ def peek_settings():
     except Exception:
         s = None
     return s or mmcore.resolve(mmcore.defaults())
+
+
+def cmd_metrics(args, as_json, profile):
+    import mmprometheus
+    if args or as_json:
+        return err("E_USAGE", "metrics accepts no arguments or --json", "mm metrics [--profile FILE] [--data DIR]")
+    text, fresh = mmprometheus.export(profile, peek_settings(), time.time())
+    print(text, end="")
+    return 0 if fresh else 3
 
 
 def cmd_resources(args, as_json, profile):
@@ -640,6 +650,8 @@ def main(argv):
     profile = mmcore.load_profile()
     if verb == "settings":  # read-only: before the state folder is made, so it creates nothing
         return cmd_settings(args, as_json, profile)
+    if verb == "metrics":  # text exporter reads snapshots only, even when the supervisor has never run
+        return cmd_metrics(args, as_json, profile)
     os.makedirs(mmcore.path("state"), exist_ok=True)
     if verb == "status":
         return cmd_status(args, as_json)
