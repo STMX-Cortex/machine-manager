@@ -321,7 +321,8 @@ def check(profile_file=None, online=False):
     raw = mmcore.load_toml(prof["_file"])
     for p in mmschema.validate(raw, mmschema.load("profile")):
         out.append("E_PROFILE %s; fix: correct %s" % (p, prof["_file"]))
-    for part, fn in (("queue", mmadapters.queue), ("pools", mmadapters.pools), ("delivery", mmadapters.delivery)):
+    import mmfleet
+    for part, fn in (("queue", mmadapters.queue), ("pools", mmadapters.pools), ("delivery", mmadapters.delivery), ("machines", mmfleet.configs)):
         try:
             fn(prof)
         except mmcore.MMError as e:

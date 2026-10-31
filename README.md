@@ -150,6 +150,51 @@ Outside text (runner names and the like) shows cleaned and quoted as in "Agent-w
 machine status is fresh, 3 when status.json is missing or not fresh (the rows are still printed), 2 on a usage error. A
 supervisor that runs code older than `resources.json` writes none: until it restarts, only the machine row shows.
 
+## Machines
+
+A profile can list remote machines whose own `mm` supervisors keep all safety decisions local. Give each remote
+profile a `machine_id` matching its entry below, and serve that machine's `status.json` through existing private
+HTTP(S) hosting. HTTPS uses normal certificate verification. No server, remote agent, or remote service is installed
+by the collector.
+
+```toml
+[[machines]]
+id = "linux-worker"
+status_url = "https://worker.example.internal/mm/status.json"
+ssh_argv = ["ssh", "worker.example.internal"]
+start_argv = ["run-queued-job", "--kind", "{kind}", "--shards", "{shards}", "--branch", "{branch}"]
+timeout_s = 5
+stale_after_s = 60
+job_minutes = 40
+[machines.kinds]
+go-test = 8
+py-suite = 4
+```
+
+`mm collect` explicitly reads the configured endpoints and atomically writes `fleet.json`. It can be scheduled by
+the owner. At most 32 peers are read, four at a time; each request has a hard wall timeout (0.1–30 s) and a 1 MiB
+response limit. Redirects, URL credentials, non-HTTP(S) schemes, unsupported schemas, wrong machine ids, nonfinite
+numbers and excessive JSON nesting are rejected. Query strings and transport error details never reach the cache
+or output. A failed read replaces that peer with UNKNOWN without affecting other peers. Exit 1 means a peer could
+not be read; `--json` gives the collected record. No local queue, slot count, settings, process or service is changed.
+
+`mm resources` and `mm place` read only this cache for peers and perform no collection. Both the collection time
+and the remote supervisor's source time must be fresh; collecting an old `status.json` does not refresh the machine.
+A candidate must report GREEN or STEADY, action mode, known available memory and valid queue counts. Safe, off,
+observe and dry modes are not remote placement candidates. Supported kinds and shard limits are explicit per
+machine. Queue wait is estimated from its busy/waiting counts and `job_minutes`; local placement wins equal waits.
+A fast eligible remote can take work before a pool; a pool is preferred to a remote with a long queue. Machine and
+pool ids must be unique, including the local machine id. `--agents`, `--wide` and the configured wide kind keep
+checking the local machine because aggregate remote status cannot prove those local safety gates.
+
+Commands come only from the local profile and are printed, never dispatched. `start_argv` may use `{kind}`,
+`{shards}`, `{packages}`, `{branch}`, `{sha}`, `{crate}`, `{diff_base}` and `{race}` in its argument words; its
+executable is literal. With `ssh_argv`, the complete expanded remote argv is quoted into one SSH command argument,
+so branch names and other request values survive both local and remote shell parsing. The SSH transport words
+are fixed and contain no request placeholders. Without SSH transport, use a trusted local launcher that preserves
+argument boundaries. Direct `ssh` or shell `-c` templates in `start_argv` are rejected. Unreadable or stale peers
+never cause a signal, deletion, slot change or recovery action on another machine.
+
 ## Stop
 
 ```sh
@@ -563,17 +608,17 @@ Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFI
 
 ## Roadmap
 
-Today the tool watches one machine and any configured list of GitHub Actions pools. Multiple-pool configuration,
-separate reads, alerts, reserves and placement are implemented (see Pools). General adapters are also implemented.
-The rule for each part:
+Today the tool watches each machine locally and can place work across remote machines and configured GitHub,
+command and static pools. Multiple-pool configuration, general adapters and read-only machine collection are
+implemented (see Pools, General pool adapters and Machines). The rule for each part:
 you add any resource with a profile entry, and a new kind of resource needs one adapter file at most.
 
 1. **Any kind of pool: implemented.** `command` reads bounded, schema-checked JSON from a script; `static` describes
    fixed capacity. Both use capacity, reserve and per-job cost in the resource's own unit. `mm place` prints the
    configured start command, and `mm resources` shows the cached resource record. See General pool adapters.
-2. **Many machines.** Each machine runs its own `mm` and writes its `status.json`. A collector reads them over the
-   network, and placement chooses across machines and pools. Safety actions stay local on each machine and never
-   depend on the network. Estimate: 1 to 2 days.
+2. **Many machines: implemented.** `[[machines]]`, `mm collect`, cached resource rows and fleet placement read each
+   machine's `status.json` over HTTP(S). Safety actions stay local. Live peer hosting and cross-host operation still
+   need deployment validation on the owner's machines.
 3. **At large scale, a monitor watches and `mm` controls.** When scale comes, connect `mm` to Prometheus and Grafana,
    and grow only its control part, because large-scale monitoring is already solved for free, and control for AI-agent
    fleets is not. `mm` exports its readings as Prometheus metrics. Prometheus stores them, and Grafana draws the graphs

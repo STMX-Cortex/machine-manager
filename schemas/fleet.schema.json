@@ -1,0 +1,63 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "Read-only collected machine snapshots (fleet.json)",
+ "type": "object",
+ "required": [
+  "kind",
+  "time",
+  "machine_id",
+  "schema_version",
+  "machines"
+ ],
+ "properties": {
+  "kind": {
+   "const": "fleet"
+  },
+  "time": {
+   "type": "number"
+  },
+  "machine_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "schema_version": {
+   "const": 1
+  },
+  "machines": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "collected_at",
+     "status",
+     "error"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "minLength": 1
+     },
+     "collected_at": {
+      "type": "number"
+     },
+     "status": {
+      "type": [
+       "object",
+       "null"
+      ],
+      "description": "Schema-validated machine status; source time is authoritative for freshness."
+     },
+     "error": {
+      "type": [
+       "string",
+       "null"
+      ]
+     }
+    },
+    "additionalProperties": false
+   }
+  }
+ },
+ "additionalProperties": false
+}

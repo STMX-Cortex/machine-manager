@@ -65,6 +65,12 @@ the expected row is a list of `[key, value]` pairs, so the key order is part of 
 cap). In `machine_resource`, `pool_resources` and `usage_resources`, and in `resource_row`'s `running`, `queued` and
 `age_s`, whole numbers and rounded values are rounded as Python's `round`, half to even.
 
+`place_fleet` wraps `place` with cached remote machine candidates: `{id, state, eligible, kinds, wait_minutes}`.
+No remote candidates preserves the original answer. Equal waits prefer local, fast healthy remotes can precede
+pools, and pools precede long remote queues. Agent/wide gates remain local. `mmfleet` strictly validates source
+status identity, schema and age; the fleet cache never makes stale source data fresh. Remote commands are local
+profile argv only. An SSH transport receives one shell-quoted remote command, preserving both parsing boundaries.
+
 ## Schemas
 
 Profiles may use legacy `[ci]` or `[[pools]]` with unique ids, never both. Each listed pool has an independent worker,
@@ -80,7 +86,7 @@ adapter uses owner-maintained profile capacity; it does not consume capacity aut
 Both adapters retain the resource record contract, including the profile's reserve and their own freshness rule.
 
 JSON Schema (2020-12) files: `reading`, `status` (kind `machine` or `pool`), `resource` (`resources.json`), `alert`,
-`placement-request`, `placement`, `delete-line`, `off`, `override`, `profile`, `pool-read`, `settings`. `settings.schema.json` is
+`placement-request`, `placement`, `fleet` (collected peer snapshots), `delete-line`, `off`, `override`, `profile`, `pool-read`, `settings`. `settings.schema.json` is
 generated from the code's table (`mmcore.settings_json_schema()`); `tests/test_vectors.py` fails when they differ.
 
 Every file the tool writes as a record, and every log record, carries `machine_id` and `schema_version` (now 1); the
