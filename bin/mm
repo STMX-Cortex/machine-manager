@@ -109,9 +109,9 @@ def flag(args, name):
     return False
 
 
-def settings():
+def settings(save=True):
     st = mmcore.Settings()
-    s = st.load()
+    s = st.load(save=save)
     if s is None:
         raise mmcore.MMError("E_SETTINGS", "settings invalid: %s" % st.problem, "mm check")
     return s
@@ -245,7 +245,7 @@ def cmd_collect(args, as_json, profile):
     import mmfleet
     if args:
         return err("E_USAGE", "unknown words: %s" % " ".join(mmcore.quoted(a) for a in args), "mm collect [--json]")
-    rec = mmfleet.collect(profile, settings())
+    rec = mmfleet.collect(profile, settings(save=False))
     failures = sum(row["status"] is None for row in rec["machines"])
     emit(as_json, rec, [kv({"collected": len(rec["machines"]), "unavailable": failures})] +
          [kv({"machine": row["id"], "state": (row["status"] or {}).get("state", "UNKNOWN"),

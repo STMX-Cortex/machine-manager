@@ -58,6 +58,21 @@ class Collection(TempData):
     def view(self, profile=None, now=NOW):
         return mmfleet.views(profile or self.fleet_profile(), now, self.settings)[0]
 
+    def test_collect_cli_never_creates_or_rewrites_last_good_settings(self):
+        lastgood = Path(mmcore.path("state", "settings.lastgood.json"))
+        original = b'{"slots.floor":4}\n'
+        lastgood.write_bytes(original)
+        before = lastgood.stat().st_mtime_ns
+        result = self.mm("collect", "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(lastgood.read_bytes(), original)
+        self.assertEqual(lastgood.stat().st_mtime_ns, before)
+        lastgood.unlink()
+        result = self.mm("collect", "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(lastgood.exists())
+        self.assertTrue(Path(mmcore.path("fleet.json")).exists())
+
     def test_configuration_rejects_ambiguous_ids_and_unsafe_urls(self):
         bad_lists = [
             [machine_config("same"), machine_config("same")],
