@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import selectors
 import socket
@@ -153,8 +154,17 @@ def main():
                     for target in panel.get("targets", []):
                         expression = target["expr"].replace("$job", "machine-manager")
                         for variable in ("instance", "machine", "resource", "id", "unit"):
-                            expression = expression.replace("${%s:regex}" % variable, ".*")
+                            expression = expression.replace("${%s}" % variable, ".*")
                         query(expression)  # Parse and execute every shipped panel against real Prometheus.
+                        # Also exercise selected label values, including punctuation in the producer address.
+                        # Grafana's Prometheus datasource must provide the corresponding PromQL string escaping.
+                        selected = target["expr"].replace("$job", "machine-manager")
+                        for variable, value_ in {"instance": "127.0.0.1:%d" % central_port,
+                                                  "machine": "fixture-central", "resource": "pool",
+                                                  "id": "fixture-pool", "unit": "credits"}.items():
+                            escaped = json.dumps(re.escape(value_))[1:-1]
+                            selected = selected.replace("${%s}" % variable, escaped)
+                        query(selected)
                         count += 1
                 print("PASS %s: %d dashboard queries execute" % (dashboard.name, count), flush=True)
             remote_status = root / "fixture-peer" / "status.json"

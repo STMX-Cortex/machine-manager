@@ -70,7 +70,7 @@
           "uid": "${datasource}"
         },
         "query": {
-          "query": "label_values(machine_manager_machine_status_fresh{job=\"$job\",instance=~\"${instance:regex}\"}, machine_id)",
+          "query": "label_values(machine_manager_machine_status_fresh{job=\"$job\",instance=~\"${instance}\"}, machine_id)",
           "refId": "variable-machine"
         },
         "refresh": 2,
@@ -93,7 +93,7 @@
           "uid": "${datasource}"
         },
         "query": {
-          "query": "label_values(machine_manager_resource_fresh{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\"}, resource)",
+          "query": "label_values(machine_manager_resource_fresh{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}, resource)",
           "refId": "variable-resource"
         },
         "refresh": 2,
@@ -116,7 +116,7 @@
           "uid": "${datasource}"
         },
         "query": {
-          "query": "label_values(machine_manager_resource_fresh{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\"}, id)",
+          "query": "label_values(machine_manager_resource_fresh{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\"}, id)",
           "refId": "variable-id"
         },
         "refresh": 2,
@@ -139,7 +139,7 @@
           "uid": "${datasource}"
         },
         "query": {
-          "query": "label_values(machine_manager_resource_capacity_left{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}, unit)",
+          "query": "label_values(machine_manager_resource_capacity_left{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\"}, unit)",
           "refId": "variable-unit"
         },
         "refresh": 2,
@@ -193,7 +193,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "machine_manager_resource_fresh{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}",
+          "expr": "machine_manager_resource_fresh{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\"}",
           "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}}",
           "range": true,
           "instant": false,
@@ -251,7 +251,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "machine_manager_resource_state{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"} == 1",
+          "expr": "machine_manager_resource_state{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\"} == 1",
           "legendFormat": "{{instance}} / {{machine_id}}",
           "range": false,
           "instant": true,
@@ -327,7 +327,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "machine_manager_resource_capacity_left{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"}",
+          "expr": "machine_manager_resource_capacity_left{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\",unit=~\"${unit}\"}",
           "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} [{{unit}}]",
           "range": true,
           "instant": false,
@@ -385,7 +385,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "machine_manager_resource_capacity_left{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"} - machine_manager_resource_capacity_reserve{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"}",
+          "expr": "machine_manager_resource_capacity_left{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\",unit=~\"${unit}\"} - machine_manager_resource_capacity_reserve{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\",unit=~\"${unit}\"}",
           "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} [{{unit}}]",
           "range": true,
           "instant": false,
@@ -443,7 +443,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "machine_manager_resource_capacity_total{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"}",
+          "expr": "machine_manager_resource_capacity_total{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\",unit=~\"${unit}\"}",
           "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} total [{{unit}}]",
           "range": true,
           "instant": false,
@@ -452,7 +452,7 @@
         },
         {
           "refId": "B",
-          "expr": "machine_manager_resource_capacity_reserve{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"}",
+          "expr": "machine_manager_resource_capacity_reserve{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\",unit=~\"${unit}\"}",
           "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} reserve [{{unit}}]",
           "range": true,
           "instant": false,
@@ -510,7 +510,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "machine_manager_resource_running{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}",
+          "expr": "machine_manager_resource_running{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\"}",
           "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} running",
           "range": true,
           "instant": false,
@@ -519,7 +519,7 @@
         },
         {
           "refId": "B",
-          "expr": "machine_manager_resource_queued{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}",
+          "expr": "machine_manager_resource_queued{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\"}",
           "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} queued",
           "range": true,
           "instant": false,
@@ -577,7 +577,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "machine_manager_resource_value{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}",
+          "expr": "machine_manager_resource_value{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\",resource=~\"${resource}\",id=~\"${id}\"}",
           "legendFormat": "{{instance}} / {{machine_id}}",
           "range": false,
           "instant": true,
@@ -654,7 +654,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "machine_manager_snapshot_valid{job=\"$job\",instance=~\"${instance:regex}\",source=\"resources\"}",
+          "expr": "machine_manager_snapshot_valid{job=\"$job\",instance=~\"${instance}\",source=\"resources\"}",
           "legendFormat": "{{instance}}",
           "range": true,
           "instant": false,
