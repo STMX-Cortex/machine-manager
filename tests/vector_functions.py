@@ -16,6 +16,7 @@ import mmdecide
 import mmread
 import mmreplay
 import mmstorage
+import mmstorage_linux
 
 
 def _drop(d, *keys):
@@ -44,6 +45,7 @@ def _read_usage(i, s):
 
 
 FUNCTIONS = {
+    "storage_linux_mounts": lambda i, s: mmstorage_linux.parse_mountinfo(i["text"]),
     "storage_id": lambda i, s: mmstorage.storage_id(**i),
     "storage_capacity": lambda i, s: mmstorage.capacity(**i),
     "storage_mounts": lambda i, s: mmstorage.select_mounts(**i),

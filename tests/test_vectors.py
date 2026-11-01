@@ -29,7 +29,8 @@ class Vectors(unittest.TestCase):
         for fn in ("classify", "slot_decide", "alert_raise", "alert_absent", "conditions", "delete_guard", "place",
                    "drill_stop", "replay", "parse_billing", "mask", "sample_problems", "self_check", "crash_loop",
                    "resume_targets", "reboot_check", "resource_row", "machine_resource", "pool_resources",
-                   "usage_resources", "cap_records", "timing_warnings", "storage_id", "storage_capacity", "storage_mounts"):
+                   "usage_resources", "cap_records", "timing_warnings", "storage_id", "storage_capacity", "storage_mounts",
+                   "storage_linux_mounts"):
             self.assertGreaterEqual(counts.get(fn, 0), 3 if fn != "alert_absent" else 3, fn)
         mmtest.write_result("vector-counts.txt", ["%s=%d" % kv for kv in sorted(counts.items())])
 

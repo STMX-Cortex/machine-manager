@@ -18,6 +18,7 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Monitoring HTTP | `core/mmserve.py` | MONITORING.md; foreground loopback listener, fixed read-only paths, bounded connections/deadlines, filtered status with source time; no collection or control |
 | Private transport | `core/mmtailscale.py` | TAILSCALE.md; explicit foreground SSH tunnel over an owner-managed tailnet, fixed loopback forward, strict host keys, no profile/data writes; dry-run prints argv/URL |
 | Shared storage model | `core/mmstorage.py` | STORAGE.md and `storage.schema.json`; pure identities/capacity/selection/semantic validation; collectors and export remain separate scopes |
+| Linux storage collector | `core/mmstorage_linux.py` | STORAGE.md; explicit `mm storage`, bounded namespace/sysfs/udev discovery and pinned mount-ID capacity probes; no cache/control/export |
 
 ## Vectors
 
@@ -81,7 +82,8 @@ Storage scope 1 adds `storage_id`, `storage_capacity` and `storage_mounts` vecto
 `mmstorage`. STORAGE.md specifies identity hashing/canonicalization, exact integer capacity arithmetic, unknown
 values and exact-path selection. `storage.schema.json` also requires the semantic checks in `mmstorage.valid`:
 bounded/sorted unique records, resolved references, state/reason consistency, clean paths and capacity relations.
-No storage collector, runtime record writer or exporter is enabled by this contract.
+Scope 2 adds `storage_linux_mounts` parser vectors and the explicit Linux collector; the shared contract itself
+enables no automatic runtime writer, fleet storage field or exporter.
 
 Profiles may use legacy `[ci]` or `[[pools]]` with unique ids, never both. Each listed pool has an independent worker,
 read cache, status record and alert namespace (`POOL:<id>:`); GitHub pools also have their own watched-run file.
