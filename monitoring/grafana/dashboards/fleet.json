@@ -264,7 +264,31 @@
         "footer": {
           "show": false
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "Value": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "machine_id": 0,
+              "state": 1,
+              "instance": 2
+            },
+            "renameByName": {
+              "machine_id": "Machine",
+              "state": "State",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
     },
     {
       "id": 4,
@@ -308,7 +332,31 @@
         "footer": {
           "show": false
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "Value": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "machine_id": 0,
+              "mode": 1,
+              "instance": 2
+            },
+            "renameByName": {
+              "machine_id": "Machine",
+              "mode": "Mode",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
     },
     {
       "id": 5,
@@ -977,7 +1025,43 @@
         "footer": {
           "show": false
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "Value": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "alertname": 0,
+              "severity": 1,
+              "machine_id": 2,
+              "instance": 3,
+              "resource": 4,
+              "id": 5,
+              "parent": 6,
+              "location": 7,
+              "unit": 8
+            },
+            "renameByName": {
+              "alertname": "Alert",
+              "severity": "Severity",
+              "machine_id": "Machine",
+              "instance": "Producer",
+              "resource": "Kind",
+              "id": "ID",
+              "parent": "Parent",
+              "location": "Location",
+              "unit": "Unit"
+            }
+          }
+        }
+      ]
     }
   ]
 }

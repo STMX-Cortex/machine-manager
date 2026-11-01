@@ -275,7 +275,39 @@
         "footer": {
           "show": false
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "Value": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "id": 0,
+              "state": 1,
+              "parent": 2,
+              "machine_id": 3,
+              "resource": 4,
+              "location": 5,
+              "instance": 6
+            },
+            "renameByName": {
+              "id": "ID",
+              "state": "State",
+              "parent": "Parent",
+              "machine_id": "Machine",
+              "resource": "Kind",
+              "location": "Location",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
     },
     {
       "id": 3,
@@ -569,7 +601,40 @@
         "footer": {
           "show": false
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "id": 0,
+              "key": 1,
+              "Value": 2,
+              "parent": 3,
+              "machine_id": 4,
+              "resource": 5,
+              "location": 6,
+              "instance": 7
+            },
+            "renameByName": {
+              "id": "ID",
+              "key": "Reading",
+              "Value": "Value",
+              "parent": "Parent",
+              "machine_id": "Machine",
+              "resource": "Kind",
+              "location": "Location",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
     },
     {
       "id": 8,
