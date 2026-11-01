@@ -1,0 +1,18 @@
+{
+ "function": "storage_mounts",
+ "case": "local-aliases",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "category": "local",
+  "mounts": [
+   "/srv",
+   "/",
+   "/srv"
+  ]
+ },
+ "expected": [
+  "/",
+  "/srv"
+ ]
+}

@@ -1,0 +1,13 @@
+{
+ "function": "storage_mounts",
+ "case": "unknown-default",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "category": "unknown",
+  "mounts": [
+   "/mnt/test"
+  ]
+ },
+ "expected": []
+}

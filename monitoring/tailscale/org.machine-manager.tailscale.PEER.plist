@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>org.machine-manager.tailscale.PEER</string>
+  <key>ProgramArguments</key><array>
+    <string>/ABS/PYTHON3</string><string>-I</string><string>/ABS/MACHINE_MANAGER/bin/mm</string>
+    <string>tailscale</string><string>--peer</string><string>PEER.TAILNET.ts.net</string>
+    <string>--user</string><string>SSH_USER</string><string>--port</string><string>19877</string>
+  </array>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>15</integer><key>ExitTimeOut</key><integer>15</integer>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>/ABS/MONITORING/tailscale-PEER.log</string>
+  <key>StandardErrorPath</key><string>/ABS/MONITORING/tailscale-PEER.err.log</string>
+</dict></plist>

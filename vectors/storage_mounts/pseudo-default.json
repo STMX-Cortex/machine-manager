@@ -1,0 +1,13 @@
+{
+ "function": "storage_mounts",
+ "case": "pseudo-default",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "category": "pseudo",
+  "mounts": [
+   "/proc"
+  ]
+ },
+ "expected": []
+}

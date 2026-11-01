@@ -16,6 +16,8 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Command line | `bin/mm`, `core/mminstall.py`, `core/mmplace.py` | Same verbs, output lines and exit codes (`tests/test_cli.py`) |
 | Metrics export | `core/mmprometheus.py` | Prometheus text contract in METRICS.md; files only, bounded inputs, fresh known values only; no control or collection |
 | Monitoring HTTP | `core/mmserve.py` | MONITORING.md; foreground loopback listener, fixed read-only paths, bounded connections/deadlines, filtered status with source time; no collection or control |
+| Private transport | `core/mmtailscale.py` | TAILSCALE.md; explicit foreground SSH tunnel over an owner-managed tailnet, fixed loopback forward, strict host keys, no profile/data writes; dry-run prints argv/URL |
+| Shared storage model | `core/mmstorage.py` | STORAGE.md and `storage.schema.json`; pure identities/capacity/selection/semantic validation; collectors and export remain separate scopes |
 
 ## Vectors
 
@@ -75,6 +77,12 @@ profile argv only. An SSH transport receives one shell-quoted remote command, pr
 
 ## Schemas
 
+Storage scope 1 adds `storage_id`, `storage_capacity` and `storage_mounts` vectors for the pure functions in
+`mmstorage`. STORAGE.md specifies identity hashing/canonicalization, exact integer capacity arithmetic, unknown
+values and exact-path selection. `storage.schema.json` also requires the semantic checks in `mmstorage.valid`:
+bounded/sorted unique records, resolved references, state/reason consistency, clean paths and capacity relations.
+No storage collector, runtime record writer or exporter is enabled by this contract.
+
 Profiles may use legacy `[ci]` or `[[pools]]` with unique ids, never both. Each listed pool has an independent worker,
 read cache, status record and alert namespace (`POOL:<id>:`); GitHub pools also have their own watched-run file.
 Capacity and reserve overrides apply only to that pool; other GitHub thresholds inherit the settings table. Legacy `[ci]` retains its original files and
@@ -88,7 +96,7 @@ adapter uses owner-maintained profile capacity; it does not consume capacity aut
 Both adapters retain the resource record contract, including the profile's reserve and their own freshness rule.
 
 JSON Schema (2020-12) files: `reading`, `status` (kind `machine` or `pool`), `resource` (`resources.json`), `alert`,
-`placement-request`, `placement`, `fleet` (collected peer snapshots), `delete-line`, `off`, `override`, `profile`, `pool-read`, `settings`. `settings.schema.json` is
+`placement-request`, `placement`, `fleet` (collected peer snapshots), `storage` (standalone future collector contract), `delete-line`, `off`, `override`, `profile`, `pool-read`, `settings`. `settings.schema.json` is
 generated from the code's table (`mmcore.settings_json_schema()`); `tests/test_vectors.py` fails when they differ.
 
 Every file the tool writes as a record, and every log record, carries `machine_id` and `schema_version` (now 1); the

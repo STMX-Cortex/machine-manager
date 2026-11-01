@@ -1,0 +1,19 @@
+{
+ "function": "storage_mounts",
+ "case": "exact-not-recursive",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "category": "network",
+  "mounts": [
+   "/mnt/a",
+   "/mnt/a/child"
+  ],
+  "include": [
+   "/mnt/a"
+  ]
+ },
+ "expected": [
+  "/mnt/a"
+ ]
+}

@@ -1,0 +1,16 @@
+{
+ "function": "storage_mounts",
+ "case": "container-root",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "category": "overlay",
+  "mounts": [
+   "/srv/container",
+   "/"
+  ]
+ },
+ "expected": [
+  "/"
+ ]
+}

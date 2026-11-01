@@ -8,6 +8,10 @@ Read [CLOUD.md](CLOUD.md) for setup, test commands, and the Mac checks that rema
 An isolated Cloud checkout has no live Mac supervisor. Do not copy its profile or runtime data.
 Use the test fixtures. Do not install a supervisor to run the tests.
 
+Prefer **Tailscale** for Linux/Mac/cloud-VM connections; see [TAILSCALE.md](TAILSCALE.md) for setup and SSH exit codes.
+Keep listeners on loopback and verified host keys; no incidental tailnet/policy/login/service changes or Funnel.
+Existing private transports remain supported. Monitoring grants no remote control or automatic migration authority.
+
 ## Commands
 
 | Command | Use |
@@ -18,6 +22,7 @@ Use the test fixtures. Do not install a supervisor to run the tests.
 | `mm ack ID` | silence an alert you handled, until it gets worse |
 | `mm place --kind K [--shards N] [--wide] [--agents N]` | where a job runs: MACHINE, POOL or WAIT |
 | `mm resources` | one line per resource (machine, pools, runners, services); files only, fast |
+| `mm tailscale --peer HOST.TAILNET.ts.net --user USER [--port 19877]` | foreground SSH tunnel; add `--dry-run --json` for a plan without writes/connections |
 | `mm settings show [KEY\|SECTION]` | the settings in force, each with its default (read-only) |
 | `mm wait [--min-level action]` | block until an unseen alert (run it under a monitor) |
 | `mm event timing-failure --note TEXT` | report a test that failed by time (slots go down one step) |

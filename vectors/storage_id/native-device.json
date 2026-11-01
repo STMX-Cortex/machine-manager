@@ -1,0 +1,12 @@
+{
+ "function": "storage_id",
+ "case": "native-device",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "kind": "device",
+  "basis": "native",
+  "value": "fixture-disk"
+ },
+ "expected": "device:native:10c92de77628cc3657d6fc293ac0001d663327ed944f6aabebc2d61fd58941df"
+}

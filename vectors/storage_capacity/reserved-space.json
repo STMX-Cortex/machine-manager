@@ -1,0 +1,17 @@
+{
+ "function": "storage_capacity",
+ "case": "reserved-space",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "total_bytes": 100,
+  "free_bytes": 30,
+  "available_bytes": 20
+ },
+ "expected": {
+  "total_bytes": 100,
+  "free_bytes": 30,
+  "available_bytes": 20,
+  "used_bytes": 70
+ }
+}

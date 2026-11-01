@@ -1,0 +1,238 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "Storage observation contract (not yet collected or exported)",
+ "description": "Also requires mmstorage.valid semantic validation: bounds, clean text/paths, ordering, references, unknown states and capacity relations. Capacity groups are non-additive allocation domains.",
+ "type": "object",
+ "required": [
+  "schema_version",
+  "machine_id",
+  "time",
+  "state",
+  "reason",
+  "devices",
+  "filesystems"
+ ],
+ "properties": {
+  "schema_version": {
+   "type": "integer",
+   "const": 1
+  },
+  "machine_id": {
+   "type": "string",
+   "minLength": 1,
+   "maxLength": 120
+  },
+  "time": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 9007199254740991
+  },
+  "state": {
+   "enum": [
+    "OK",
+    "PARTIAL",
+    "UNKNOWN"
+   ]
+  },
+  "reason": {
+   "enum": [
+    null,
+    "unsupported",
+    "permission_denied",
+    "timeout",
+    "read_failed",
+    "invalid_data",
+    "truncated"
+   ]
+  },
+  "devices": {
+   "type": "array",
+   "maxItems": 128,
+   "items": {
+    "$ref": "#/$defs/device"
+   }
+  },
+  "filesystems": {
+   "type": "array",
+   "maxItems": 128,
+   "items": {
+    "$ref": "#/$defs/filesystem"
+   }
+  }
+ },
+ "additionalProperties": false,
+ "$defs": {
+  "capacity": {
+   "type": "object",
+   "required": [
+    "total_bytes",
+    "free_bytes",
+    "available_bytes",
+    "used_bytes"
+   ],
+   "properties": {
+    "total_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    },
+    "free_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    },
+    "available_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    },
+    "used_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    }
+   },
+   "additionalProperties": false
+  },
+  "device": {
+   "type": "object",
+   "required": [
+    "id",
+    "name",
+    "kind",
+    "size_bytes"
+   ],
+   "properties": {
+    "id": {
+     "type": "string",
+     "pattern": "^device:(uuid|wwn|native|session):[0-9a-f]{64}$",
+     "maxLength": 96
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 1024
+    },
+    "kind": {
+     "enum": [
+      "block",
+      "virtual",
+      "unknown"
+     ]
+    },
+    "size_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    }
+   },
+   "additionalProperties": false
+  },
+  "filesystem": {
+   "type": "object",
+   "required": [
+    "id",
+    "fs_type",
+    "category",
+    "mounts",
+    "read_only",
+    "device_ids",
+    "capacity_group",
+    "capacity",
+    "capacity_reason"
+   ],
+   "properties": {
+    "id": {
+     "type": "string",
+     "pattern": "^filesystem:(uuid|wwn|native|session):[0-9a-f]{64}$",
+     "maxLength": 96
+    },
+    "fs_type": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 64
+    },
+    "category": {
+     "enum": [
+      "local",
+      "network",
+      "memory",
+      "pseudo",
+      "overlay",
+      "unknown"
+     ]
+    },
+    "mounts": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 32,
+     "uniqueItems": true,
+     "items": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^/(?:[^/]+(?:/[^/]+)*)?$"
+     }
+    },
+    "read_only": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "device_ids": {
+     "type": "array",
+     "maxItems": 128,
+     "uniqueItems": true,
+     "items": {
+      "type": "string",
+      "pattern": "^device:(uuid|wwn|native|session):[0-9a-f]{64}$",
+      "maxLength": 96
+     }
+    },
+    "capacity_group": {
+     "anyOf": [
+      {
+       "type": "null"
+      },
+      {
+       "type": "string",
+       "pattern": "^capacity:(uuid|wwn|native|session):[0-9a-f]{64}$",
+       "maxLength": 96
+      }
+     ]
+    },
+    "capacity": {
+     "$ref": "#/$defs/capacity"
+    },
+    "capacity_reason": {
+     "enum": [
+      null,
+      "unsupported",
+      "permission_denied",
+      "timeout",
+      "read_failed",
+      "invalid_data",
+      "truncated"
+     ]
+    }
+   },
+   "additionalProperties": false
+  }
+ }
+}
