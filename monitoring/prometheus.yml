@@ -4,6 +4,9 @@ global:
   scrape_timeout: 5s
   evaluation_interval: 15s
 
+rule_files:
+  - machine-manager.rules.yml
+
 scrape_configs:
   - job_name: machine-manager
     metrics_path: /metrics

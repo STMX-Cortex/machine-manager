@@ -1,0 +1,934 @@
+{
+  "rule_files": [
+    "../machine-manager.rules.yml"
+  ],
+  "evaluation_interval": "15s",
+  "tests": [
+    {
+      "name": "healthy and unknown optional readings never fabricate alarms",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_machine_status_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_snapshot_valid{job=\"machine-manager\",instance=\"central:9877\",source=\"resources\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_resource_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-a\",location=\"cloud\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_memory_available_ratio{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0.05+0x30"
+        },
+        {
+          "series": "machine_manager_storage_available_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "10+0x30"
+        },
+        {
+          "series": "machine_manager_storage_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "100+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerTargetMissing",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerEndpointDown",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMachineStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerActionAlerts",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourceStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourcesInvalid",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "missing scrape configuration",
+      "interval": "1m",
+      "input_series": [],
+      "alert_rule_test": [
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerTargetMissing",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "severity": "critical"
+              },
+              "exp_annotations": {
+                "summary": "No machine-manager scrape target is present",
+                "description": "Check the Prometheus configuration and target discovery. This cannot detect Prometheus itself being down."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerEndpointDown",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerMachineStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerActionAlerts",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerResourceStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerResourcesInvalid",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "endpoint down suppresses stale and workload alerts",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_machine_status_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_snapshot_valid{job=\"machine-manager\",instance=\"central:9877\",source=\"resources\"}",
+          "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_memory_available_ratio{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_machine_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",state=\"RED\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_resource_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-a\",location=\"cloud\"}",
+          "values": "0+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerTargetMissing",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerEndpointDown",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "severity": "critical"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager endpoint cannot be scraped",
+                "description": "Check the listener, tunnel, scrape limits and Prometheus target error. Local safety remains independent."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMachineStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerActionAlerts",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourceStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourcesInvalid",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "stale machine suppresses old low readings",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_machine_status_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_snapshot_valid{job=\"machine-manager\",instance=\"central:9877\",source=\"resources\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_memory_available_ratio{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_machine_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",state=\"RED\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_alerts_active{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",level=\"ACTION\"}",
+          "values": "2+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerTargetMissing",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerEndpointDown",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMachineStale",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager source status is stale or unavailable",
+                "description": "Check the source supervisor and, for peers, collection and private transport. A successful scrape does not prove fresh readings."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerActionAlerts",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourceStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourcesInvalid",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "RED requires sustained fresh source",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_machine_status_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_machine_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",state=\"RED\"}",
+          "values": "1+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "1m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "2m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "state": "RED",
+                "severity": "critical"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager reports RED",
+                "description": "Inspect mm status and mm alerts on the source machine. Monitoring does not authorize a restart or changes to slots or safe mode."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "memory pending firing and recovery",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_machine_status_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_memory_available_ratio{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0.049+0x5 0.20+0x5"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "4m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "5m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Available memory is below five percent",
+                "description": "Sustained low available memory against the effective RAM limit. Inspect source readings and workload before acting."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "storage pending firing and recovery",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_machine_status_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_storage_available_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "9+0x10 20+0x5"
+        },
+        {
+          "series": "machine_manager_storage_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "100+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "9m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "10m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Main filesystem has less than ten percent available",
+                "description": "Only the main filesystem is measured. Inspect mm cleanup suggestions; this alert never deletes files."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "11m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "zero storage size remains unknown",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_machine_status_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_storage_available_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_storage_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerTargetMissing",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerEndpointDown",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMachineStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerActionAlerts",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourceStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourcesInvalid",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "(machine_manager_storage_available_bytes{job=\"machine-manager\",instance=~\".*\",machine_id=~\".*\"} / machine_manager_storage_size_bytes{job=\"machine-manager\",instance=~\".*\",machine_id=~\".*\"}) and (machine_manager_storage_size_bytes{job=\"machine-manager\",instance=~\".*\",machine_id=~\".*\"} > 0)",
+          "eval_time": "20m",
+          "exp_samples": []
+        }
+      ]
+    },
+    {
+      "name": "ACTION alerts",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_machine_status_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_alerts_active{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",level=\"ACTION\"}",
+          "values": "1+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerTargetMissing",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerEndpointDown",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerMachineStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerActionAlerts",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "level": "ACTION",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager has active ACTION alerts",
+                "description": "Read mm alerts and mm explain on the source host for the actual alert text, evidence and suggested command."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerResourceStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerResourcesInvalid",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "stale resource with valid document",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_snapshot_valid{job=\"machine-manager\",instance=\"central:9877\",source=\"resources\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_resource_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-a\",location=\"cloud\"}",
+          "values": "0+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerTargetMissing",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerEndpointDown",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMachineStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerActionAlerts",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerResourceStale",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "resource": "pool",
+                "id": "workers",
+                "parent": "team-a",
+                "location": "cloud",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager resource snapshot is stale",
+                "description": "Inspect the local adapter and resource source. Peer adapter records are not collected by the fleet collector."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerResourcesInvalid",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "invalid resource document is distinct from stale record",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_snapshot_valid{job=\"machine-manager\",instance=\"central:9877\",source=\"resources\"}",
+          "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_resource_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-a\",location=\"cloud\"}",
+          "values": "0+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerTargetMissing",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerEndpointDown",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMachineStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerActionAlerts",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerResourceStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerResourcesInvalid",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "source": "resources",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Local resources document is missing or invalid",
+                "description": "Check the source supervisor and resources.json. An empty valid resources list is allowed and does not trigger this alert."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "reserve threshold matches full identity and native unit",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_resource_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-a\",location=\"cloud\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_resource_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-b\",location=\"cloud\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_resource_capacity_left{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-a\",location=\"cloud\",unit=\"credits\"}",
+          "values": "10+0x30"
+        },
+        {
+          "series": "machine_manager_resource_capacity_reserve{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-a\",location=\"cloud\",unit=\"credits\"}",
+          "values": "10+0x30"
+        },
+        {
+          "series": "machine_manager_resource_capacity_left{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-b\",location=\"cloud\",unit=\"minutes\"}",
+          "values": "20+0x30"
+        },
+        {
+          "series": "machine_manager_resource_capacity_reserve{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-b\",location=\"cloud\",unit=\"minutes\"}",
+          "values": "10+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerTargetMissing",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerEndpointDown",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMachineStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMachineRed",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerMemoryLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerActionAlerts",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerResourceStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerResourcesInvalid",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "6m",
+          "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "resource": "pool",
+                "id": "workers",
+                "parent": "team-a",
+                "location": "cloud",
+                "unit": "credits",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Resource capacity is at or below its reserve",
+                "description": "Capacity is compared within one resource and native unit. Check the pool guard and budget; monitoring never dispatches work or buys capacity."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

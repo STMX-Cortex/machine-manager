@@ -204,13 +204,19 @@ class Hosting(TempData):
                 start = time.monotonic()
                 conn.sendall(b"GET /metrics HTTP/1.1\r\n")
                 sender.start()
-                self.assertEqual(conn.recv(1), b"")
+                try:
+                    self.assertEqual(conn.recv(1), b"")
+                except ConnectionResetError:
+                    # Closing a socket while its peer is still writing may produce RST instead of FIN.
+                    # Both mean the wall deadline ended the connection; a timeout must still fail.
+                    pass
                 self.assertLess(time.monotonic() - start, 2)
                 # Keep the client open: releasing the worker must not depend on the client closing its read half.
                 until = time.monotonic() + 1
                 while server.workers._value < mmserve.CONNECTIONS and time.monotonic() < until:
                     time.sleep(.01)
                 self.assertEqual(server.workers._value, mmserve.CONNECTIONS)
+                self.assertEqual(self.request(server, "/-/healthy")[::2], (200, b"ok\n"))
             finally:
                 stop.set()
                 if sender.ident is not None:

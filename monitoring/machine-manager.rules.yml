@@ -1,0 +1,85 @@
+# Evaluated by Prometheus, independently of Grafana. See GRAFANA.md for delivery and thresholds.
+groups:
+  - name: machine-manager
+    interval: 15s
+    rules:
+      - alert: MachineManagerTargetMissing
+        expr: absent(up{job="machine-manager"})
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: No machine-manager scrape target is present
+          description: Check the Prometheus configuration and target discovery. This cannot detect Prometheus itself being down.
+      - alert: MachineManagerEndpointDown
+        expr: up{job="machine-manager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Machine-manager endpoint cannot be scraped
+          description: Check the listener, tunnel, scrape limits and Prometheus target error. Local safety remains independent.
+      - alert: MachineManagerMachineStale
+        expr: (machine_manager_machine_status_fresh{job="machine-manager"} == 0) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Machine-manager source status is stale or unavailable
+          description: Check the source supervisor and, for peers, collection and private transport. A successful scrape does not prove fresh readings.
+      - alert: MachineManagerMachineRed
+        expr: (machine_manager_machine_state{job="machine-manager",state="RED"} == 1) and on(job, instance, machine_id) (machine_manager_machine_status_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Machine-manager reports RED
+          description: Inspect mm status and mm alerts on the source machine. Monitoring does not authorize a restart or changes to slots or safe mode.
+      - alert: MachineManagerMemoryLow
+        expr: (machine_manager_memory_available_ratio{job="machine-manager"} < 0.05) and on(job, instance, machine_id) (machine_manager_machine_status_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Available memory is below five percent
+          description: Sustained low available memory against the effective RAM limit. Inspect source readings and workload before acting.
+      - alert: MachineManagerStorageLow
+        expr: ((machine_manager_storage_available_bytes{job="machine-manager"} / machine_manager_storage_size_bytes{job="machine-manager"}) < 0.10) and (machine_manager_storage_size_bytes{job="machine-manager"} > 0) and on(job, instance, machine_id) (machine_manager_machine_status_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Main filesystem has less than ten percent available
+          description: Only the main filesystem is measured. Inspect mm cleanup suggestions; this alert never deletes files.
+      - alert: MachineManagerActionAlerts
+        expr: (machine_manager_alerts_active{job="machine-manager",level="ACTION"} > 0) and on(job, instance, machine_id) (machine_manager_machine_status_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Machine-manager has active ACTION alerts
+          description: Read mm alerts and mm explain on the source host for the actual alert text, evidence and suggested command.
+      - alert: MachineManagerResourceStale
+        expr: (machine_manager_resource_fresh{job="machine-manager"} == 0) and on(job, instance) (machine_manager_snapshot_valid{job="machine-manager",source="resources"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Machine-manager resource snapshot is stale
+          description: Inspect the local adapter and resource source. Peer adapter records are not collected by the fleet collector.
+      - alert: MachineManagerResourcesInvalid
+        expr: (machine_manager_snapshot_valid{job="machine-manager",source="resources"} == 0) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Local resources document is missing or invalid
+          description: Check the source supervisor and resources.json. An empty valid resources list is allowed and does not trigger this alert.
+      - alert: MachineManagerResourceReserve
+        expr: (machine_manager_resource_capacity_left{job="machine-manager"} <= machine_manager_resource_capacity_reserve{job="machine-manager"}) and on(job, instance, machine_id, resource, id, parent, location) (machine_manager_resource_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Resource capacity is at or below its reserve
+          description: Capacity is compared within one resource and native unit. Check the pool guard and budget; monitoring never dispatches work or buys capacity.

@@ -14,7 +14,8 @@ Central supervisor -> status.json/resources.json -> central mm serve /metrics ->
 ```
 
 This stage provides the endpoint, scrape configuration and service templates. It does not install or start them,
-change an existing supervisor, or provide Grafana dashboards. Test an isolated candidate before updating a live
+change an existing supervisor. Grafana dashboards and Prometheus alert rules are in [GRAFANA.md](GRAFANA.md).
+Test an isolated candidate before updating a live
 installation. Fixture collection is not proof that production queues or pool dispatch work.
 
 ## Start the endpoint in the foreground
@@ -127,7 +128,7 @@ ssh -N -T -o ExitOnForwardFailure=yes -L 127.0.0.1:19090:127.0.0.1:9090 central.
 ```
 
 Open `http://127.0.0.1:19090`. Do not enable the Prometheus admin/lifecycle API or expose its web UI publicly.
-Grafana dashboards and alert delivery are the next roadmap stage.
+For Grafana dashboards, Prometheus alert evaluation and owner-configured notification delivery, see [GRAFANA.md](GRAFANA.md).
 
 ## Optional persistent services: owner installation
 
