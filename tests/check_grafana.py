@@ -34,7 +34,7 @@ def main():
         return subprocess.run(docker + list(args), check=True, capture_output=True, text=True, timeout=90).stdout
 
     name = "mm-grafana-test-" + secrets.token_hex(8)
-    created = False
+    created, attached = False, None
     with tempfile.TemporaryDirectory(prefix="mm-grafana-") as temporary:
         root = Path(temporary)
         root.chmod(0o755)  # Container uid 472 must traverse the fixture; it contains no real credentials.
@@ -45,33 +45,41 @@ def main():
         (root / "grafana.ini").write_text((CODE / "monitoring/grafana/grafana.ini").read_text()
                                          .replace("/ABS/MONITORING", "/tmp/mm-monitoring"))
         password = secrets.token_urlsafe(32)
-        secret_file = root / "password"
-        secret_file.write_text(password)
-        secret_file.chmod(0o444)  # Disposable credential, read-only bind inside this container only.
         for path in root.rglob("*"):
-            if path != secret_file:
-                path.chmod(0o755 if path.is_dir() else 0o644)
+            path.chmod(0o755 if path.is_dir() else 0o644)
         # Explicitly disable client proxy defaults for loopback requests from this validation process.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         auth = "Basic " + base64.b64encode(("admin:" + password).encode()).decode()
         try:
-            run("create", "--pull=never", "--name", name, "--read-only", "--cap-drop=ALL",
+            run("create", "--pull=never", "--name", name, "--read-only", "--cap-drop=ALL", "--interactive",
+                "--entrypoint", "/bin/sh",
                 "--security-opt=no-new-privileges", "--memory=512m", "--cpus=1",
                 "--tmpfs", "/tmp:rw,size=256m,mode=1777", "--publish", "127.0.0.1::3000",
                 "--mount", "type=bind,src=%s,dst=/etc/grafana/provisioning,readonly" % (root / "provisioning"),
                 "--mount", "type=bind,src=%s,dst=/etc/mm-dashboards,readonly" % (root / "dashboards"),
                 "--mount", "type=bind,src=%s,dst=/etc/grafana/grafana.ini,readonly" % (root / "grafana.ini"),
-                "--mount", "type=bind,src=%s,dst=/run/mm-test-password,readonly" % secret_file,
-                "--env", "GF_SECURITY_ADMIN_PASSWORD__FILE=/run/mm-test-password",
                 "--env", "GF_PATHS_DATA=/tmp/mm-grafana-data", "--env", "GF_PATHS_LOGS=/tmp/mm-grafana-logs",
                 "--env", "GF_PATHS_PLUGINS=/tmp/mm-grafana-plugins",
                 "--env", "GF_PATHS_PROVISIONING=/etc/grafana/provisioning",
                 "--env", "GF_PLUGINS_PREINSTALL_DISABLED=true",
                 # Only the container listens on all of its interfaces; the host port is loopback-only.
-                "--env", "GF_SERVER_HTTP_ADDR=0.0.0.0", options.docker_image)
+                "--env", "GF_SERVER_HTTP_ADDR=0.0.0.0", options.docker_image, "-c",
+                "IFS= read -r GF_SECURITY_ADMIN_PASSWORD; export GF_SECURITY_ADMIN_PASSWORD; exec /run.sh")
             created = True
-            run("start", name)
-            inspected = json.loads(run("inspect", "--format", "{{json .NetworkSettings.Ports}}", name))
+            # Deliver the one-use fixture credential over stdin. Never persist it in a host file, Docker's
+            # configured environment, command arguments or logs. Grafana's database lives on container tmpfs.
+            attached = subprocess.Popen(docker + ["start", "--attach", "--interactive", name], stdin=subprocess.PIPE,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+            attached.stdin.write(password + "\n")
+            attached.stdin.close()
+            until = time.monotonic() + 15
+            while True:
+                inspected = json.loads(run("inspect", "--format", "{{json .NetworkSettings.Ports}}", name))
+                if inspected.get("3000/tcp"):
+                    break
+                if attached.poll() is not None or time.monotonic() >= until:
+                    raise RuntimeError("Grafana container did not publish its loopback port")
+                time.sleep(.1)
             binding, = inspected["3000/tcp"]
             if binding["HostIp"] != "127.0.0.1":
                 raise RuntimeError("fixture must publish only on host loopback")
@@ -127,6 +135,12 @@ def main():
         finally:
             if created:
                 run("rm", "--force", "--volumes", name)
+            if attached is not None:
+                try:
+                    attached.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    attached.terminate()
+                    attached.wait(timeout=15)
     print("PASS cleanup: removed fixture container, in-memory database and provisioning copies")
     return 0
 
