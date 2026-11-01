@@ -1,0 +1,15 @@
+# Example user unit. Replace every /ABS/... before use; see MONITORING.md.
+[Unit]
+Description=machine-manager read-only monitoring endpoint
+
+[Service]
+Type=simple
+ExecStart=/ABS/PYTHON3 -I /ABS/MACHINE_MANAGER/bin/mm serve --profile /ABS/PROFILE.toml --data /ABS/MM_DATA
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

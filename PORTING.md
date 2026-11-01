@@ -15,6 +15,7 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Adapters | `adapters/ad_queue_fifo.py`, `adapters/ad_ci_github.py`, generic pool adapters, `adapters/ad_deliver_claude.py` | One per kind; chosen by the profile's `adapter` value. Optional `resources(read, s, now)`: resource records (`schemas/resource.schema.json`, without `time`) from the adapter's last read and its own small files only (no command, no network, no waiting) |
 | Command line | `bin/mm`, `core/mminstall.py`, `core/mmplace.py` | Same verbs, output lines and exit codes (`tests/test_cli.py`) |
 | Metrics export | `core/mmprometheus.py` | Prometheus text contract in METRICS.md; files only, bounded inputs, fresh known values only; no control or collection |
+| Monitoring HTTP | `core/mmserve.py` | MONITORING.md; foreground loopback listener, fixed read-only paths, bounded connections/deadlines, filtered status with source time; no collection or control |
 
 ## Vectors
 

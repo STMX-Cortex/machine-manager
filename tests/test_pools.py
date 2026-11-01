@@ -194,7 +194,8 @@ class Pools(TempData):
     def test_supervisor_writes_each_status_and_keeps_alerts_separate(self):
         profile = self.profile_pools()
         for p in mmadapters.pools(profile):
-            self.write_read(p, gross=1 if p.id == "one" else 0)
+            # Isolate the paid-use stop; billed minutes could also raise a calendar-dependent pace alert.
+            self.write_read(p, used=0, gross=1 if p.id == "one" else 0)
         with mock.patch.object(mmread, "disk_free_gb", return_value=500):
             sup = mmsuper.Supervisor(profile, kernel=False, sizes=False, slow_jobs=False, clock=lambda: self.now,
                                      sampler=calm, check_readings=False)

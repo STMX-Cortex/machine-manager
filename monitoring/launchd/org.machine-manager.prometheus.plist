@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>org.machine-manager.prometheus</string>
+  <key>ProgramArguments</key><array>
+    <string>/ABS/PROMETHEUS</string>
+    <string>--config.file=/ABS/MONITORING/prometheus.yml</string>
+    <string>--storage.tsdb.path=/ABS/MONITORING/tsdb</string>
+    <string>--storage.tsdb.retention.time=15d</string><string>--storage.tsdb.retention.size=2GB</string>
+    <string>--web.listen-address=127.0.0.1:9090</string>
+  </array>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer><key>ExitTimeOut</key><integer>30</integer>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>/ABS/MONITORING/prometheus.log</string>
+  <key>StandardErrorPath</key><string>/ABS/MONITORING/prometheus.err.log</string>
+</dict></plist>

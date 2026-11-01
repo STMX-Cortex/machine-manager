@@ -37,6 +37,8 @@ Agents:
   mm resources              one line per resource: machine, pools, runners, services (files only)
   mm collect                collect remote machine statuses into the local fleet cache
   mm metrics                Prometheus metrics from cached snapshots (files only)
+  mm serve [--bind 127.0.0.1|::1] [--port 9877]
+                            foreground read-only /metrics and /status.json hosting (loopback only)
   mm settings show [KEY|SECTION]   the settings in force, each with its default (read-only)
 Owner:
   mm off [--reason TEXT] | mm on      every automatic action off or on; on also ends safe mode
@@ -267,6 +269,20 @@ def cmd_metrics(args, as_json, profile):
     text, fresh = mmprometheus.export(profile, peek_settings(), time.time())
     print(text, end="")
     return 0 if fresh else 3
+
+
+def cmd_serve(args, as_json, profile):
+    import mmserve
+    bind = opt(args, "--bind", "127.0.0.1")
+    port = opt(args, "--port", mmserve.PORT, int)
+    if args or as_json:
+        return err("E_USAGE", "serve accepts only --bind and --port", "mm help")
+    if bind not in ("127.0.0.1", "::1") or not 1 <= port <= 65535:
+        return err("E_RANGE", "serve needs a loopback IP and port 1..65535", "mm help")
+    try:
+        return mmserve.run(profile, bind, port)
+    except OSError:
+        return err("E_SERVE", "cannot bind or run monitoring server", "check the loopback address and port")
 
 
 def cmd_resources(args, as_json, profile):
@@ -652,6 +668,8 @@ def main(argv):
         return cmd_settings(args, as_json, profile)
     if verb == "metrics":  # text exporter reads snapshots only, even when the supervisor has never run
         return cmd_metrics(args, as_json, profile)
+    if verb == "serve":  # hosting creates no data/state folders and never initiates collection
+        return cmd_serve(args, as_json, profile)
     os.makedirs(mmcore.path("state"), exist_ok=True)
     if verb == "status":
         return cmd_status(args, as_json)

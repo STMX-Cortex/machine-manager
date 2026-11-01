@@ -110,6 +110,8 @@ mm resources     # one line per resource: the machine, every pool, its runners, 
 
 Output is plain `key=value` lines; `--json` gives one JSON object. Errors are one line: `E_CODE what; fix: how`.
 `mm metrics` is a text-format export for Prometheus; see [METRICS.md](METRICS.md) for its metrics and freshness rules.
+`mm serve` hosts `/metrics` and a filtered `/status.json` on loopback. Prometheus configuration, scheduled peer
+collection and Linux/macOS service templates are in [MONITORING.md](MONITORING.md).
 
 `mm resources` reads files only: the machine from status.json, every other resource from `resources.json` (the
 supervisor writes it each tick from every adapter's records), plus the profile and the settings. No reading, no child
@@ -155,8 +157,8 @@ supervisor that runs code older than `resources.json` writes none: until it rest
 
 A profile can list remote machines whose own `mm` supervisors keep all safety decisions local. Give each remote
 profile a `machine_id` matching its entry below, and serve that machine's `status.json` through existing private
-HTTP(S) hosting. HTTPS uses normal certificate verification. No server, remote agent, or remote service is installed
-by the collector.
+HTTP(S) hosting, or `mm serve` over a private tunnel/proxy (MONITORING.md). HTTPS uses normal certificate verification.
+No server, remote agent, or remote service is installed by the collector.
 
 ```toml
 [[machines]]
@@ -605,7 +607,7 @@ the CI pool; `GUARD_NEAR`, `GUARD_STOP` the CI budget.
 Exit codes: 0 ok; 1 nothing found or problems listed; 2 error (one `E_` line); 3 stale; 10 `POOL`; 20 `WAIT`;
 75 the supervisor restarts itself (`mm run` only).
 Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFILE`, `E_NO_PROFILE`, `E_SETTINGS`, `E_HOOKS`, `E_READINGS`,
-`E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`, `E_PLATFORM`.
+`E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`, `E_PLATFORM`, `E_SERVE`.
 
 ## Roadmap
 
@@ -621,8 +623,10 @@ you add any resource with a profile entry, and a new kind of resource needs one 
    machine's `status.json` over HTTP(S). Safety actions stay local. Live peer hosting and cross-host operation still
    need deployment validation on the owner's machines.
 3. **At large scale, a monitor watches and `mm` controls.** The first step, `mm metrics`, exports cached machine,
-   peer and resource readings as Prometheus text ([METRICS.md](METRICS.md)). Next: configure Prometheus collection
-   and hosting, then Grafana dashboards and alerts. Each runs as its own program. `mm` keeps the decisions: the slots,
+   peer and resource readings as Prometheus text ([METRICS.md](METRICS.md)). Collection/hosting now has a loopback
+   HTTP endpoint, Prometheus scrape configuration and Linux/macOS service templates ([MONITORING.md](MONITORING.md));
+   owner deployment validation remains. Next: Grafana dashboards and alerts. Each runs as its own program.
+   `mm` keeps the decisions: the slots,
    the placement, the guards and the usage meters across the fleet. Monitoring does not acquire control authority.
 4. **Storage across Linux and macOS: planned.** Discover mounted filesystems and report capacity and available space
    for each, with stable identities and bounded record counts. Follow with device read/write byte and operation rates,

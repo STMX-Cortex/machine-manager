@@ -12,8 +12,9 @@ Keep the live supervisor on the machine it watches. Run the final macOS checks o
 
 Multiple GitHub pools, general `command`/`static` adapters, and read-only fleet collection/placement are implemented.
 `mm metrics` exports cached machine/resource readings in Prometheus format (METRICS.md).
-Live systemd and peer-host validation still require the owner's target machines. Prometheus collection/hosting,
-Grafana dashboards, and broader storage discovery remain roadmap work.
+`mm serve` provides loopback HTTP hosting; Prometheus configuration and systemd/launchd collection/hosting templates
+are in MONITORING.md. Live service managers, private peer hosting and production integrations still require the
+owner's target machines. Grafana dashboards and broader storage discovery remain roadmap work.
 Use the README roadmap as the source when its details change.
 
 ## Tools
@@ -56,6 +57,9 @@ and push to `main`, on Ubuntu 24.04 and macOS 15 with Python 3.11 and 3.14.
 Each matrix job runs independently, reports failures and skip reasons in its job summary,
 and uploads `tests/results/` as an artifact for 14 days, including on test failure.
 The workflow uses the test fixtures and does not install a persistent supervisor.
+A separate Linux job downloads checksum-pinned Prometheus 3.15.1, checks the scrape configuration, and runs
+`tests/check_prometheus.py` against disposable loopback endpoints and a temporary TSDB. It verifies ingestion,
+peer metrics, staleness and endpoint failure, and uploads its report for 14 days. Nothing is installed as a service.
 
 These hosted runner checks cover platform compatibility. Real systemd user service
 recovery and collection/placement between the owner's machines still need target-host

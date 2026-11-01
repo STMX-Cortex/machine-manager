@@ -9,8 +9,9 @@ python3 -I bin/mm metrics --profile profiles/example.toml --data /path/to/data
 Use the profile and data folder for the machine to monitor. The command reads `status.json`, `resources.json`
 and, for configured peers, `fleet.json`. It runs no system sampler, adapter command or network request, writes no
 files, and starts no server or background service. Collect peers separately with `mm collect` and let each local
-supervisor refresh its own status. Prometheus collection/hosting configuration and Grafana dashboards are the next
-steps; this export does not install either. A plain output file can be consumed by a textfile collector later.
+supervisor refresh its own status. For the separate `mm serve` HTTP endpoint, scheduled collection, Prometheus
+configuration and Linux/macOS hosting templates, see [MONITORING.md](MONITORING.md). This export does not start or
+install those programs. Grafana dashboards are the next stage.
 
 Exit 0 means the local machine status is valid and fresh. Exit 3 means it is missing, invalid or stale; stdout still
 contains valid health metrics and any other usable cached records. Exit 2 reports a usage/profile error.
