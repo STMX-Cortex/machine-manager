@@ -16,6 +16,7 @@ sys.path.insert(0, HERE)
 
 GROUPS = {
     "generic_pools": ["test_generic_pools"],
+    "fleet": ["test_fleet"],
     "linux": ["test_linux"],
     "pools": ["test_pools"],
     "red_sys_memory_sign": ["test_red_sys_memory_sign"],  # R-1: system CPU needs a current memory sign for RED

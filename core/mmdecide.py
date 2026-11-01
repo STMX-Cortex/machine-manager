@@ -407,6 +407,37 @@ def place(req, ctx, s):
     return _ans("MACHINE", m["id"], out + [wtxt, "no pool: " + " | ".join(no_all)])
 
 
+def place_fleet(req, ctx, s):
+    """Placement with optional, already validated remote machine candidates. Safety gates stay local.
+    machines: [{id, eligible, state, kinds: {kind: max_shards}, wait_minutes}]. A local machine wins equal waits;
+    an eligible fast remote can precede pools, while a pool precedes a remote with a long queue.
+    """
+    answer = place(req, ctx, s)
+    if not ctx.get("machines") or req.get("agents") or req.get("wide") or req.get("kind") == ctx.get("wide_kind"):
+        return answer
+    shards, kind = req.get("shards", 1), req["kind"]
+    candidates = []
+    for machine in ctx["machines"]:
+        wait = machine.get("wait_minutes")
+        limit = (machine.get("kinds") or {}).get(kind)
+        if machine.get("eligible") and machine.get("state") in ("GREEN", "STEADY") and _num(wait) is not None \
+                and wait >= 0 and type(shards) is int and type(limit) is int and 1 <= shards <= limit:
+            candidates.append(machine)
+    if not candidates:
+        return answer
+    best = min(candidates, key=lambda m: m["wait_minutes"])
+    local = ctx["machine"]
+    local_wait = expected_wait(local.get("queue"), local.get("medians") or {}, s["queue.default_run_minutes"], ctx["now"])
+    local_usable = local.get("state") in ("GREEN", "STEADY", "AMBER")
+    if local_usable and local_wait is not None and local_wait <= best["wait_minutes"]:
+        return answer
+    fast_remote = best["wait_minutes"] <= s["queue.placement_max_mac_wait_minutes"]
+    if not fast_remote and (answer.get("need_guard") or answer["place"] == "POOL"):
+        return answer
+    return _ans("MACHINE", best["id"], ["remote machine %s: state %s, estimated wait %.1f min" % (
+        best["id"], best["state"], best["wait_minutes"]), "fresh remote status; controls remain on that machine"])
+
+
 def _ans(place_, cand, reasons):
     return {"place": place_, "candidate": cand, "reasons": reasons, "need_guard": None}
 

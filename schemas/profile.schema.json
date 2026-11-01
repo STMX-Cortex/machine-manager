@@ -837,6 +837,68 @@
     ]
    },
    "description": "Independent github-gh, static or command pools; replaces [ci]. Each id is unique. Each adapter uses its own capacity unit and reserve."
+  },
+  "machines": {
+   "type": "array",
+   "description": "Read-only remote machines collected by mm collect; ids must not collide with pools/local machine.",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "status_url",
+     "start_argv",
+     "kinds"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"
+     },
+     "status_url": {
+      "type": "string",
+      "minLength": 1
+     },
+     "start_argv": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+       "type": "string"
+      }
+     },
+     "kinds": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 1024
+      }
+     },
+     "stale_after_s": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 3600
+     },
+     "timeout_s": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 30
+     },
+     "job_minutes": {
+      "type": "number",
+      "minimum": 0.01,
+      "maximum": 1440
+     },
+     "ssh_argv": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+       "type": "string"
+      },
+      "description": "Fixed SSH transport arguments ending in destination. start_argv becomes one quoted remote command."
+     }
+    },
+    "additionalProperties": false
+   }
   }
  },
  "additionalProperties": false

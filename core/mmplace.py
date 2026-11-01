@@ -9,6 +9,7 @@ import time
 
 import mmcore
 import mmdecide
+import mmfleet
 import mmread
 
 
@@ -69,13 +70,14 @@ def place(req, s, profile, queue=None, pool=None, now=None):
                       "guard": None, "guard_why": gwhy, "stop_active": stopped})
     ctx = {"now": now, "kinds": {"machine_only": profile["kinds"].get("machine_only", {}), "pool": profile["kinds"].get("pool", {})},
            "wide_kind": profile["kinds"].get("wide") or None, "machine": machine, "pools": pools}
+    ctx["machines"] = mmfleet.views(profile, now, s)
     shown = dict(req, kind=mmcore.quoted(req["kind"]))  # a profile's kind is bare and stays as it is
-    ans = mmdecide.place(shown, ctx, s)
+    ans = mmdecide.place_fleet(shown, ctx, s)
     while ans["need_guard"]:
         ident = ans["need_guard"]
         rc, line = by_id[ident].guard(guard_args[ident])
         next(row for row in pools if row["id"] == ident)["guard"] = {"rc": rc, "line": mmcore.clean(mmcore.mask(line))}
-        ans = mmdecide.place(shown, ctx, s)
+        ans = mmdecide.place_fleet(shown, ctx, s)
     if mv["source"] != "supervisor":
         ans["reasons"].append("state source: " + mv["source"])
     cmds = []
@@ -87,6 +89,12 @@ def place(req, s, profile, queue=None, pool=None, now=None):
         if pool.scoped:
             watch += " --pool " + shlex.quote(pool.id)
         cmds = pool.commands(req, guard_args[pool.id] or [], watch)
+    elif ans["place"] == "MACHINE" and ans["candidate"] != machine["id"]:
+        if changed:
+            ans["reasons"].append("commands withheld: a request word held a character outputs replace")
+        else:
+            cfg = next(c for c in mmfleet.configs(profile) if c["id"] == ans["candidate"])
+            cmds = mmfleet.commands(cfg, req)
     rec = mmcore.stamp({"kind": "placement", "time": now, "request": req, "place": ans["place"], "candidate": ans["candidate"],
                         "reasons": ans["reasons"], "commands": cmds}, profile)
     return rec
