@@ -65,6 +65,30 @@ class GenericPools(TempData):
         return mmplace.place(dict({"kind":"go-test","shards":1}, **request), self.s(), profile,
                              pool=mmadapters.pools(profile), now=self.now)
 
+    def test_oversized_cache_timestamp_does_not_block_other_pools_or_tick(self):
+        cfg = self.command(ident="broken")
+        profile = self.profile_for(cfg, self.config(ident="healthy"))
+        pool = self.pools(cfg)[0]
+        mmcore.write_atomic(pool.cache_file(), json.dumps({"time": 10**400,
+                            "data": self.state(), "error": None}))
+        result = self.place(cfg, self.config(ident="healthy"))
+        self.assertEqual((result["place"], result["candidate"]), ("POOL", "healthy"))
+        sup = mmsuper.Supervisor(profile, kernel=False, sampler=calm, sizes=False,
+                                 slow_jobs=False, check_readings=False, clock=lambda: self.now)
+        sup.tick()
+        self.assertEqual(mmcore.read_json(mmcore.path("pools", "broken.json"))["state"], "UNKNOWN")
+
+    def test_command_rejects_integers_too_large_for_numeric_consumers(self):
+        for field in ("running", "queued"):
+            with self.subTest(field=field):
+                data = self.state()
+                data["load"][field] = 10**400
+                pool = self.pools(self.command(data))[0]
+                result = pool.job(self.s(), self.now)
+                self.assertIsNone(result["data"])
+                self.assertIsNotNone(result["error"])
+                self.assertIsNone(pool.latest(self.now)[0])
+
     def test_mixed_static_command_and_github_preserve_schema(self):
         github = copy.deepcopy(self.profile()["ci"])
         github["id"] = "github"
