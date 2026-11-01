@@ -21,8 +21,11 @@ FIELDS = {"kind", "shards", "sha", "branch", "crate", "diff_base", "race", "pack
 
 
 def _finite(value):
-    if isinstance(value, float) and not math.isfinite(value):
-        return False
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return math.isfinite(value)
+        except OverflowError:
+            return False
     if isinstance(value, dict):
         return all(_finite(x) for x in value.values())
     if isinstance(value, list):
@@ -161,6 +164,8 @@ class Pool:
         try:
             if not isinstance(read, dict):
                 return None, "no pool read"
+            if not _finite(read):
+                return None, "pool snapshot contains an unusable number"
             when = read.get("time")
             if isinstance(when, bool) or not isinstance(when, (int, float)) or not math.isfinite(when):
                 return None, "pool snapshot time invalid"

@@ -1,0 +1,19 @@
+# Central collector: local machine plus peers from its fleet.json. See MONITORING.md.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: machine-manager
+    metrics_path: /metrics
+    scheme: http
+    follow_redirects: false
+    honor_labels: false
+    sample_limit: 100000
+    body_size_limit: 16MB
+    label_limit: 16
+    label_name_length_limit: 128
+    label_value_length_limit: 512
+    static_configs:
+      - targets: ['127.0.0.1:9877']

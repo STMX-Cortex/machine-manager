@@ -406,7 +406,7 @@ def _cache_object(path):
         return None
 
 
-def usable_snapshot(read):
+def usable_snapshot(read, now=None):
     """A cached adapter read, or None when it cannot be used safely.
 
     Atomic writes prevent partial files, but an older or damaged snapshot must not stop the supervisor or keep
@@ -415,6 +415,8 @@ def usable_snapshot(read):
     number = _snapshot_number
 
     if not isinstance(read, dict) or not number(read.get("time")):
+        return None
+    if now is not None and read["time"] > now + 5:
         return None
     errors = read.get("errors") or {}
     if not isinstance(errors, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in errors.items()):
@@ -525,7 +527,7 @@ class Pool:
         return read_all(self.cfg, self.settings(s), now, watch)
 
     def conditions(self, gh, s, now, mk, owner):
-        found = conditions(usable_snapshot(gh), self.settings(s), now, mk, owner)
+        found = conditions(usable_snapshot(gh, now), self.settings(s), now, mk, owner)
         if self.scoped:
             found = [dict(c, key=self.prefix + c["key"], text="pool %s: %s" % (self.id, c["text"])) for c in found]
         return found
@@ -548,7 +550,7 @@ class Pool:
         return res
 
     def status(self, gh, s, now, alerts=()):
-        gh = usable_snapshot(gh)
+        gh = usable_snapshot(gh, now)
         s = self.settings(s)
         st, why = pool_state(gh, s, now)
         b = (gh or {}).get("billing") or {}
@@ -560,7 +562,7 @@ class Pool:
                              "alerts": list(alerts), "read_time": (gh or {}).get("time")}, mid=self.id)
 
     def resources(self, gh, s, now):
-        return pool_resources(usable_snapshot(gh), self.settings(s), now, self.id)
+        return pool_resources(usable_snapshot(gh, now), self.settings(s), now, self.id)
 
     def minutes_left(self, s, now):
         s = self.settings(s)
@@ -569,7 +571,7 @@ class Pool:
         # when it has no gross amount or run summary; malformed time/usage still cannot block another pool.
         billing = gh.get("billing") if isinstance(gh, dict) else None
         if isinstance(billing, dict) and _snapshot_number(gh.get("time")) and _snapshot_number(billing.get("minutes")) \
-                and now - gh["time"] < s["github.stale_minutes"] * 60:
+                and -5 <= now - gh["time"] < s["github.stale_minutes"] * 60:
             return s["github.included_minutes"] - billing["minutes"], "the supervisor's read"
         rc, out = gh_run(["api", self.cfg["billing_path"]])
         if rc != 0:

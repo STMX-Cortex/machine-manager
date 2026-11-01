@@ -24,8 +24,20 @@ class Live(unittest.TestCase):
                 break
             time.sleep(2)
         self.assertEqual(bad, [], (fast, cmd))
-        for k in ("free_pct", "swap_total_mb", "swap_used_mb", "comp_mb", "pressure", "seg_pct", "load1", "load5"):
+        for k in ("free_pct", "swap_total_mb", "swap_used_mb", "comp_mb", "pressure", "load1", "load5"):
             self.assertIsNotNone(fast.get(k), k)
+
+    @mmtest.darwin_only
+    def test_compressor_segments_when_exposed_by_kernel(self):
+        names = ("vm.compressor.segment.total", "vm.compressor.segment.limit")
+        result = subprocess.run(["/usr/sbin/sysctl", *names], capture_output=True, text=True, timeout=10)
+        reading = mmread.plat.memory_readings()["seg_pct"]
+        if result.returncode != 0 and "unknown oid" in result.stderr.lower():
+            self.assertIsNone(reading, "an unavailable kernel metric must remain unknown")
+            self.skipTest("kernel does not expose compressor segment sysctls")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(reading)
+        self.assertGreaterEqual(reading, 0)
 
     def test_disk_matches_df(self):
         rc, out = mmread.run(["/bin/df", "-k", mmread.plat.DATA_VOLUME], timeout=10)

@@ -79,12 +79,17 @@ def kill_children():
     return len(live)
 
 
-# Keep a known session leader until the reader exits. Its stdout stays open even when a reader closes its own
-# output early. os._exit closes it only at process exit, avoiding a reaped/reused group id during cleanup.
-_READER_CHILD = ("import os,subprocess,sys\n"
-                 "try: rc=subprocess.call(sys.argv[1:])\n"
+# Keep a known session leader alive until cleanup. It reports the command status through a private descriptor
+# (closed in the command), then closes stdout. EOF can precede process exit on macOS, so the leader's status
+# after group cleanup cannot be used as the command's status. No group id is reaped/reused before cleanup.
+_READER_CHILD = ("import os,signal,subprocess,sys\n"
+                 "try: rc=subprocess.call(sys.argv[2:])\n"
                  "except OSError: rc=127\n"
-                 "os._exit(rc if 0 <= rc <= 255 else 1)\n")
+                 "fd=int(sys.argv[1])\n"
+                 "os.write(fd,str(rc if 0 <= rc <= 255 else 1).encode('ascii'))\n"
+                 "os.close(fd)\n"
+                 "os.close(1)\n"
+                 "while True: signal.pause()\n")
 
 
 def run_bounded(argv, timeout=10, max_bytes=65536, cwd=None):
@@ -92,10 +97,18 @@ def run_bounded(argv, timeout=10, max_bytes=65536, cwd=None):
     Returns (rc, bytes, error). The private session joins the stop registry; no outside process group is signalled.
     """
     try:
-        p = subprocess.Popen([sys.executable, "-I", "-c", _READER_CHILD, *argv], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=cwd, start_new_session=True)
-    except (OSError, subprocess.SubprocessError):
+        status_r, status_w = os.pipe()
+    except OSError:
         return None, b"", "read command could not start"
+    try:
+        p = subprocess.Popen([sys.executable, "-I", "-c", _READER_CHILD, str(status_w), *argv],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             cwd=cwd, start_new_session=True, pass_fds=(status_w,))
+    except (OSError, subprocess.SubprocessError):
+        os.close(status_r)
+        return None, b"", "read command could not start"
+    finally:
+        os.close(status_w)
     with _LIVE_LOCK:
         _LIVE.add(p)
         _LIVE_GROUPS.add(p)
@@ -103,6 +116,7 @@ def run_bounded(argv, timeout=10, max_bytes=65536, cwd=None):
     deadline = time.monotonic() + timeout
     try:
         os.set_blocking(p.stdout.fileno(), False)
+        os.set_blocking(status_r, False)
         with selectors.DefaultSelector() as selector:
             selector.register(p.stdout, selectors.EVENT_READ)
             while True:
@@ -121,11 +135,15 @@ def run_bounded(argv, timeout=10, max_bytes=65536, cwd=None):
                 if size > max_bytes:
                     error = "read command exceeded %d bytes" % max_bytes
                     break
+        # The wrapper writes this before closing stdout; never wait on a missing status after an external stop.
+        rc = int(os.read(status_r, 16)) if not error else None
+        if rc is not None and not 0 <= rc <= 255:
+            raise ValueError("invalid command status")
         _kill_owned_group(p)
         p.wait(timeout=1)
         if error:
             return None, b"", error
-        return p.returncode, b"".join(chunks), None
+        return rc, b"".join(chunks), None
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None, b"", "read command output unavailable"
     finally:
@@ -135,6 +153,7 @@ def run_bounded(argv, timeout=10, max_bytes=65536, cwd=None):
         except subprocess.TimeoutExpired:
             pass
         p.stdout.close()
+        os.close(status_r)
         with _LIVE_LOCK:
             _LIVE.discard(p)
 

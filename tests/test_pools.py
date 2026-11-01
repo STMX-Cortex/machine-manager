@@ -53,6 +53,21 @@ class Pools(TempData):
         mmcore.write_atomic(mmcore.path("status.json"), json.dumps(
             {"time": self.now, "state": state, "reasons": ["busy"], "readings": {"free_pct": 30}}))
 
+    def test_future_github_cache_is_unknown_and_does_not_supply_budget(self):
+        pool = self.adapters()[0]
+        future = reading(self.now + 3600)
+        mmcore.write_atomic(pool.cache_file(), json.dumps(future))
+        with mock.patch.object(ad_ci_github, "gh_run", return_value=(1, "unavailable")) as api:
+            self.assertIsNone(pool.minutes_left(self.s(), self.now)[0])
+            api.assert_called_once()
+        self.assertEqual(pool.status(future, self.s(), self.now)["state"], "UNKNOWN")
+        self.assertEqual(pool.resources(future, self.s(), self.now)[0]["state"], "UNKNOWN")
+        found = pool.conditions(future, self.s(), self.now, mmalerts._c, "owner")
+        self.assertTrue(any(c["name"] == "SOURCE_STALE" for c in found))
+        skewed = reading(self.now + 5)
+        mmcore.write_atomic(pool.cache_file(), json.dumps(skewed))
+        self.assertEqual(pool.minutes_left(self.s(), self.now)[0], self.s()["github.included_minutes"] - 100)
+
     def test_config_normalization_and_schema(self):
         p = self.profile_pools(self.config("build-a", reserve_minutes=42, included_minutes=500))
         raw = {k: v for k, v in p.items() if not k.startswith("_") and k != "ci"}
@@ -194,7 +209,8 @@ class Pools(TempData):
     def test_supervisor_writes_each_status_and_keeps_alerts_separate(self):
         profile = self.profile_pools()
         for p in mmadapters.pools(profile):
-            self.write_read(p, gross=1 if p.id == "one" else 0)
+            # Isolate the paid-use stop; billed minutes could also raise a calendar-dependent pace alert.
+            self.write_read(p, used=0, gross=1 if p.id == "one" else 0)
         with mock.patch.object(mmread, "disk_free_gb", return_value=500):
             sup = mmsuper.Supervisor(profile, kernel=False, sizes=False, slow_jobs=False, clock=lambda: self.now,
                                      sampler=calm, check_readings=False)

@@ -1,0 +1,15 @@
+# Install a separate official Prometheus binary; replace /ABS/... paths.
+[Unit]
+Description=Prometheus for machine-manager
+
+[Service]
+Type=simple
+ExecStart=/ABS/PROMETHEUS --config.file=/ABS/MONITORING/prometheus.yml --storage.tsdb.path=/ABS/MONITORING/tsdb --storage.tsdb.retention.time=15d --storage.tsdb.retention.size=2GB --web.listen-address=127.0.0.1:9090
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

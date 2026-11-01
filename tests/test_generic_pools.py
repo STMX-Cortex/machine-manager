@@ -65,6 +65,30 @@ class GenericPools(TempData):
         return mmplace.place(dict({"kind":"go-test","shards":1}, **request), self.s(), profile,
                              pool=mmadapters.pools(profile), now=self.now)
 
+    def test_oversized_cache_timestamp_does_not_block_other_pools_or_tick(self):
+        cfg = self.command(ident="broken")
+        profile = self.profile_for(cfg, self.config(ident="healthy"))
+        pool = self.pools(cfg)[0]
+        mmcore.write_atomic(pool.cache_file(), json.dumps({"time": 10**400,
+                            "data": self.state(), "error": None}))
+        result = self.place(cfg, self.config(ident="healthy"))
+        self.assertEqual((result["place"], result["candidate"]), ("POOL", "healthy"))
+        sup = mmsuper.Supervisor(profile, kernel=False, sampler=calm, sizes=False,
+                                 slow_jobs=False, check_readings=False, clock=lambda: self.now)
+        sup.tick()
+        self.assertEqual(mmcore.read_json(mmcore.path("pools", "broken.json"))["state"], "UNKNOWN")
+
+    def test_command_rejects_integers_too_large_for_numeric_consumers(self):
+        for field in ("running", "queued"):
+            with self.subTest(field=field):
+                data = self.state()
+                data["load"][field] = 10**400
+                pool = self.pools(self.command(data))[0]
+                result = pool.job(self.s(), self.now)
+                self.assertIsNone(result["data"])
+                self.assertIsNotNone(result["error"])
+                self.assertIsNone(pool.latest(self.now)[0])
+
     def test_mixed_static_command_and_github_preserve_schema(self):
         github = copy.deepcopy(self.profile()["ci"])
         github["id"] = "github"
@@ -188,6 +212,24 @@ class GenericPools(TempData):
         self.assertIsNone(rc)
         self.assertIn("timed out", why)
         self.assertLess(time.monotonic()-started, 0.5)
+
+    def test_command_status_survives_group_cleanup_and_early_stdout_close(self):
+        for rc in (0, 7):
+            with self.subTest(rc=rc):
+                code = "import os,sys,time; print('done',flush=True); os.close(1); time.sleep(.05); sys.exit(%d)" % rc
+                real_cleanup = mmread._kill_owned_group
+                cleaned = []
+
+                def cleanup(p):
+                    result = real_cleanup(p)
+                    if result:
+                        cleaned.append(p.wait(timeout=1))
+                    return result
+
+                with mock.patch.object(mmread, "_kill_owned_group", side_effect=cleanup):
+                    result = mmread.run_bounded([sys.executable, "-I", "-c", code])
+                self.assertEqual(result, (rc, b'done\n', None))
+                self.assertEqual(cleaned, [-9], "cleanup kills the reserved leader after the command completes")
 
     def test_bounded_reader_is_registered_for_supervisor_stop(self):
         marker = Path(self.root) / "reader-started"

@@ -592,6 +592,9 @@ class C1StartGrace(Base):
         self.assertTrue(json.load(open(os.path.join(self.data, "state", "run.json")))["clean"], "a stop while starting is clean")
         # the stop deadline is cancelled once run_loop returns in time (else its os._exit ends the caller later:
         # 2026-10-14, the test runner itself ended at once with rc 0 and no output)
+        for timer in [t for t in threading.enumerate() if isinstance(t, threading.Timer) and t.is_alive()]:
+            self.assertTrue(timer.finished.is_set(), "the stop deadline must already be cancelled")
+            timer.join(timeout=1)  # cancel sets the event; thread exit can follow a moment later
         self.assertEqual([t for t in threading.enumerate() if isinstance(t, threading.Timer) and t.is_alive()], [])
 
     def test_a_start_that_fails_is_unclean(self):

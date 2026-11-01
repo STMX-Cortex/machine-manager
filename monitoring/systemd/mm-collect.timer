@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh machine-manager peers without overlapping collections
+
+[Timer]
+OnStartupSec=5
+OnUnitInactiveSec=15
+AccuracySec=1
+Unit=mm-collect.service
+
+[Install]
+WantedBy=timers.target

@@ -14,6 +14,8 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Jobs and loop | `core/mmsuper.py`, `core/mmwatch.py`, `core/mmrecover.py`, `core/mmdelete.py`, `core/mmdrill.py`, `bin/cachetrim.py` | Same behaviour; tests in `tests/` describe it. The tick and the job intervals come from `[schedule]` (README.md, Schedules); the tick is read before each wait |
 | Adapters | `adapters/ad_queue_fifo.py`, `adapters/ad_ci_github.py`, generic pool adapters, `adapters/ad_deliver_claude.py` | One per kind; chosen by the profile's `adapter` value. Optional `resources(read, s, now)`: resource records (`schemas/resource.schema.json`, without `time`) from the adapter's last read and its own small files only (no command, no network, no waiting) |
 | Command line | `bin/mm`, `core/mminstall.py`, `core/mmplace.py` | Same verbs, output lines and exit codes (`tests/test_cli.py`) |
+| Metrics export | `core/mmprometheus.py` | Prometheus text contract in METRICS.md; files only, bounded inputs, fresh known values only; no control or collection |
+| Monitoring HTTP | `core/mmserve.py` | MONITORING.md; foreground loopback listener, fixed read-only paths, bounded connections/deadlines, filtered status with source time; no collection or control |
 
 ## Vectors
 
@@ -103,7 +105,9 @@ Resource record caps are reader limits, not validity rules (a longer list or tex
 
 1. Readings never block a tick for long: every outside command has a time limit.
    Generic command readers also have byte and depth bounds. They run in dedicated child sessions with a known
-   leader kept unreaped until cleanup. Stop, failure and completion terminate only their registered owned group;
+   leader kept alive until cleanup. The command exit status travels through a private descriptor closed in the
+   command itself, so killing the leader cannot overwrite the result. Stop, failure and completion terminate only
+   their registered owned group;
    this command-lifecycle cleanup does not change the target checks or signal whitelist for queue pause/resume.
 2. Mask secrets before anything reaches an alert, evidence, status or output (`mask` vectors). Paths are kept: the
    long-random-word rule never cuts into a word that starts with `/`, `~/`, `./` or `../`. A value is masked before
