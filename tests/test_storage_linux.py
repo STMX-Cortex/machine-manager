@@ -233,7 +233,8 @@ class Collector(unittest.TestCase):
     def test_bad_arguments_and_unsupported_platform_do_not_spawn(self):
         with mock.patch.object(linux, "_work", side_effect=AssertionError("worker started")):
             for kwargs in ({"include": ["relative"]}, {"exclude": ["/a/../b"]}, {"timeout_s": True},
-                           {"timeout_s": 0}, {"timeout_s": float("inf")}, {"timeout_s": 31}):
+                           {"timeout_s": 0}, {"timeout_s": float("inf")}, {"timeout_s": float("nan")},
+                           {"timeout_s": 31}, {"timeout_s": 10**1000}):
                 with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                     linux.collect("test-machine", **kwargs)
             with mock.patch.object(linux.sys, "platform", "darwin"):

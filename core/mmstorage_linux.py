@@ -6,7 +6,6 @@ All /proc, /sys, udev and mount access runs in bounded owned workers. The superv
 import collections
 import errno
 import json
-import math
 import os
 import re
 import sys
@@ -371,7 +370,7 @@ def collect(machine_id, include=(), exclude=(), timeout_s=TOTAL_TIMEOUT):
     """One bounded foreground observation, with no cache writes. Non-Linux returns UNKNOWN/unsupported."""
     model.select_mounts("local", [], include, exclude)  # validate policy before any worker
     if (not model._text(machine_id, 120) or mmtext.mask(machine_id) != machine_id
-            or type(timeout_s) not in (int, float) or not math.isfinite(timeout_s) or not 0.05 <= timeout_s <= 30):
+            or type(timeout_s) not in (int, float) or not 0.05 <= timeout_s <= 30):
         raise ValueError("invalid storage collection arguments")
     now, deadline = time.time(), time.monotonic() + timeout_s
     if sys.platform != "linux":
