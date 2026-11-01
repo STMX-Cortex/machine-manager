@@ -112,6 +112,10 @@ Output is plain `key=value` lines; `--json` gives one JSON object. Errors are on
 `mm metrics` is a text-format export for Prometheus; see [METRICS.md](METRICS.md) for its metrics and freshness rules.
 `mm serve` hosts `/metrics` and a filtered `/status.json` on loopback. Prometheus configuration, scheduled peer
 collection and Linux/macOS service templates are in [MONITORING.md](MONITORING.md).
+**Tailscale is the preferred connection method** for machines in different locations, including cloud VMs.
+The default [Tailscale setup](TAILSCALE.md) uses `mm tailscale` for OpenSSH tunnels and keeps all monitoring
+listeners on loopback; reusable Linux/macOS tunnel service templates are included. It does not auto-install
+Tailscale, join a tailnet or change existing connections.
 
 `mm resources` reads files only: the machine from status.json, every other resource from `resources.json` (the
 supervisor writes it each tick from every adapter's records), plus the profile and the settings. No reading, no child
@@ -157,7 +161,9 @@ supervisor that runs code older than `resources.json` writes none: until it rest
 
 A profile can list remote machines whose own `mm` supervisors keep all safety decisions local. Give each remote
 profile a `machine_id` matching its entry below, and serve that machine's `status.json` through existing private
-HTTP(S) hosting, or `mm serve` over a private tunnel/proxy (MONITORING.md). HTTPS uses normal certificate verification.
+HTTP(S) hosting, or `mm serve` over a private tunnel/proxy (MONITORING.md). Prefer
+[Tailscale with the supplied SSH tunnel setup](TAILSCALE.md); other authenticated private transports are supported.
+HTTPS uses normal certificate verification.
 No server, remote agent, or remote service is installed by the collector.
 
 ```toml

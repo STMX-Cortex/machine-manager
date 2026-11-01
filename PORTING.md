@@ -16,6 +16,7 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Command line | `bin/mm`, `core/mminstall.py`, `core/mmplace.py` | Same verbs, output lines and exit codes (`tests/test_cli.py`) |
 | Metrics export | `core/mmprometheus.py` | Prometheus text contract in METRICS.md; files only, bounded inputs, fresh known values only; no control or collection |
 | Monitoring HTTP | `core/mmserve.py` | MONITORING.md; foreground loopback listener, fixed read-only paths, bounded connections/deadlines, filtered status with source time; no collection or control |
+| Private transport | `core/mmtailscale.py` | TAILSCALE.md; explicit foreground SSH tunnel over an owner-managed tailnet, fixed loopback forward, strict host keys, no profile/data writes; dry-run prints argv/URL |
 
 ## Vectors
 

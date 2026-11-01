@@ -1,0 +1,15 @@
+# Central host only. Review copies and replace ALL placeholders; see TAILSCALE.md.
+[Unit]
+Description=machine-manager monitoring tunnel to PEER over Tailscale
+
+[Service]
+Type=simple
+ExecStart=/ABS/PYTHON3 -I /ABS/MACHINE_MANAGER/bin/mm tailscale --peer PEER.TAILNET.ts.net --user SSH_USER --port 19877
+Restart=always
+RestartSec=15
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

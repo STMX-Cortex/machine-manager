@@ -1,5 +1,8 @@
 # Grafana dashboards and Prometheus alerts
 
+For machines in different locations, prefer the [Tailscale setup](TAILSCALE.md). Keep Grafana and Prometheus on
+loopback and use an authenticated SSH tunnel over the tailnet for remote access; Grafana authentication still applies.
+
 Run Grafana on the central monitoring machine, beside Prometheus. Grafana reads Prometheus history; Prometheus
 evaluates the supplied alert rules. Each is a separate program. Neither can change machine-manager settings,
 slots, placement, safe mode or services. These files do not install or start anything.

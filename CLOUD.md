@@ -17,6 +17,8 @@ are in MONITORING.md. Live service managers, private peer hosting and production
 owner's target machines. Grafana fleet/resource dashboards and Prometheus alert rules/provisioning are in
 GRAFANA.md; real dashboard rendering and notification delivery need owner acceptance. Broader storage discovery
 remains roadmap work.
+Tailscale is the preferred private transport; TAILSCALE.md documents the opt-in `mm tailscale` SSH helper and
+per-peer service templates. Cloud fixtures do not authorize a tailnet login, policy changes or persistent tunnels.
 Use the README roadmap as the source when its details change.
 
 ## Tools

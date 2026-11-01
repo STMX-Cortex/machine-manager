@@ -39,6 +39,7 @@ Agents:
   mm metrics                Prometheus metrics from cached snapshots (files only)
   mm serve [--bind 127.0.0.1|::1] [--port 9877]
                             foreground read-only /metrics and /status.json hosting (loopback only)
+  mm tailscale --peer PEER --user USER [--port N] [--dry-run]   SSH tunnel; TAILSCALE.md
   mm settings show [KEY|SECTION]   the settings in force, each with its default (read-only)
 Owner:
   mm off [--reason TEXT] | mm on      every automatic action off or on; on also ends safe mode
@@ -641,6 +642,30 @@ def cmd_selftest(args, as_json):
     return 0 if p.returncode == 0 else 1
 
 
+def cmd_tailscale(args, as_json):
+    import mmtailscale
+    peer = opt(args, "--peer")
+    user = opt(args, "--user")
+    port = opt(args, "--port", mmtailscale.PORT, int)
+    dry = flag(args, "--dry-run")
+    if args or (as_json and not dry):
+        return err("E_USAGE", "tailscale accepts --peer, --user, --port and --dry-run; --json needs --dry-run",
+                   "see TAILSCALE.md")
+    try:
+        plan = mmtailscale.tunnel(peer, user, port)
+    except ValueError:
+        return err("E_TAILSCALE", "need full peer MagicDNS name or Tailscale IP, SSH user and local port 1024..65535",
+                   "see TAILSCALE.md")
+    if dry:
+        emit(as_json, plan, [kv({"tunnel": "planned", "status_url": plan["status_url"]}),
+                            kv({"argv": json.dumps(plan["argv"])})])
+        return 0
+    try:
+        mmtailscale.run(plan)
+    except OSError:
+        return err("E_TAILSCALE", "cannot execute /usr/bin/ssh", "install OpenSSH; see TAILSCALE.md")
+
+
 def main(argv):
     argv = mmcore.take_data_arg(list(argv))
     as_json = flag(argv, "--json")
@@ -659,6 +684,8 @@ def main(argv):
         import ad_deliver_claude
         sys.argv = [sys.argv[0]] + args
         ad_deliver_claude.hook_process()
+    if verb == "tailscale":  # independent of profiles/data; only this explicit verb opens a tunnel
+        return cmd_tailscale(args, as_json)
     refused = mmcore.mmplat.refusal(verb)  # the service verbs and the drill: macOS only for now
     if refused:
         print(refused)

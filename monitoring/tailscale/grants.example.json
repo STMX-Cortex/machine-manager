@@ -1,0 +1,9 @@
+{
+  "tagOwners": {
+    "tag:mm-monitor": ["autogroup:admin"],
+    "tag:mm-worker": ["autogroup:admin"]
+  },
+  "grants": [
+    {"src": ["tag:mm-monitor"], "dst": ["tag:mm-worker"], "ip": ["tcp:22"]}
+  ]
+}

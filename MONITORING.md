@@ -53,6 +53,10 @@ keep-alive, and a 16 MiB response cap. Keep Prometheus and untrusted browser pag
 
 ## Machines in different locations
 
+**Prefer Tailscale with ordinary OpenSSH tunnels.** [TAILSCALE.md](TAILSCALE.md) provides the default `mm tailscale`
+command, per-peer Linux/macOS service templates, a tailnet policy fragment and setup/acceptance steps for Linux,
+Mac and cloud VMs. Tailscale login and policy remain owner-managed; no public bind or Funnel is enabled.
+
 Run `mm serve` on each peer. Use an existing private network with an authenticated HTTPS reverse proxy, or an SSH
 tunnel. The built-in endpoint deliberately has no public bind, TLS or authentication; the private transport supplies
 access control. A reverse proxy must overwrite Host with `127.0.0.1:9877`, preserve source responses/status codes,
