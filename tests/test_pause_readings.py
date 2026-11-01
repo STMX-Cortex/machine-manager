@@ -138,7 +138,7 @@ class PauseReadingUnits(TempData):
 
         with patch.object(tpm.mmread, "read_ps", return_value=[]), patch.object(
                 tpm.mmread, "disk_free_gb", return_value=tpm.DISK_GB), patch.object(
-                mmrecover, "start_time", return_value="start"), patch.object(mmrecover.os, "kill") as kill:
+                mmrecover, "start_time", return_value="start"), patch.object(mmrecover, "signal_process") as send:
             sup = mmsuper.Supervisor(self.profile(), kernel=False, sampler=sampler, sizes=False,
                                      slow_jobs=False, check_readings=False, clock=lambda: clock["t"])
             mmrecover.add_paused({"123": "start"})
@@ -154,22 +154,24 @@ class PauseReadingUnits(TempData):
                     self.assertEqual(json.load(f)["state"], "STEADY")
                 if offset < 90:
                     self.assertEqual(mmrecover.read_paused(), {"123": "start"})
-                    kill.assert_not_called()
+                    send.assert_not_called()
             self.assertEqual(mmrecover.read_paused(), {})
-            kill.assert_called_once_with(123, signal.SIGCONT)
+            send.assert_called_once_with(123, "start", signal.SIGCONT)
 
     def test_n1_read_failures_keep_the_record_send_nothing_and_retry(self):
         for failure in (None, OSError("cannot fork"), TimeoutError("ps timed out")):
             with self.subTest(failure=failure):
                 mmrecover.add_paused({"123": "start"})
                 options = {"side_effect": failure} if isinstance(failure, Exception) else {"return_value": failure}
-                with patch.object(mmrecover, "start_time", **options), patch.object(mmrecover.os, "kill") as kill:
+                with patch.object(mmrecover, "start_time", **options), patch.object(mmrecover.os, "kill"), \
+                        patch.object(mmrecover, "signal_process") as send:
                     self.assertEqual(mmrecover.resume_paused("read failure"), [])
                     self.assertEqual(mmrecover.read_paused(), {"123": "start"})
-                    self.assertNotIn(unittest.mock.call(123, signal.SIGCONT), kill.call_args_list)
-                with patch.object(mmrecover, "start_time", return_value="start"), patch.object(mmrecover.os, "kill") as kill:
+                    send.assert_not_called()
+                with patch.object(mmrecover, "start_time", return_value="start"), \
+                        patch.object(mmrecover, "signal_process") as send:
                     self.assertEqual(mmrecover.resume_paused("retry"), [123])
-                    kill.assert_called_once_with(123, signal.SIGCONT)
+                    send.assert_called_once_with(123, "start", signal.SIGCONT)
                 self.assertEqual(mmrecover.read_paused(), {})
         with open(mmcore.path("state", "recovery.log")) as f:
             self.assertIn("record kept", f.read())
@@ -179,23 +181,28 @@ class PauseReadingUnits(TempData):
             with self.subTest(current=current):
                 mmrecover.add_paused({"123": "start"})
                 with patch.object(mmrecover, "start_time", return_value=current), patch.object(
-                        mmrecover.os, "kill", side_effect=error) as kill:
+                        mmrecover.os, "kill", side_effect=error), patch.object(mmrecover, "signal_process") as send:
                     self.assertEqual(mmrecover.resume_paused("gone"), [])
-                    self.assertNotIn(unittest.mock.call(123, signal.SIGCONT), kill.call_args_list)
+                    send.assert_not_called()
                 self.assertEqual(mmrecover.read_paused(), {})
 
     def test_n1_permission_or_continue_failure_keeps_only_uncertain_pids(self):
         mmrecover.add_paused({"123": "start", "456": "start"})
 
-        def kill(pid, sig):
+        def denied(pid, *args):
             if pid == 123:
                 raise PermissionError("refused")
 
-        with patch.object(mmrecover, "start_time", return_value="start"), patch.object(mmrecover.os, "kill", side_effect=kill):
+        with patch.object(mmrecover, "start_time", return_value="start"), \
+                patch.object(mmrecover, "signal_process", side_effect=denied) as send:
             self.assertEqual(mmrecover.resume_paused("signal failure"), [456])
+            self.assertEqual(send.call_args_list, [unittest.mock.call(123, "start", signal.SIGCONT),
+                                                   unittest.mock.call(456, "start", signal.SIGCONT)])
         self.assertEqual(mmrecover.read_paused(), {"123": "start"})
-        with patch.object(mmrecover, "start_time", return_value=None), patch.object(mmrecover.os, "kill", side_effect=kill):
+        with patch.object(mmrecover, "start_time", return_value=None), patch.object(mmrecover.os, "kill", side_effect=denied), \
+                patch.object(mmrecover, "signal_process") as send:
             self.assertEqual(mmrecover.resume_paused("existence uncertain"), [])
+            send.assert_not_called()
         self.assertEqual(mmrecover.read_paused(), {"123": "start"})
 
     def test_k3_signal_success_record_failure_reports_what_happened(self):
@@ -214,15 +221,15 @@ class PauseReadingUnits(TempData):
             def resume(self, why):
                 return mmrecover.resume_paused(why)
 
-        with patch.object(mmrecover, "start_time", return_value="start"), patch.object(mmrecover.os, "kill") as kill, patch.object(
+        with patch.object(mmrecover, "start_time", return_value="start"), patch.object(mmrecover, "signal_process") as send, patch.object(
                 mmcore, "write_atomic", side_effect=fail_record):
             self.sup._resume_at_cap(40, 0.5, "AMBER", Recorded())
-            kill.assert_called_once_with(123, signal.SIGCONT)
+            send.assert_called_once_with(123, "start", signal.SIGCONT)
         self.assertEqual(mmrecover.read_paused(), {"123": "start"})
         self.assertIn("continued", self.texts[-1])
         self.assertIn("record was not written", self.texts[-1])
         self.assertNotIn("stays paused", self.texts[-1])
-        with patch.object(mmrecover, "start_time", return_value="start"), patch.object(mmrecover.os, "kill"):
+        with patch.object(mmrecover, "start_time", return_value="start"), patch.object(mmrecover, "signal_process"):
             self.assertEqual(mmrecover.resume_paused("write recovered"), [123])
         self.assertEqual(mmrecover.read_paused(), {})
 

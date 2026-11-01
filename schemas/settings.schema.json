@@ -41,6 +41,8 @@
   "hook.subagent_model_scan_mb",
   "launch_gate.enabled",
   "launch_gate.max_minutes",
+  "linux.psi_critical_pct",
+  "linux.psi_warn_pct",
   "mode.observe",
   "mode.slot_writes",
   "mode.slots_file",
@@ -311,6 +313,16 @@
    "type": "number",
    "minimum": 0,
    "maximum": 120
+  },
+  "linux.psi_critical_pct": {
+   "type": "number",
+   "minimum": 0.1,
+   "maximum": 100
+  },
+  "linux.psi_warn_pct": {
+   "type": "number",
+   "minimum": 0.1,
+   "maximum": 100
   },
   "mode.observe": {
    "type": "boolean"

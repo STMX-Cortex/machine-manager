@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""machine-manager watchdog: one shot, every schedule.watchdog_s (default 60 s) from launchd (`mm watchdog`).
+"""machine-manager watchdog: one shot every schedule.watchdog_s (default 60 s), from launchd or a systemd timer.
 
 It checks the supervisor's status.json age, the memory guard's heartbeat and the queue sampler's age. A stale
-supervisor gives an ACTION alert SELF_STALE and a restart of the supervisor's LaunchAgent (launchctl kickstart -k;
-MM_LAUNCHCTL replaces launchctl in tests). After `mm stop` (state/stopped.json) it restarts nothing and stays quiet.
+supervisor gives an ACTION alert SELF_STALE and a restart through the platform's user service manager.
+MM_LAUNCHCTL/MM_SYSTEMCTL replace the service commands in tests. After `mm stop` (state/stopped.json) it restarts nothing and stays quiet.
 It writes no slots file and stops no process. When the supervisor is stale over self.resume_paused_after_s (or
 stopped), it continues every process the pause stopped (mmrecover.resume_paused). Each run writes state/watchdog.stamp.
-Where the platform has no service yet (mmread.plat.SERVICE is None: Linux) it restarts nothing; SELF_STALE still says so.
+When restart=False it reports problems and recovers recorded pauses without restarting the supervisor.
 """
 import os
 
@@ -17,7 +17,7 @@ import mmrecover
 
 
 def label(profile, part=""):
-    """The LaunchAgent label: the profile's service.label_prefix (default com.example.machine-manager) + part."""
+    """The service label: the profile's service.label_prefix (default com.example.machine-manager) + part."""
     return (profile["service"].get("label_prefix") or mmcore.DEFAULT_LABEL_PREFIX) + part
 
 
@@ -54,9 +54,7 @@ def check(now, s, profile, restart=True):
                 store.raise_("SELF_UNLOADED", "SELF_UNLOADED", "ACTION", "the supervisor was not loaded; loaded it again "
                              "(rc=%s)" % rc, command="mm status")
             else:
-                argv = [os.environ.get("MM_LAUNCHCTL", "/bin/launchctl"), "kickstart", "-k",
-                        "gui/%d/%s" % (os.getuid(), label(profile))]
-                rc, _ = mmread.run(argv, timeout=20)
+                rc = mminstall.kickstart(label(profile))
                 restarted = "; kickstart rc=%s" % rc
             mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s %s%s" % (mmcore.now_local(now), why, restarted))
         store.raise_("SELF_STALE", "SELF_STALE", "ACTION", "supervisor stale: %s%s; the launch gate is open" % (why, restarted),

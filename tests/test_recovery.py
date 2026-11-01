@@ -357,20 +357,20 @@ class R4Paused(Base):
         self.write_settings(**{"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10, "mode.observe": False,
                                "pause_newest_call.enabled": True})
         seen = []
-        real = os.kill
+        real = mmrecover.signal_process
 
-        def spy(pid, sig):
+        def spy(pid, expected, sig):
             if sig == signal.SIGSTOP:
                 if pid not in tree:  # never stop a process this test did not start
                     seen.append(("not ours", pid))
                     return None
                 seen.append(str(pid) in mmrecover.read_paused())
-            return real(pid, sig)
-        mmsuper.os.kill = spy
+            return real(pid, expected, sig)
+        mmrecover.signal_process = spy
         try:
             self.sup(sampler=sampler_of(free_pct=70, pressure=4)).tick()
         finally:
-            mmsuper.os.kill = real
+            mmrecover.signal_process = real
         self.assertEqual(seen, [True, True], "one SIGSTOP per pid of the call, each after its record")
         self.assertEqual(sorted(int(x) for x in mmrecover.read_paused()), sorted(tree))
         self.assertTrue(all(proc_stat(pid).startswith("T") for pid in tree))
@@ -681,7 +681,7 @@ class C4Loads(Base):
     """Reinstall faults (21:50): the supervisor was not loaded after `mm install`, which still said installed=yes;
     a not-loaded supervisor or watchdog cannot be kickstarted; a good gh read left SOURCE_STALE active 5 min."""
 
-    def fail(self, verb_label_rc):
+    def fail_controls(self, verb_label_rc):
         """Make the fake launchctl fail: {(verb, label suffix): rc}; `print` of a failing label says not found (113)."""
         with open(self.fake, "a") as f:
             for (verb, lab), rc in verb_label_rc.items():
@@ -689,7 +689,7 @@ class C4Loads(Base):
 
     @mmtest.darwin_only
     def test_install_says_so_when_the_supervisor_does_not_load(self):
-        self.fail({("bootstrap", SUP + ".plist"): 5, ("print", SUP): 113})
+        self.fail_controls({("bootstrap", SUP + ".plist"): 5, ("print", SUP): 113})
         rc, out, err = self.run_mm("install", timeout=120)
         self.assertEqual(rc, 2, out + [err])
         self.assertEqual(len(out), 1, out)
@@ -712,7 +712,7 @@ class C4Loads(Base):
 
     @mmtest.darwin_only
     def test_watchdog_loads_an_unloaded_supervisor_and_says_so(self):
-        self.fail({("print", SUP): 113})
+        self.fail_controls({("print", SUP): 113})
         now = time.time()
         mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps({"time": now - 600, "state": "GREEN"}))
         rc, out, _ = self.run_mm("watchdog", MM_NOW=str(now))
@@ -735,7 +735,7 @@ class C4Loads(Base):
     def test_supervisor_loads_an_unloaded_watchdog(self):
         os.makedirs(os.path.join(self.root, "base"), exist_ok=True)
         mmcore.write_atomic(os.path.join(self.root, "base", "install.json"), json.dumps({"data": self.data}))
-        self.fail({("print", WD): 113})
+        self.fail_controls({("print", WD): 113})
         mmrecover.stamp_watchdog(time.time() - 400)
         self.sup().tick()
         self.assertEqual([c[0] for c in self.launchctl()], ["print", "bootstrap"])
@@ -864,6 +864,13 @@ class C5CleanStop(Base):
         self.assertLess(took, 4.0, "ends by the 2 s deadline, under ExitTimeOut")
         with self.assertRaises(ProcessLookupError):  # its command is killed with it, not left behind
             for _ in range(50):
+                # A Linux subreaper can inherit the dead command after the supervisor's forced exit.
+                # Reap only this fixture child, so a zombie is not mistaken for a still-running command.
+                if sys.platform == "linux":
+                    try:
+                        os.waitpid(kid, os.WNOHANG)
+                    except ChildProcessError:
+                        pass
                 os.kill(kid, 0)
                 time.sleep(0.05)
         log = open(os.path.join(self.data, "state", "recovery.log")).read()
@@ -933,17 +940,51 @@ class R8Never(unittest.TestCase):
                         getattr(node.func.value, "id", None) == "os":
                     self.assertIn(ast.unparse(node.args[1]), {"0", "signal.SIGSTOP", "signal.SIGCONT"},
                                   "%s: %s" % (p, ast.unparse(node)))
+                if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "pidfd_send_signal":
+                    self.assertEqual(os.path.basename(p), "mmplat_linux.py", p)
+                    self.assertEqual(ast.unparse(node.args[1]), "sig")
+                    tree = ast.parse(text)
+                    functions = [f for f in tree.body if isinstance(f, ast.FunctionDef) and f.name == "signal_process"]
+                    self.assertEqual(len(functions), 1)
+                    guarded = [n for n in functions[0].body if isinstance(n, ast.If) and
+                               ast.unparse(n.test) == "sig not in (signal.SIGSTOP, signal.SIGCONT)" and
+                               any(isinstance(x, ast.Raise) for x in n.body)]
+                    self.assertEqual(len(guarded), 1, "the transport must reject other signals before opening a pidfd")
+                    self.assertLess(guarded[0].lineno, node.lineno)
 
     def test_only_the_pause_stops_and_only_the_record_continues(self):
-        stops = []
+        stops, guarded_calls = [], []
         for p, text in self.sources():
             for node in ast.walk(ast.parse(text)):
                 if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "kill" and \
                         getattr(node.func.value, "id", None) == "os":
                     stops.append((os.path.basename(p), ast.unparse(node.args[1])))
+                if isinstance(node, ast.Call) and (isinstance(node.func, ast.Name) and node.func.id == "signal_process" or
+                        isinstance(node.func, ast.Attribute) and node.func.attr == "signal_process" and
+                        isinstance(node.func.value, ast.Name) and node.func.value.id == "mmrecover"):
+                    guarded_calls.append((os.path.basename(p), ast.unparse(node.args[2])))
         self.assertEqual(sorted(set(stops)), [("mmread.py", "0"), ("mmrecover.py", "0"),
                                               ("mmrecover.py", "signal.SIGCONT"),
-                                              ("mmsuper.py", "signal.SIGSTOP")])
+                                              ("mmrecover.py", "signal.SIGSTOP")])
+        self.assertEqual(sorted(set(guarded_calls)), [("mmrecover.py", "signal.SIGCONT"),
+                                                     ("mmsuper.py", "signal.SIGSTOP")])
+
+    def test_signal_transports_reject_every_other_signal_before_any_process_access(self):
+        import mmplat_linux
+        from unittest.mock import patch
+        backend_send = mmplat_linux.signal_process
+        with patch.object(mmrecover.mmread.plat, "signal_process", create=True) as send, \
+                patch.object(mmplat_linux.os, "pidfd_open", create=True) as opened, \
+                patch.object(mmrecover, "start_time") as identity, patch.object(mmrecover.os, "kill") as kill:
+            for sig in (0, signal.SIGTERM, signal.SIGINT, signal.SIGKILL, -1, 123456):
+                with self.subTest(sig=sig), self.assertRaises(ValueError):
+                    mmrecover.signal_process(123, "birth", sig)
+                with self.subTest(backend_sig=sig), self.assertRaises(ValueError):
+                    backend_send(123, "birth", sig)
+            send.assert_not_called()
+            opened.assert_not_called()
+            identity.assert_not_called()
+            kill.assert_not_called()
 
 
 if __name__ == "__main__":

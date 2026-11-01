@@ -32,6 +32,15 @@ expected value after a JSON round trip (tuples are lists). A crash is a failure.
 `python3 -I tests/run_vectors.py --list` prints the count per function.
 A `place` pool's `guard` is null (the answer names it in `need_guard`; read the guard, then call again), `{rc, line}`,
 or `"skip"` (no guard round; it counts as passed).
+A candidate may supply `reserve_minutes`; otherwise placement uses `github.reserve_minutes`. A refused guard or
+budget stop excludes only that candidate. The caller repeats guard reads until placement names a destination or
+has no more candidates.
+
+Linux samples carry `linux=1`, `psi_supported`, and the `psi_some_pct`/`psi_full_pct` memory PSI avg10 readings.
+`linux_sample` maps valid PSI shares to common pressure levels using the Linux settings. Compressor/segment
+readings stay null and do not make a Linux sample incomplete. PSI is optional when unavailable in the kernel;
+when the kernel exposes it, a missing or invalid reading blocks a complete sample. Linux process birth identity
+combines the boot id and `/proc/<pid>/stat` start ticks; STOP/CONT uses a pidfd after verifying that identity.
 
 Functions with vectors: `classify`, `slot_decide`, `alert_raise`, `alert_absent`, `alert_line`, `conditions`
 (`mmalerts.evaluate`), `delete_guard`, `place`, `expected_wait`, `drill_stop`, `replay` (whole incidents minute by
@@ -46,6 +55,11 @@ cap). In `machine_resource`, `pool_resources` and `usage_resources`, and in `res
 `age_s`, whole numbers and rounded values are rounded as Python's `round`, half to even.
 
 ## Schemas
+
+Profiles may use legacy `[ci]` or `[[pools]]` with unique ids, never both. Each listed pool has an independent worker,
+read cache, watched-run file, status record and alert namespace (`POOL:<id>:`). Capacity and reserve overrides apply
+only to that pool; other GitHub thresholds inherit the settings table. Legacy `[ci]` retains its original files and
+alert keys. A pool adapter failure must not invalidate the successful reads of other pools.
 
 JSON Schema (2020-12) files: `reading`, `status` (kind `machine` or `pool`), `resource` (`resources.json`), `alert`,
 `placement-request`, `placement`, `delete-line`, `off`, `override`, `profile`, `settings`. `settings.schema.json` is

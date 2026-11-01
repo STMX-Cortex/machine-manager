@@ -51,6 +51,18 @@ def case(fn, name, inp, over=None, expected=None):
 # ---- classify
 case("classify", "empty", {"window": []})
 case("classify", "green", {"window": series(3), "disk_gb": 100.0})
+LINUX_GREEN = dict(sample(NOW), linux=1, psi_supported=1, comp_mb=None, seg_pct=None,
+                   psi_some_pct=0, psi_full_pct=0)
+case("classify", "linux-green-no-compressor", {"window": [LINUX_GREEN], "disk_gb": 100},
+     expected=["GREEN", ["all readings in the green band"], True])
+case("classify", "linux-psi-warn", {"window": [dict(LINUX_GREEN, psi_some_pct=12)], "disk_gb": 100},
+     expected=["AMBER", ["kernel pressure 2 (warn)"], True])
+case("classify", "linux-psi-critical", {"window": [dict(LINUX_GREEN, psi_full_pct=12)], "disk_gb": 100},
+     expected=["RED", ["kernel pressure 4 (critical)"], True])
+case("classify", "linux-psi-unreadable", {"window": [dict(LINUX_GREEN, psi_full_pct=None)], "disk_gb": 100},
+     expected=["STEADY", ["readings incomplete"], False])
+case("classify", "linux-without-psi", {"window": [dict(LINUX_GREEN, psi_supported=0, psi_some_pct=None, psi_full_pct=None)],
+                                       "disk_gb": 100}, expected=["GREEN", ["all readings in the green band"], True])
 case("classify", "steady-free-below-green", {"window": series(3, free_pct=52.0), "disk_gb": 100.0})
 case("classify", "amber-free", {"window": series(3, free_pct=45.0), "disk_gb": 100.0})
 case("classify", "amber-compressor", {"window": series(3, comp_mb=6000.0), "disk_gb": 100.0})
@@ -236,6 +248,22 @@ case("place", "agents-amber-one", {"req": {"kind": "other", "agents": 2}, "ctx":
 case("place", "agents-go", {"req": {"kind": "other", "agents": 3}, "ctx": ctx})
 case("place", "too-many-shards", {"req": {"kind": "go-test", "shards": 9}, "ctx": dict(ctx, machine=dict(mach, queue=qfull))})
 case("place", "no-pools", {"req": {"kind": "go-test", "shards": 1}, "ctx": dict(ctx, machine=dict(mach, queue=qfull), pools=[])})
+case("place", "pools-independent-reserves", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(
+    ctx, machine=dict(mach, queue=qfull), pools=[dict(pool, id="one", guard="skip", reserve_minutes=19950),
+                                              dict(pool, id="two", guard="skip", reserve_minutes=50)])}, expected={
+    "place": "POOL", "candidate": "two", "need_guard": None,
+    "reasons": ["state GREEN: all readings in the green band", "expected wait on m1: 44 min",
+                "two: 20000 minutes left (read), worst case 82, reserve 50", "guard: " + mmdecide.GUARD_SKIP]})
+case("place", "pools-refused-guard-tries-next", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(
+    ctx, machine=dict(mach, queue=qfull), pools=[dict(pool, id="one", guard={"rc": 1, "line": "refused"}),
+                                              dict(pool, id="two")])}, expected={
+    "place": None, "candidate": None, "need_guard": "two", "reasons": ["state GREEN: all readings in the green band"]})
+case("place", "pools-stop-is-local", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(
+    ctx, machine=dict(mach, queue=qfull), pools=[dict(pool, id="one", guard="skip", stop_active=True),
+                                              dict(pool, id="two", guard="skip")])}, expected={
+    "place": "POOL", "candidate": "two", "need_guard": None,
+    "reasons": ["state GREEN: all readings in the green band", "expected wait on m1: 44 min",
+                "two: 20000 minutes left (read), worst case 82, reserve 300", "guard: " + mmdecide.GUARD_SKIP]})
 
 # ---- expected_wait
 case("expected_wait", "free-slot", {"q": qfree, "medians": {}, "default": 10, "now": NOW})

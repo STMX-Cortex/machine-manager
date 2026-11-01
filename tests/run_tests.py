@@ -15,6 +15,8 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 GROUPS = {
+    "linux": ["test_linux"],
+    "pools": ["test_pools"],
     "red_sys_memory_sign": ["test_red_sys_memory_sign"],  # R-1: system CPU needs a current memory sign for RED
     "red_sys_review": ["test_red_sys_review"],
     "core": ["test_core"],            # T1 parsers, T6 alerts, T7 controller, T10 names, T12 settings, B1 masking

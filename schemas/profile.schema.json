@@ -494,6 +494,128 @@
    "minimum": 256,
    "maximum": 1048576,
    "description": "C-22: the longest line any pattern sees; longer lines are cut with a mark (default 4096)"
+  },
+  "pools": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "adapter",
+     "id",
+     "repo",
+     "billing_path",
+     "guard_argv"
+    ],
+    "properties": {
+     "adapter": {
+      "enum": [
+       "github-gh"
+      ]
+     },
+     "repo": {
+      "type": "string",
+      "pattern": "^[^/\\s]+/[^/\\s]+$"
+     },
+     "billing_path": {
+      "type": "string"
+     },
+     "linux_sku": {
+      "type": "string"
+     },
+     "guard_argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "guard_cwd": {
+      "type": "string"
+     },
+     "job_minutes": {
+      "type": "number"
+     },
+     "plan_minutes": {
+      "type": "number"
+     },
+     "dispatch_kinds": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "push_command": {
+      "type": "string"
+     },
+     "dispatch_argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "scratch_command": {
+      "type": "string"
+     },
+     "noise": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "workflow": {
+         "type": "string"
+        },
+        "workflow_regex": {
+         "type": "string"
+        },
+        "event": {
+         "type": "string"
+        },
+        "branch_regex": {
+         "type": "string"
+        }
+       },
+       "additionalProperties": false
+      }
+     },
+     "guard_args": {
+      "type": "object",
+      "description": "per job kind (or 'default'): the guard's arguments; placeholders {kind} {shards} {race} {packages} {crate} {diff_base}",
+      "additionalProperties": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      }
+     },
+     "guard_defaults": {
+      "type": "object",
+      "description": "values for placeholders the request leaves empty",
+      "additionalProperties": {
+       "type": "string"
+      }
+     },
+     "runner_labels": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "self-hosted runners for mm resources: a runner is listed when it carries every one of these labels (as runs-on matches); read only when set"
+     },
+     "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"
+     },
+     "reserve_minutes": {
+      "type": "number",
+      "minimum": 0
+     },
+     "included_minutes": {
+      "type": "number",
+      "minimum": 0
+     }
+    },
+    "additionalProperties": false
+   },
+   "description": "Independent pools; replaces [ci]. Each id is unique. Budget overrides inherit github settings when omitted."
   }
  },
  "additionalProperties": false

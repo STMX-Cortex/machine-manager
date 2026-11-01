@@ -230,7 +230,7 @@ def cmd_place(args, as_json, profile):
            "branch": opt(args, "--branch")}
     if args:
         return err("E_USAGE", "unknown words: %s" % " ".join(args), "mm help")
-    rec = mmplace.place(req, settings(), profile, mmadapters.queue(profile), mmadapters.pool(profile))
+    rec = mmplace.place(req, settings(), profile, mmadapters.queue(profile), mmadapters.pools(profile))
     lines = [kv({"place": rec["place"], "candidate": rec["candidate"]})] + ["why=" + json.dumps(r) for r in rec["reasons"]] + \
             ["do=" + json.dumps(c) for c in rec["commands"]]
     emit(as_json, rec, lines)
@@ -473,11 +473,23 @@ def cmd_event(args, as_json):
 
 def cmd_watch(args, as_json):
     import ad_ci_github
+    import mmadapters
     note = opt(args, "--note", "")
+    ident = opt(args, "--pool")
     if not args:
         return err("E_USAGE", "watch needs a run id", "mm watch 123456 --note why")
+    configured = mmadapters.pools(mmcore.load_profile())
+    if ident is not None:
+        selected = next((p for p in configured if p.id == ident), None)
+        if selected is None:
+            return err("E_USAGE", "unknown pool %r" % ident, "use a configured pool id")
+    elif len(configured) > 1:
+        return err("E_USAGE", "watch needs --pool with multiple pools", "mm watch <run-id> --pool <id>")
+    else:
+        selected = configured[0] if configured else None
+    scoped_id = selected.id if selected is not None and selected.scoped else None
     try:
-        ad_ci_github.watch_add(args[0], note, time.time())
+        ad_ci_github.watch_add(args[0], note, time.time(), scoped_id)
     except ValueError as e:
         return err("E_USAGE", str(e), "pass the run's number")
     print("watch=%s" % args[0])
@@ -648,8 +660,10 @@ def main(argv):
         import mminstall
         if verb == "install":
             rec = mminstall.install(profile, opt(args, "--settings"))
-            print(kv({"installed": "yes", "data": rec["data"], "hooks": rec["hooks_file"] or "none",
-                      "python": rec["python"], "plists": len(rec["plists"])}))
+            fields = {"installed": "yes", "data": rec["data"], "hooks": rec["hooks_file"] or "none",
+                      "python": rec["python"]}
+            fields["units" if rec.get("service") == "systemd" else "plists"] = len(rec["plists"])
+            print(kv(fields))
             for w in rec["warnings"]:
                 print(w)
             return 0
@@ -662,10 +676,15 @@ def main(argv):
                 print(line)
             return 0
         print(" ".join("%s=rc%s" % (lb, rc) for lb, rc in out))
-        return 0
+        return 1 if any(rc != 0 for _, rc in out) else 0
     if verb == "run":
         import mmsuper
         return mmsuper.run_loop(profile, **run_options(args))
+    if verb == "recover-paused":
+        import mmrecover
+        pids = mmrecover.resume_paused("service stopped")
+        print(kv({"resumed": ",".join(str(p) for p in pids)}))
+        return 1 if mmrecover.read_paused() else 0
     if verb == "watchdog":
         import mmwatch
         probs = mmwatch.check(float(os.environ.get("MM_NOW", time.time())), settings(), profile,

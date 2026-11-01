@@ -7,6 +7,7 @@ with no command, no network and no waiting. The supervisor asks each one through
 resources.json; `mm resources` reads that file and loads no adapter."""
 import importlib
 import json
+import re
 
 QUEUE = {"fifo-gates": ("ad_queue_fifo", "Queue")}
 POOL = {"github-gh": ("ad_ci_github", "Pool")}
@@ -28,8 +29,44 @@ def queue(profile):
     return _make(QUEUE, profile.get("queue"), "queue")
 
 
+def pool_configs(profile):
+    """Normalized pool configs. Legacy [ci] keeps its files and keys; [[pools]] uses explicit, unique ids."""
+    import mmcore
+    import mmschema
+    if "pools" not in profile:
+        return [profile["ci"]] if (profile.get("ci") or {}).get("adapter") else []
+    if profile.get("ci"):
+        raise mmcore.MMError("E_PROFILE", "[ci] and [[pools]] cannot be combined", "use [[pools]] for every pool")
+    configs = profile["pools"]
+    if not isinstance(configs, list):
+        raise mmcore.MMError("E_PROFILE", "pools must be a list", "use [[pools]] entries")
+    schema = mmschema.load("profile")["properties"]["pools"]["items"]
+    out, seen = [], set()
+    for cfg in configs:
+        problems = mmschema.validate(cfg, schema)
+        if problems:
+            raise mmcore.MMError("E_PROFILE", "pool: " + problems[0], "correct [[pools]]; mm check")
+        ident = cfg["id"]
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", ident) or ident.casefold() in seen:
+            raise mmcore.MMError("E_PROFILE", "pool id is invalid or repeated: %r" % ident,
+                                 "use unique ids of 1..80 letters, digits, dots, - or _, starting with a letter or digit")
+        for key in ("reserve_minutes", "included_minutes", "job_minutes", "plan_minutes"):
+            if key in cfg and not 0 <= cfg[key] <= 10000000:
+                raise mmcore.MMError("E_PROFILE", "pool %s has invalid %s" % (ident, key),
+                                     "use a finite number from 0 to 10000000")
+        seen.add(ident.casefold())
+        out.append(dict(cfg, pool_id=ident, _multi_pool=True))
+    return out
+
+
+def pools(profile):
+    return [_make(POOL, cfg, "pool") for cfg in pool_configs(profile)]
+
+
 def pool(profile):
-    return _make(POOL, profile.get("ci"), "ci")
+    """The first pool (compatibility for callers that accept one adapter)."""
+    found = pools(profile)
+    return found[0] if found else None
 
 
 def delivery(profile):
