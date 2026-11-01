@@ -10,7 +10,8 @@ import json
 import re
 
 QUEUE = {"fifo-gates": ("ad_queue_fifo", "Queue")}
-POOL = {"github-gh": ("ad_ci_github", "Pool")}
+POOL = {"github-gh": ("ad_ci_github", "Pool"), "static": ("ad_pool_static", "Pool"),
+        "command": ("ad_pool_command", "Pool")}
 DELIVERY = {"claude-code-hook": ("ad_deliver_claude", "Delivery")}
 
 

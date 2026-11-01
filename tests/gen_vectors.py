@@ -265,6 +265,30 @@ case("place", "pools-stop-is-local", {"req": {"kind": "go-test", "shards": 2}, "
     "reasons": ["state GREEN: all readings in the green band", "expected wait on m1: 44 min",
                 "two: 20000 minutes left (read), worst case 82, reserve 300", "guard: " + mmdecide.GUARD_SKIP]})
 
+generic = {"id": "credits", "generic": True, "unit": "credits", "capacity_left": 25, "reserve": 5,
+           "job_cost": 3, "plan_cost": 1, "source": "cached", "guard": "skip", "guard_why": None,
+           "stop_active": False}
+generic_ctx = dict(ctx, machine=dict(mach, queue=qfull), pools=[generic])
+case("place", "generic-native-unit-cost", {"req": {"kind": "go-test", "shards": 2}, "ctx": generic_ctx}, expected={
+    "place": "POOL", "candidate": "credits", "need_guard": None,
+    "reasons": ["state GREEN: all readings in the green band", "expected wait on m1: 44 min",
+                "credits: 25 credits left (cached), worst case 7, reserve 5"]})
+case("place", "generic-reserve-boundary", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(
+    generic_ctx, machine=dict(mach, state="RED", reasons=["critical"], queue=qfull), pools=[dict(generic, capacity_left=12)])},
+    expected={"place": "WAIT", "candidate": None, "need_guard": None,
+              "reasons": ["state RED: critical", "RED; no pool: credits: credits left 12 - worst case 7 <= reserve 5"]})
+case("place", "generic-cross-unit-failover", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(
+    generic_ctx, pools=[dict(generic, capacity_left=12), dict(generic, id="slots", unit="slots", capacity_left=3,
+                                                           reserve=0, job_cost=1, plan_cost=0)])}, expected={
+    "place": "POOL", "candidate": "slots", "need_guard": None,
+    "reasons": ["state GREEN: all readings in the green band", "expected wait on m1: 44 min",
+                "slots: 3 slots left (cached), worst case 2, reserve 0"]})
+case("place", "generic-unknown-fails-over-to-github", {"req": {"kind": "go-test", "shards": 2}, "ctx": dict(
+    generic_ctx, pools=[dict(generic, capacity_left=None, source="stale"), dict(pool, guard="skip")])}, expected={
+    "place": "POOL", "candidate": "ci:example/project", "need_guard": None,
+    "reasons": ["state GREEN: all readings in the green band", "expected wait on m1: 44 min",
+                "ci:example/project: 20000 minutes left (read), worst case 82, reserve 300", "guard: " + mmdecide.GUARD_SKIP]})
+
 # ---- expected_wait
 case("expected_wait", "free-slot", {"q": qfree, "medians": {}, "default": 10, "now": NOW})
 case("expected_wait", "full", {"q": qfull, "medians": {"go-test": 15.0}, "default": 10, "now": NOW})

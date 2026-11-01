@@ -126,7 +126,8 @@ def external_commands(profile):
     configs = mmadapters.pool_configs(profile)
     if any(ci.get("adapter") == "github-gh" for ci in configs):
         names.append("gh")
-    argvs = [ci.get("guard_argv") for ci in configs] + [(profile.get("trim") or {}).get("warm_argv")]
+    argvs = [ci.get("guard_argv") for ci in configs] + [ci.get("read_argv") for ci in configs] + \
+        [(profile.get("trim") or {}).get("warm_argv")]
     for argv in argvs:
         if argv:
             names.append(argv[0])

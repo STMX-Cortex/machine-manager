@@ -1,0 +1,117 @@
+{
+ "case": "generic-native-unit-cost",
+ "expected": {
+  "candidate": "credits",
+  "need_guard": null,
+  "place": "POOL",
+  "reasons": [
+   "state GREEN: all readings in the green band",
+   "expected wait on m1: 44 min",
+   "credits: 25 credits left (cached), worst case 7, reserve 5"
+  ]
+ },
+ "function": "place",
+ "input": {
+  "ctx": {
+   "kinds": {
+    "machine_only": {
+     "merge-wide": "the wide run stays on the machine",
+     "other": "kind 'other' runs on the machine"
+    },
+    "pool": {
+     "go-test": 8,
+     "rust-mutants": 64
+    }
+   },
+   "machine": {
+    "free_pct": 80.0,
+    "id": "m1",
+    "medians": {
+     "go-test": 15.0
+    },
+    "queue": {
+     "busy": [
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "since": 1799999940.0,
+       "slot": ".slot.0"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "since": 1799999940.0,
+       "slot": ".slot.1"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "since": 1799999940.0,
+       "slot": ".slot.2"
+      }
+     ],
+     "slots": 3,
+     "tickets": [
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t0"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t1"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t2"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t3"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t4"
+      },
+      {
+       "kind": "go-test",
+       "mode": "S",
+       "name": "t5"
+      }
+     ]
+    },
+    "reasons": [
+     "all readings in the green band"
+    ],
+    "state": "GREEN"
+   },
+   "now": 1800000000.0,
+   "pools": [
+    {
+     "capacity_left": 25,
+     "generic": true,
+     "guard": "skip",
+     "guard_why": null,
+     "id": "credits",
+     "job_cost": 3,
+     "plan_cost": 1,
+     "reserve": 5,
+     "source": "cached",
+     "stop_active": false,
+     "unit": "credits"
+    }
+   ],
+   "wide_kind": "merge-wide"
+  },
+  "req": {
+   "kind": "go-test",
+   "shards": 2
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

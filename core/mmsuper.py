@@ -907,6 +907,8 @@ class Supervisor:
         pool = pool or self.pool
         if pool is None:
             return False
+        if not getattr(pool, "supports_watch", True):
+            return False
         if callable(getattr(pool, "load_watch", None)):
             w = pool.load_watch()
         else:

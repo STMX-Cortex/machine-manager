@@ -12,7 +12,7 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Readings | `core/mmread.py` (system calls; the macOS commands as a cross-check) | Any method; `mm check` compares with the commands |
 | Platform | `core/mmplat.py` (the choice; `MM_PLATFORM` overrides it), `core/mmplat_darwin.py`, `core/mmplat_linux.py` | One backend per platform, the same names (readings, `machine_facts` for the static facts, command paths); a reading it cannot take is None, a command it lacks is None and skipped |
 | Jobs and loop | `core/mmsuper.py`, `core/mmwatch.py`, `core/mmrecover.py`, `core/mmdelete.py`, `core/mmdrill.py`, `bin/cachetrim.py` | Same behaviour; tests in `tests/` describe it. The tick and the job intervals come from `[schedule]` (README.md, Schedules); the tick is read before each wait |
-| Adapters | `adapters/ad_queue_fifo.py`, `adapters/ad_ci_github.py`, `adapters/ad_deliver_claude.py` | One per kind; chosen by the profile's `adapter` value. Optional `resources(read, s, now)`: resource records (`schemas/resource.schema.json`, without `time`) from the adapter's last read and its own small files only (no command, no network, no waiting) |
+| Adapters | `adapters/ad_queue_fifo.py`, `adapters/ad_ci_github.py`, generic pool adapters, `adapters/ad_deliver_claude.py` | One per kind; chosen by the profile's `adapter` value. Optional `resources(read, s, now)`: resource records (`schemas/resource.schema.json`, without `time`) from the adapter's last read and its own small files only (no command, no network, no waiting) |
 | Command line | `bin/mm`, `core/mminstall.py`, `core/mmplace.py` | Same verbs, output lines and exit codes (`tests/test_cli.py`) |
 
 ## Vectors
@@ -36,6 +36,17 @@ A candidate may supply `reserve_minutes`; otherwise placement uses `github.reser
 budget stop excludes only that candidate. The caller repeats guard reads until placement names a destination or
 has no more candidates.
 
+General pool candidates carry `capacity_left`, `unit`, `reserve`, `job_cost`, `plan_cost`, and `source`, with a
+marker distinguishing them from the legacy minute-based GitHub candidates. The total job cost is `plan_cost +
+shards * job_cost`; placement requires remaining capacity after that cost to exceed reserve. A candidate in
+`RED` or `UNKNOWN`, or with an invalid/stale read, is unavailable. Capacity values in different units are never
+compared to each other. The configured `start_argv` produces a printed shell-quoted command only; resource data
+cannot choose executable instructions.
+An optional fixed `ssh_argv` transports the filled `start_argv` as one shell-quoted remote command. It contains
+2..64 nonempty words, starts with basename `ssh`, and permits no placeholders or control characters. Reject direct
+SSH and shell `-c` modes in `start_argv`; placeholders describe argv values rather than embedded shell source.
+
+
 Linux samples carry `linux=1`, `psi_supported`, and the `psi_some_pct`/`psi_full_pct` memory PSI avg10 readings.
 `linux_sample` maps valid PSI shares to common pressure levels using the Linux settings. Compressor/segment
 readings stay null and do not make a Linux sample incomplete. PSI is optional when unavailable in the kernel;
@@ -57,12 +68,19 @@ cap). In `machine_resource`, `pool_resources` and `usage_resources`, and in `res
 ## Schemas
 
 Profiles may use legacy `[ci]` or `[[pools]]` with unique ids, never both. Each listed pool has an independent worker,
-read cache, watched-run file, status record and alert namespace (`POOL:<id>:`). Capacity and reserve overrides apply
-only to that pool; other GitHub thresholds inherit the settings table. Legacy `[ci]` retains its original files and
+read cache, status record and alert namespace (`POOL:<id>:`); GitHub pools also have their own watched-run file.
+Capacity and reserve overrides apply only to that pool; other GitHub thresholds inherit the settings table. Legacy `[ci]` retains its original files and
 alert keys. A pool adapter failure must not invalidate the successful reads of other pools.
 
+`command` pool output follows `pool-read.schema.json`: schema version 1, resource read time, known state,
+capacity unit/total/left, nonnegative running and queued counts, and optional explanation. The runtime additionally
+requires finite numbers, matching configured unit, left no larger than total, bounded JSON depth and size, and a
+fresh read time. A failed command, invalid JSON/schema, or stale data yields an isolated UNKNOWN pool. The static
+adapter uses owner-maintained profile capacity; it does not consume capacity automatically after placement.
+Both adapters retain the resource record contract, including the profile's reserve and their own freshness rule.
+
 JSON Schema (2020-12) files: `reading`, `status` (kind `machine` or `pool`), `resource` (`resources.json`), `alert`,
-`placement-request`, `placement`, `delete-line`, `off`, `override`, `profile`, `settings`. `settings.schema.json` is
+`placement-request`, `placement`, `delete-line`, `off`, `override`, `profile`, `pool-read`, `settings`. `settings.schema.json` is
 generated from the code's table (`mmcore.settings_json_schema()`); `tests/test_vectors.py` fails when they differ.
 
 Every file the tool writes as a record, and every log record, carries `machine_id` and `schema_version` (now 1); the
@@ -78,6 +96,9 @@ Resource record caps are reader limits, not validity rules (a longer list or tex
 ## Rules a port keeps
 
 1. Readings never block a tick for long: every outside command has a time limit.
+   Generic command readers also have byte and depth bounds. They run in dedicated child sessions with a known
+   leader kept unreaped until cleanup. Stop, failure and completion terminate only their registered owned group;
+   this command-lifecycle cleanup does not change the target checks or signal whitelist for queue pause/resume.
 2. Mask secrets before anything reaches an alert, evidence, status or output (`mask` vectors). Paths are kept: the
    long-random-word rule never cuts into a word that starts with `/`, `~/`, `./` or `../`. A value is masked before
    it is quoted; a text of own words and quoted values is masked part by part (`mask_keep_quotes`).

@@ -498,124 +498,345 @@
   "pools": {
    "type": "array",
    "items": {
-    "type": "object",
-    "required": [
-     "adapter",
-     "id",
-     "repo",
-     "billing_path",
-     "guard_argv"
-    ],
-    "properties": {
-     "adapter": {
-      "enum": [
-       "github-gh"
-      ]
-     },
-     "repo": {
-      "type": "string",
-      "pattern": "^[^/\\s]+/[^/\\s]+$"
-     },
-     "billing_path": {
-      "type": "string"
-     },
-     "linux_sku": {
-      "type": "string"
-     },
-     "guard_argv": {
-      "type": "array",
-      "items": {
-       "type": "string"
-      }
-     },
-     "guard_cwd": {
-      "type": "string"
-     },
-     "job_minutes": {
-      "type": "number"
-     },
-     "plan_minutes": {
-      "type": "number"
-     },
-     "dispatch_kinds": {
-      "type": "array",
-      "items": {
-       "type": "string"
-      }
-     },
-     "push_command": {
-      "type": "string"
-     },
-     "dispatch_argv": {
-      "type": "array",
-      "items": {
-       "type": "string"
-      }
-     },
-     "scratch_command": {
-      "type": "string"
-     },
-     "noise": {
-      "type": "array",
-      "items": {
-       "type": "object",
-       "properties": {
-        "workflow": {
-         "type": "string"
-        },
-        "workflow_regex": {
-         "type": "string"
-        },
-        "event": {
-         "type": "string"
-        },
-        "branch_regex": {
+    "anyOf": [
+     {
+      "type": "object",
+      "required": [
+       "adapter",
+       "id",
+       "repo",
+       "billing_path",
+       "guard_argv"
+      ],
+      "properties": {
+       "adapter": {
+        "enum": [
+         "github-gh"
+        ]
+       },
+       "repo": {
+        "type": "string",
+        "pattern": "^[^/\\s]+/[^/\\s]+$"
+       },
+       "billing_path": {
+        "type": "string"
+       },
+       "linux_sku": {
+        "type": "string"
+       },
+       "guard_argv": {
+        "type": "array",
+        "items": {
          "type": "string"
         }
        },
-       "additionalProperties": false
-      }
-     },
-     "guard_args": {
-      "type": "object",
-      "description": "per job kind (or 'default'): the guard's arguments; placeholders {kind} {shards} {race} {packages} {crate} {diff_base}",
-      "additionalProperties": {
-       "type": "array",
-       "items": {
+       "guard_cwd": {
         "type": "string"
+       },
+       "job_minutes": {
+        "type": "number"
+       },
+       "plan_minutes": {
+        "type": "number"
+       },
+       "dispatch_kinds": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        }
+       },
+       "push_command": {
+        "type": "string"
+       },
+       "dispatch_argv": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        }
+       },
+       "scratch_command": {
+        "type": "string"
+       },
+       "noise": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "workflow": {
+           "type": "string"
+          },
+          "workflow_regex": {
+           "type": "string"
+          },
+          "event": {
+           "type": "string"
+          },
+          "branch_regex": {
+           "type": "string"
+          }
+         },
+         "additionalProperties": false
+        }
+       },
+       "guard_args": {
+        "type": "object",
+        "description": "per job kind (or 'default'): the guard's arguments; placeholders {kind} {shards} {race} {packages} {crate} {diff_base}",
+        "additionalProperties": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        }
+       },
+       "guard_defaults": {
+        "type": "object",
+        "description": "values for placeholders the request leaves empty",
+        "additionalProperties": {
+         "type": "string"
+        }
+       },
+       "runner_labels": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        },
+        "description": "self-hosted runners for mm resources: a runner is listed when it carries every one of these labels (as runs-on matches); read only when set"
+       },
+       "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"
+       },
+       "reserve_minutes": {
+        "type": "number",
+        "minimum": 0
+       },
+       "included_minutes": {
+        "type": "number",
+        "minimum": 0
        }
-      }
-     },
-     "guard_defaults": {
-      "type": "object",
-      "description": "values for placeholders the request leaves empty",
-      "additionalProperties": {
-       "type": "string"
-      }
-     },
-     "runner_labels": {
-      "type": "array",
-      "items": {
-       "type": "string"
       },
-      "description": "self-hosted runners for mm resources: a runner is listed when it carries every one of these labels (as runs-on matches); read only when set"
+      "additionalProperties": false
      },
-     "id": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"
+     {
+      "type": "object",
+      "required": [
+       "id",
+       "adapter",
+       "unit",
+       "reserve",
+       "job_cost",
+       "start_argv",
+       "total"
+      ],
+      "properties": {
+       "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"
+       },
+       "adapter": {
+        "const": "static"
+       },
+       "unit": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+       },
+       "reserve": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000000
+       },
+       "job_cost": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000000
+       },
+       "job_costs": {
+        "type": "object",
+        "additionalProperties": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1000000000000000
+        }
+       },
+       "plan_cost": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000000,
+        "default": 0
+       },
+       "start_argv": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "description": "Trusted profile command to print for a selected job; never executed by machine-manager. Supported placeholders: kind, shards, sha, branch, crate, diff_base, race, packages, pool."
+       },
+       "location": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+        "default": "cloud"
+       },
+       "read_interval_s": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 3600,
+        "default": 60
+       },
+       "stale_after_s": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 86400,
+        "default": 300
+       },
+       "total": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000000
+       },
+       "left": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000000,
+        "description": "Capacity remaining; defaults to total. Maintained by the owner, not decremented automatically."
+       },
+       "running": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 0
+       },
+       "queued": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 0
+       },
+       "ssh_argv": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 64,
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "description": "Optional fixed trusted SSH transport argv (executable basename ssh). No placeholders or control characters. start_argv is filled and quoted as one remote command, then passed as one final SSH argument."
+       }
+      },
+      "additionalProperties": false
      },
-     "reserve_minutes": {
-      "type": "number",
-      "minimum": 0
-     },
-     "included_minutes": {
-      "type": "number",
-      "minimum": 0
+     {
+      "type": "object",
+      "required": [
+       "id",
+       "adapter",
+       "unit",
+       "reserve",
+       "job_cost",
+       "start_argv",
+       "read_argv"
+      ],
+      "properties": {
+       "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"
+       },
+       "adapter": {
+        "const": "command"
+       },
+       "unit": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+       },
+       "reserve": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000000
+       },
+       "job_cost": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000000
+       },
+       "job_costs": {
+        "type": "object",
+        "additionalProperties": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1000000000000000
+        }
+       },
+       "plan_cost": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000000,
+        "default": 0
+       },
+       "start_argv": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "description": "Trusted profile command to print for a selected job; never executed by machine-manager. Supported placeholders: kind, shards, sha, branch, crate, diff_base, race, packages, pool."
+       },
+       "location": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+        "default": "cloud"
+       },
+       "read_interval_s": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 3600,
+        "default": 60
+       },
+       "stale_after_s": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 86400,
+        "default": 300
+       },
+       "read_argv": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "description": "Read-only script command that prints one pool-read JSON object."
+       },
+       "read_cwd": {
+        "type": "string"
+       },
+       "timeout_s": {
+        "type": "number",
+        "minimum": 0.1,
+        "maximum": 30,
+        "default": 10
+       },
+       "max_bytes": {
+        "type": "integer",
+        "minimum": 1024,
+        "maximum": 1048576,
+        "default": 65536
+       },
+       "ssh_argv": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 64,
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "description": "Optional fixed trusted SSH transport argv (executable basename ssh). No placeholders or control characters. start_argv is filled and quoted as one remote command, then passed as one final SSH argument."
+       }
+      },
+      "additionalProperties": false
      }
-    },
-    "additionalProperties": false
+    ]
    },
-   "description": "Independent pools; replaces [ci]. Each id is unique. Budget overrides inherit github settings when omitted."
+   "description": "Independent github-gh, static or command pools; replaces [ci]. Each id is unique. Each adapter uses its own capacity unit and reserve."
   }
  },
  "additionalProperties": false
