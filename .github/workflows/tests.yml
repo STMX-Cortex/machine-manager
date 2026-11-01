@@ -15,6 +15,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  grafana:
+    name: Grafana provisioning integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+
+      - name: Provision disposable Grafana
+        run: |
+          mkdir -p tests/results
+          image=grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
+          docker pull "$image"
+          python -I tests/check_grafana.py --docker-image "$image" | tee tests/results/grafana.log
+
+      - name: Upload provisioning report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: grafana-integration
+          path: tests/results/grafana.log
+          if-no-files-found: warn
+          retention-days: 14
+
   prometheus:
     name: Prometheus collection integration
     runs-on: ubuntu-24.04
@@ -46,6 +80,7 @@ jobs:
       - name: Scrape disposable endpoints and query real Prometheus
         run: |
           mkdir -p tests/results
+          "$RUNNER_TEMP/prometheus/promtool" test rules monitoring/tests/alerts.test.yml | tee tests/results/alerts.log
           python -I tests/check_prometheus.py \
             --prometheus "$RUNNER_TEMP/prometheus/prometheus" \
             --promtool "$RUNNER_TEMP/prometheus/promtool" | tee tests/results/prometheus.log
@@ -55,7 +90,9 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: prometheus-integration
-          path: tests/results/prometheus.log
+          path: |
+            tests/results/prometheus.log
+            tests/results/alerts.log
           if-no-files-found: warn
           retention-days: 14
 

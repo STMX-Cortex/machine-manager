@@ -14,7 +14,9 @@ Multiple GitHub pools, general `command`/`static` adapters, and read-only fleet 
 `mm metrics` exports cached machine/resource readings in Prometheus format (METRICS.md).
 `mm serve` provides loopback HTTP hosting; Prometheus configuration and systemd/launchd collection/hosting templates
 are in MONITORING.md. Live service managers, private peer hosting and production integrations still require the
-owner's target machines. Grafana dashboards and broader storage discovery remain roadmap work.
+owner's target machines. Grafana fleet/resource dashboards and Prometheus alert rules/provisioning are in
+GRAFANA.md; real dashboard rendering and notification delivery need owner acceptance. Broader storage discovery
+remains roadmap work.
 Use the README roadmap as the source when its details change.
 
 ## Tools
@@ -60,6 +62,13 @@ The workflow uses the test fixtures and does not install a persistent supervisor
 A separate Linux job downloads checksum-pinned Prometheus 3.15.1, checks the scrape configuration, and runs
 `tests/check_prometheus.py` against disposable loopback endpoints and a temporary TSDB. It verifies ingestion,
 peer metrics, staleness and endpoint failure, and uploads its report for 14 days. Nothing is installed as a service.
+
+The Prometheus integration also runs the alert-rule fixtures (thresholds, pending/firing/recovery, stale/outage
+suppression and resource identity/unit matching), evaluates a real alert, and executes every Grafana panel query.
+A separate Grafana integration job uses a digest-pinned official Grafana 13.3.0 image, a random temporary admin
+password and read-only provisioning. It verifies health, anonymous API rejection, the datasource UID and both
+dashboards via the Grafana API, then removes its container/data. It does not check browser rendering or send
+notifications. Grafana/Docker are not required for the normal Python suite.
 
 These hosted runner checks cover platform compatibility. Real systemd user service
 recovery and collection/placement between the owner's machines still need target-host

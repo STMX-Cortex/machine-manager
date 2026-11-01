@@ -102,8 +102,16 @@ def main():
                      'timeout_s = 2\nstale_after_s = 60\nstart_argv = ["/usr/bin/false"]\n'
                      '[machines.kinds]\nother = 1\n') % remote_port
             profile, data, local = host("fixture-central", central_port, peers)
+            resource = {"resource": "pool", "id": "fixture-pool", "parent": "team", "location": "cloud",
+                        "state": "GREEN", "read_time": time.time(), "stale_after_s": 300,
+                        "capacity": {"unit": "credits", "total": 100, "left": 10, "reserve": 10},
+                        "load": {"running": 1, "queued": 2}, "values": []}
+            (data / "resources.json").write_text(json.dumps({"kind": "resources", "schema_version": 1,
+                "machine_id": "fixture-central", "time": time.time(), "resources": [resource]}))
             collect(profile, data, 0)
             config = root / "prometheus.yml"
+            (root / "machine-manager.rules.yml").write_text(
+                (CODE / "monitoring" / "machine-manager.rules.yml").read_text().replace("interval: 15s", "interval: 1s"))
             config.write_text((CODE / "monitoring" / "prometheus.yml").read_text().replace("15s", "1s")
                               .replace("5s", "1s").replace("127.0.0.1:9877", "127.0.0.1:%d" % central_port))
             subprocess.run([options.promtool, "check", "config", str(config)], check=True, timeout=15)
@@ -121,6 +129,34 @@ def main():
                  "peer memory reading is queryable")
             wait(lambda: value('machine_manager_storage_available_bytes{machine_id="fixture-peer"}', 20e9),
                  "peer filesystem reading is queryable")
+            wait(lambda: value('machine_manager_resource_capacity_left{id="fixture-pool"}', 10),
+                 "local pool capacity is queryable")
+            wait(lambda: bool(query('(machine_manager_resource_capacity_left{job="machine-manager"} <= '
+                 'machine_manager_resource_capacity_reserve{job="machine-manager"}) and on(job, instance, '
+                 'machine_id, resource, id, parent, location) '
+                 '(machine_manager_resource_fresh{job="machine-manager"} == 1)')), "reserve condition matches")
+            try:
+                wait(lambda: value('ALERTS{alertname="MachineManagerResourceReserve",alertstate="pending"}', 1),
+                     "real Prometheus evaluates resource reserve rule")
+            except RuntimeError:
+                with opener.open("http://127.0.0.1:%d/api/v1/rules" % prom_port, timeout=2) as response:
+                    rules = json.load(response)
+                for group in rules.get("data", {}).get("groups", []):
+                    print("Rule group: " + group["name"], file=sys.stderr)
+                    for rule in group.get("rules", []):
+                        print(json.dumps({k: rule.get(k) for k in ("name", "state", "health", "lastError", "query")}),
+                              file=sys.stderr)
+                raise
+            for dashboard in sorted((CODE / "monitoring" / "grafana" / "dashboards").glob("*.json")):
+                count = 0
+                for panel in json.loads(dashboard.read_text())["panels"]:
+                    for target in panel.get("targets", []):
+                        expression = target["expr"].replace("$job", "machine-manager")
+                        for variable in ("instance", "machine", "resource", "id", "unit"):
+                            expression = expression.replace("${%s:regex}" % variable, ".*")
+                        query(expression)  # Parse and execute every shipped panel against real Prometheus.
+                        count += 1
+                print("PASS %s: %d dashboard queries execute" % (dashboard.name, count), flush=True)
             remote_status = root / "fixture-peer" / "status.json"
             stale = json.loads(remote_status.read_text())
             stale["time"] -= 10000

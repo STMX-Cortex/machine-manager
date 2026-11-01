@@ -625,7 +625,9 @@ you add any resource with a profile entry, and a new kind of resource needs one 
 3. **At large scale, a monitor watches and `mm` controls.** The first step, `mm metrics`, exports cached machine,
    peer and resource readings as Prometheus text ([METRICS.md](METRICS.md)). Collection/hosting now has a loopback
    HTTP endpoint, Prometheus scrape configuration and Linux/macOS service templates ([MONITORING.md](MONITORING.md));
-   owner deployment validation remains. Next: Grafana dashboards and alerts. Each runs as its own program.
+   Grafana fleet/resource dashboards, read-only provisioning and ten Prometheus alert rules are provided in
+   [GRAFANA.md](GRAFANA.md). Owner deployment, visual checks and actual notification delivery remain.
+   Each runs as its own program. Next feature: broader storage discovery (item 4).
    `mm` keeps the decisions: the slots,
    the placement, the guards and the usage meters across the fleet. Monitoring does not acquire control authority.
 4. **Storage across Linux and macOS: planned.** Discover mounted filesystems and report capacity and available space

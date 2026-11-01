@@ -1,0 +1,633 @@
+{
+  "uid": "mm-resources",
+  "title": "Machine Manager / Resources",
+  "description": "Local resource capacity and load, preserving producer, machine, parent, location and native unit. Peer resources require a separate direct scrape topology.",
+  "tags": [
+    "machine-manager"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Machine Manager Prometheus",
+          "value": "mm-prometheus"
+        },
+        "options": []
+      },
+      {
+        "name": "job",
+        "type": "constant",
+        "query": "machine-manager",
+        "current": {
+          "text": "machine-manager",
+          "value": "machine-manager"
+        },
+        "hide": 2
+      },
+      {
+        "name": "instance",
+        "label": "Producer",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(up{job=\"$job\"}, instance)",
+          "refId": "variable-instance"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "machine",
+        "label": "Machine",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(machine_manager_machine_status_fresh{job=\"$job\",instance=~\"${instance:regex}\"}, machine_id)",
+          "refId": "variable-machine"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "resource",
+        "label": "Resource kind",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(machine_manager_resource_fresh{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\"}, resource)",
+          "refId": "variable-resource"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "id",
+        "label": "Resource ID",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(machine_manager_resource_fresh{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\"}, id)",
+          "refId": "variable-id"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "unit",
+        "label": "Capacity unit",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(machine_manager_resource_capacity_left{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}, unit)",
+          "refId": "variable-unit"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Fleet",
+      "type": "link",
+      "url": "/d/mm-fleet",
+      "includeVars": true,
+      "keepTime": true
+    },
+    {
+      "title": "Resources",
+      "type": "link",
+      "url": "/d/mm-resources",
+      "includeVars": true,
+      "keepTime": true
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Resource freshness (1 = fresh)",
+      "type": "timeseries",
+      "description": "Local producer adapter records only. An empty list is valid; absent resources are not invented.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_resource_fresh{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}}",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Current resource state",
+      "type": "table",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_resource_state{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"} == 1",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Capacity left",
+      "type": "timeseries",
+      "description": "Native units. Compare each series separately; credits, minutes and slots cannot be summed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_resource_capacity_left{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} [{{unit}}]",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Capacity remaining above reserve",
+      "type": "timeseries",
+      "description": "Zero or below reaches reserve. This does not perform a job-specific guard or cost calculation.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 7,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_resource_capacity_left{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"} - machine_manager_resource_capacity_reserve{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} [{{unit}}]",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Capacity total and reserve",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_resource_capacity_total{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} total [{{unit}}]",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "machine_manager_resource_capacity_reserve{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\",unit=~\"${unit:regex}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} reserve [{{unit}}]",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Running and queued",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 15,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_resource_running{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} running",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "machine_manager_resource_queued{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{resource}} {{parent}} / {{id}} @ {{location}} queued",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Numeric adapter values (native units by key)",
+      "type": "table",
+      "description": "Current values with key labels. Units are adapter-defined; no rate or sum is applied to these gauges.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_resource_value{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\",resource=~\"${resource:regex}\",id=~\"${id:regex}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Local resources document valid (1 = valid)",
+      "type": "timeseries",
+      "description": "A valid envelope may contain stale records. A missing/invalid document must not look like an empty healthy list.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_snapshot_valid{job=\"$job\",instance=~\"${instance:regex}\",source=\"resources\"}",
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    }
+  ]
+}
