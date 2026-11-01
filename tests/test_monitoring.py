@@ -205,6 +205,11 @@ class Hosting(TempData):
                 sender.start()
                 self.assertEqual(conn.recv(1), b"")
                 self.assertLess(time.monotonic() - start, 2)
+                # Keep the client open: releasing the worker must not depend on the client closing its read half.
+                until = time.monotonic() + 1
+                while server.workers._value < mmserve.CONNECTIONS and time.monotonic() < until:
+                    time.sleep(.01)
+                self.assertEqual(server.workers._value, mmserve.CONNECTIONS)
             finally:
                 stop.set()
                 if sender.ident is not None:

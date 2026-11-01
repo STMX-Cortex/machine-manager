@@ -80,7 +80,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
     def process_request_thread(self, request, client_address):
         # Socket timeouts alone reset on each byte; a wall deadline also stops slow/dripping clients.
-        deadline = threading.Timer(CONNECTION_WALL_S, self.shutdown_request, args=(request,))
+        deadline = threading.Timer(CONNECTION_WALL_S, self.expire_connection, args=(request,))
         deadline.daemon = True
         deadline.start()
         try:
@@ -89,6 +89,15 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
             deadline.cancel()
             deadline.join()
             self.workers.release()
+
+    def expire_connection(self, request):
+        # TCPServer.shutdown_request shuts down only writes. Both halves must stop: makefile() retains the
+        # descriptor, so close() alone can leave a handler reading a client that keeps dripping bytes.
+        try:
+            request.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        self.close_request(request)
 
     def handle_error(self, request, client_address):
         pass  # outside requests and local paths never become log messages
