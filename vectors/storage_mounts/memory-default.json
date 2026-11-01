@@ -1,0 +1,13 @@
+{
+ "function": "storage_mounts",
+ "case": "memory-default",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "category": "memory",
+  "mounts": [
+   "/tmp"
+  ]
+ },
+ "expected": []
+}

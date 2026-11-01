@@ -1,0 +1,23 @@
+{
+ "function": "storage_mounts",
+ "case": "exclude-wins",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "category": "network",
+  "mounts": [
+   "/mnt/a",
+   "/mnt/b"
+  ],
+  "include": [
+   "/mnt/a",
+   "/mnt/b"
+  ],
+  "exclude": [
+   "/mnt/b"
+  ]
+ },
+ "expected": [
+  "/mnt/a"
+ ]
+}

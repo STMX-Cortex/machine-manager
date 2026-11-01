@@ -1,0 +1,17 @@
+{
+ "function": "storage_capacity",
+ "case": "exact-large-integer",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "total_bytes": 9223372036854775807,
+  "free_bytes": 1,
+  "available_bytes": 0
+ },
+ "expected": {
+  "total_bytes": 9223372036854775807,
+  "free_bytes": 1,
+  "available_bytes": 0,
+  "used_bytes": 9223372036854775806
+ }
+}

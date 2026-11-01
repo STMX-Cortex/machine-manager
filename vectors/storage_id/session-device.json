@@ -1,0 +1,12 @@
+{
+ "function": "storage_id",
+ "case": "session-device",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "kind": "device",
+  "basis": "session",
+  "value": "boot-a:ns-a:8:0"
+ },
+ "expected": "device:session:374880a0c9c51de82c78710c486fe7bbc9c2a80c10131010199e983535975477"
+}

@@ -1,0 +1,13 @@
+{
+ "function": "storage_mounts",
+ "case": "network-default",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "category": "network",
+  "mounts": [
+   "/mnt/remote"
+  ]
+ },
+ "expected": []
+}

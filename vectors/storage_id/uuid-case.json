@@ -1,0 +1,12 @@
+{
+ "function": "storage_id",
+ "case": "uuid-case",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "kind": "filesystem",
+  "basis": "uuid",
+  "value": "{AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}"
+ },
+ "expected": "filesystem:uuid:155b0bd16a08a7ea05e57ad15284c19f6f2963e2a094e328fe57f4483bdb589b"
+}

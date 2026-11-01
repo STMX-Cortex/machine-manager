@@ -636,7 +636,10 @@ you add any resource with a profile entry, and a new kind of resource needs one 
    Each runs as its own program. Next feature: broader storage discovery (item 4).
    `mm` keeps the decisions: the slots,
    the placement, the guards and the usage meters across the fleet. Monitoring does not acquire control authority.
-4. **Storage across Linux and macOS: planned.** Discover mounted filesystems and report capacity and available space
+4. **Storage across Linux and macOS: shared model implemented; collectors planned.** [STORAGE.md](STORAGE.md)
+   defines device/filesystem/shared-capacity identities, exact byte counts, unknown readings, bounded mount selection,
+   a standalone schema and portable tests. It does not enable discovery or export. Next, implement separate Linux
+   and Mac collectors using that contract. Discover mounted filesystems and report capacity and available space
    for each, with stable identities and bounded record counts. Follow with device read/write byte and operation rates,
    and optional latency or device-health readings where the platform exposes them. Keep filesystem capacity separate
    from device I/O: several mounts can share one device or storage pool. Missing or unsupported readings stay unknown.

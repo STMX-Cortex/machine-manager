@@ -15,6 +15,7 @@ import mmcore
 import mmdecide
 import mmread
 import mmreplay
+import mmstorage
 
 
 def _drop(d, *keys):
@@ -43,6 +44,9 @@ def _read_usage(i, s):
 
 
 FUNCTIONS = {
+    "storage_id": lambda i, s: mmstorage.storage_id(**i),
+    "storage_capacity": lambda i, s: mmstorage.capacity(**i),
+    "storage_mounts": lambda i, s: mmstorage.select_mounts(**i),
     "read_usage": _read_usage,
     "classify": lambda i, s: mmdecide.classify(i["window"], s, i.get("disk_gb"), i.get("kernel_event", False)),
     "slot_decide": lambda i, s: mmdecide.slot_decide(i["state"], i["inp"], s),
