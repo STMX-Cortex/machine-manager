@@ -158,6 +158,7 @@ class Hosting(TempData):
         before = {str(p.relative_to(self.data)): p.read_bytes() for p in Path(self.data).rglob("*") if p.is_file()}
         with mock.patch("mmfleet.collect", side_effect=AssertionError("collection")), \
                 mock.patch("subprocess.Popen", side_effect=AssertionError("command")), \
+                mock.patch("socket.getfqdn", side_effect=AssertionError("reverse DNS")), \
                 mock.patch("mmcore.write_atomic", side_effect=AssertionError("write")):
             with self.host() as server:
                 for path in ("/metrics", "/status.json", "/-/healthy"):

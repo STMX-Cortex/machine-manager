@@ -45,7 +45,8 @@ CPU-model strings, capacity/load dictionaries, resource records and arbitrary ke
 [METRICS.md](METRICS.md). Unknown measurements remain unknown; stale measurements are not revived by a scrape.
 
 The listener accepts only loopback connections and a single loopback Host header (`localhost`, `127.0.0.1` or
-`[::1]`, optionally with a port). This also rejects browser DNS rebinding. At most four connections run at once;
+`[::1]`, optionally with a port). Binding uses the numeric address directly, with no reverse DNS lookup.
+Host validation also rejects browser DNS rebinding. At most four connections run at once;
 excess connections close immediately. Each has a three-second socket timeout and ten-second wall deadline, no
 keep-alive, and a 16 MiB response cap. Keep Prometheus and untrusted browser pages on separate origins.
 

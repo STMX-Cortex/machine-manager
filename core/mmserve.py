@@ -63,6 +63,12 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.address_family = socket.AF_INET6 if bind == "::1" else socket.AF_INET
         super().__init__((bind, port), Handler)
 
+    def server_bind(self):
+        # HTTPServer.server_bind calls getfqdn(), which may block on reverse DNS even for loopback on macOS.
+        # No DNS or external name is needed: this listener accepts numeric loopback addresses only.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
     def get_request(self):
         request, address = super().get_request()
         request.settimeout(TIMEOUT_S)
