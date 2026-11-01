@@ -563,6 +563,13 @@
           "alertname": "MachineManagerResourceReserve",
           "exp_alerts": []
         }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "(machine_manager_storage_available_bytes{job=\"machine-manager\",instance=~\".*\",machine_id=~\".*\"} / machine_manager_storage_size_bytes{job=\"machine-manager\",instance=~\".*\",machine_id=~\".*\"}) and (machine_manager_storage_size_bytes{job=\"machine-manager\",instance=~\".*\",machine_id=~\".*\"} > 0)",
+          "eval_time": "20m",
+          "exp_samples": []
+        }
       ]
     },
     {

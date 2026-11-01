@@ -12,6 +12,16 @@ CODE = Path(__file__).resolve().parent.parent
 
 
 class Dashboards(TempData):
+    def test_zero_storage_fixture_uses_the_shipped_dashboard_query(self):
+        dashboard = json.loads((CODE / "monitoring/grafana/dashboards/fleet.json").read_text())
+        expression = next(p for p in dashboard["panels"] if p["id"] == 8)["targets"][0]["expr"]
+        expression = expression.replace("$job", "machine-manager")
+        for variable in ("instance", "machine"):
+            expression = expression.replace("${%s:regex}" % variable, ".*")
+        fixtures = json.loads((CODE / "monitoring/tests/alerts.test.yml").read_text())
+        case = next(t for t in fixtures["tests"] if t["name"] == "zero storage size remains unknown")
+        self.assertIn({"expr": expression, "eval_time": "20m", "exp_samples": []}, case["promql_expr_test"])
+
     def test_dashboard_metric_families_are_exported(self):
         source = machine(readings={"free_pct": 50, "cpu_pct": 30, "sys_pct": 5, "comp_mb": 10,
                                    "swap_used_mb": 2, "psi_some_pct": 1, "psi_full_pct": 0})

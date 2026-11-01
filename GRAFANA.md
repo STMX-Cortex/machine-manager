@@ -47,15 +47,16 @@ same-host configuration below assumes both programs share a network namespace.
    provisioning files use JSON syntax, which Grafana's YAML reader accepts. Preserve valid JSON escaping when
    inserting paths, especially paths with quotes or backslashes. Confirm the dashboard provider points at your
    copied `dashboards` folder. The datasource URL defaults to `http://127.0.0.1:9090`; change only the copy when needed.
-3. Create a private file containing a new initial Grafana administrator password outside the checkout. Restrict
-   its permissions to the intended user. Supply its path through `GF_SECURITY_ADMIN_PASSWORD__FILE`; do not put
-   the password in the source, shell history or command arguments. This bootstrap setting only applies to a new
+3. Create `grafana/secrets/` with mode 0700 and an `admin-password` file with mode 0600 inside it, containing a
+   new random initial Grafana administrator password. The template's `security.admin_password` uses Grafana's
+   native `$__file{...}` provider to read it. Do not put the password in the source, shell history or command
+   arguments. `GF_SECURITY_ADMIN_PASSWORD__FILE` is handled by the Docker entrypoint, not the native binary;
+   it must not replace the file-provider setting for native startup. This bootstrap setting only applies to a new
    Grafana database; it does not reset an existing administrator. Use a dedicated read-only Viewer account for viewing.
 4. Run in the foreground with your actual paths (the launcher is `bin/grafana server` in current distributions):
 
    ```sh
-   GF_SECURITY_ADMIN_PASSWORD__FILE=/path/to/private/grafana-admin-password \
-     /path/to/grafana/bin/grafana server --homepath /path/to/grafana \
+   /path/to/grafana/bin/grafana server --homepath /path/to/grafana \
      --config /path/to/monitoring/grafana/grafana.ini
    ```
 

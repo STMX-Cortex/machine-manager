@@ -488,7 +488,7 @@
       "id": 8,
       "title": "Main filesystem available fraction",
       "type": "timeseries",
-      "description": "",
+      "description": "Unknown or zero filesystem size is a gap, never an infinite or fabricated percentage.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -502,7 +502,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "machine_manager_storage_available_bytes{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\"} / machine_manager_storage_size_bytes{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\"}",
+          "expr": "(machine_manager_storage_available_bytes{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\"} / machine_manager_storage_size_bytes{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\"}) and (machine_manager_storage_size_bytes{job=\"$job\",instance=~\"${instance:regex}\",machine_id=~\"${machine:regex}\"} > 0)",
           "legendFormat": "{{instance}} / {{machine_id}}",
           "range": true,
           "instant": false,
