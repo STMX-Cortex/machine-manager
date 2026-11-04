@@ -102,10 +102,13 @@ class Hosting(TempData):
     def test_invalid_identity_queue_counts_and_files_fail_closed(self):
         with self.host() as server:
             for over in ({"machine_id": "other"}, {"schema_version": 2}, {"slots": -1}, {"slots": True},
-                         {"slots": 1.5}, {"busy": None}, {"waiting": -1},
+                         {"slots": 1.5}, {"busy": None}, {"waiting": -1}, {"slots": "missing"},
                          {"time": time.time() + 1000}, {"readings": {"free_pct": "bad"}}):
                 with self.subTest(over=over):
-                    self.write_status(**over)
+                    doc = self.write_status(**over)
+                    if over == {"slots": "missing"}:  # an absent field is not an explicit unknown
+                        del doc["slots"]
+                        Path(self.data, "status.json").write_text(json.dumps(doc))
                     self.assertEqual(self.request(server, "/status.json")[0], 503)
             path = Path(self.data, "status.json")
             path.unlink()

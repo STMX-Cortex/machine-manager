@@ -272,6 +272,18 @@ class Collection(TempData):
                 resource = mmfleet.resources(self.fleet_profile(), NOW, self.settings)[0]
                 self.assertIsNone(resource["capacity"]["total"])
                 self.assertIsNone(resource["capacity"]["left"])
+                ctx = context("RED", 60)  # a busy RED local machine and no pools: only the peer could take work
+                ctx["machines"] = mmfleet.views(self.fleet_profile(), NOW, self.settings)
+                result = mmdecide.place_fleet({"kind": "go-test", "shards": 1}, ctx, self.settings)
+                self.assertEqual(result["place"], "WAIT")
+                self.assertNotEqual(result.get("candidate"), "remote-a")
+
+    def test_missing_queue_slots_still_fail_closed(self):
+        doc = status()
+        del doc["slots"]
+        result = self.collect(response=blob(doc))
+        self.assertIsNone(result["machines"][0]["status"])
+        self.assertEqual(self.view()["state"], "UNKNOWN")
 
     def test_malformed_queue_counts_still_fail_closed(self):
         for over in ({"slots": -1}, {"slots": True}, {"slots": 1.0}, {"slots": 1025}, {"busy": None},
