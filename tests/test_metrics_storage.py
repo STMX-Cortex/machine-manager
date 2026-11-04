@@ -420,14 +420,34 @@ class StorageResponseBudget(unittest.TestCase):
         self.assertLessEqual(storage_bytes(short), exact - 1)
 
     def test_full_legacy_text_leaves_only_state_series(self):
-        storage = self.machines(2)
+        storage = self.machines(2, dense())  # each machine's measurements exceed the state reserve left over
         legacy = render()
-        with mock.patch.object(storage_metrics, "RESPONSE_TEXT_BYTES", len(legacy.encode("utf-8"))):
+        target = len(legacy.encode("utf-8")) + storage_metrics.STATE_RESERVE_BYTES * (len(storage) + 1)
+        with mock.patch.object(storage_metrics, "RESPONSE_TEXT_BYTES", target):
             text = render(*storage)
+        self.assertLessEqual(len(text.encode("utf-8")), target)
         self.assertEqual(self.complete(text, storage), [0, 0])
         self.assertEqual(len(text.encode("utf-8")), len(legacy.encode("utf-8")) + state_bytes(text))
         self.assertEqual([l for l in text.splitlines() if re.search(r"machine_manager_\w+", l).group() not in FAMILIES],
                          legacy.splitlines())
+
+    def test_no_storage_line_when_its_state_series_would_not_fit(self):
+        # Legacy text just under the cap must never be pushed over it, even by the small state series.
+        storage = self.machines(2)
+        legacy = render()
+        target = len(legacy.encode("utf-8")) + storage_metrics.STATE_RESERVE_BYTES * (len(storage) + 1) - 1
+        with mock.patch.object(storage_metrics, "RESPONSE_TEXT_BYTES", target):
+            self.assertEqual(render(*storage), legacy)
+
+    def test_state_reserve_covers_the_longest_machine_id(self):
+        # 120 three-byte characters plus escapes: each machine's always-emitted lines fit its reserve, and all
+        # family headers fit the one extra reserve.
+        one, two = "\u4e2d" * 119 + "a", "\u4e2d" * 119 + "b"
+        for fresh_ in (True, False):
+            texts = [render(*[(m, relabel(fx.snapshot(), m), fresh_) for m in ids]) for ids in ([one], [one, two])]
+            first, both = (state_bytes(t) for t in texts)
+            self.assertLessEqual(both - first, storage_metrics.STATE_RESERVE_BYTES)
+            self.assertLessEqual(both, storage_metrics.STATE_RESERVE_BYTES * 3)
 
     def test_large_legacy_resources_plus_storage_stay_under_the_response_target(self):
         # A 2 MiB response target keeps memory small; legacy text takes over half of it, as 8+ MiB would of 15 MiB.

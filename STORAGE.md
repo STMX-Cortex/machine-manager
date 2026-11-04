@@ -587,7 +587,8 @@ groups, devices or hosts.
    No whole-device traffic is repeated for each filesystem.
 3. **Fleet storage export implemented:** `mm storage record`, `/storage.json`, `mm collect` peer caches, freshness and
    limits (above); legacy guards unchanged. Target-host timers/agents and private-network acceptance remain.
-4. Grafana views and then alerts from proven readings; optional hardware health later.
+4. **Grafana views and alerts implemented:** the Storage dashboard and storage alerts (GRAFANA.md, METRICS.md);
+   real dashboard rendering and notification delivery need owner acceptance. Optional hardware health later.
 
 ```sh
 python3 -I tests/run_tests.py storage_fleet storage_io storage_darwin storage_linux storage vectors

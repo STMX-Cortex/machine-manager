@@ -84,6 +84,41 @@ def read(path, limit, dir_fd=None):
         return None
 
 
+_CHECKED = {}  # per process (mm serve): name -> (file identity, checked document or None)
+CHECK_CACHE_BYTES = 1 << 20  # larger files are read and checked again each time (bounded by READ_DEADLINE_S)
+READ_DEADLINE_S = 2.0  # exported_snapshots: peers not reached by then are (id, None, False) for that scrape
+
+
+def _read_checked(key, path, limit, check, dir_fd=None):
+    """read() plus an expensive check, reused while the file identity (device, inode, size, times) is unchanged.
+    Writers replace files atomically, so a new collection is a new identity. Returns the document or None."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=dir_fd)
+    except OSError:
+        _CHECKED.pop(key, None)
+        return None
+    try:
+        with os.fdopen(fd, "rb") as f:
+            st = os.fstat(f.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                _CHECKED.pop(key, None)
+                return None
+            ident = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+            hit = _CHECKED.get(key)
+            if hit is not None and hit[0] == ident:
+                return hit[1]
+            raw = f.read(limit + 1)
+        doc = mmfleet._strict_json(raw, limit)
+        doc = doc if check(doc) else None
+    except (OSError, ValueError, RecursionError, KeyError, TypeError):
+        doc = None
+    if st.st_size <= CHECK_CACHE_BYTES:
+        _CHECKED[key] = (ident, doc)
+    else:
+        _CHECKED.pop(key, None)
+    return doc
+
+
 def _capacity_unknown(rec, reason):
     return {"schema_version": 1, "machine_id": rec["machine_id"], "time": rec["time"], "state": "UNKNOWN",
             "reason": reason, "devices": [], "filesystems": []}
@@ -300,17 +335,24 @@ def _attempt_time(central):
     return doc["time"]
 
 
-def _peer(cfg, central, now, dir_fd, attempt):
-    doc = read(cfg["id"] + ".json", CACHE_BYTES, dir_fd=dir_fd)
+def _peer_ok(doc, cfg, central):
     if not isinstance(doc, dict) or set(doc) != PEER_KEYS or doc["kind"] != "fleet_storage" \
             or type(doc["schema_version"]) is not int or doc["schema_version"] != 1 \
             or doc["machine_id"] != central or doc["id"] != cfg["id"] or not _number(doc["collected_at"]):
-        return None, False
+        return False
     snapshot = doc["snapshot"]
     if snapshot is None or doc["error"] is not None:  # error is null exactly when a snapshot is present
+        return False
+    return valid(snapshot) and snapshot["machine_id"] == cfg["id"] and _clean_text(snapshot)
+
+
+def _peer(cfg, central, now, dir_fd, attempt):
+    name = cfg["id"] + ".json"
+    doc = _read_checked(("peer", central, cfg["id"]), name, CACHE_BYTES, lambda d: _peer_ok(d, cfg, central),
+                        dir_fd=dir_fd)
+    if doc is None:
         return None, False
-    if not valid(snapshot) or snapshot["machine_id"] != cfg["id"] or not _clean_text(snapshot):
-        return None, False
+    snapshot = doc["snapshot"]
     limit = cfg["storage_stale_after_s"]
     is_fresh = doc["collected_at"] >= attempt and -FUTURE_SKEW_S <= now - doc["collected_at"] < limit \
         and fresh(snapshot, now, limit)
@@ -322,8 +364,9 @@ def exported_snapshots(profile, now):
 
     The local machine comes first, only when storage.json exists; then each peer with storage_url, in profile order.
     Peers need a valid attempt marker and a real cache directory (not a link); otherwise each is (id, None, False).
+    Checked documents are reused while their file identity is unchanged; peers after READ_DEADLINE_S are unknown.
     """
-    ident, out = mmcore.machine_id(profile), []
+    ident, out, started = mmcore.machine_id(profile), [], time.monotonic()
     path = mmcore.path(FILE)
     try:
         os.lstat(path)
@@ -331,8 +374,9 @@ def exported_snapshots(profile, now):
     except OSError:
         exists = False
     if exists:
-        doc = read(path, SNAPSHOT_BYTES)
-        if valid(doc) and doc["machine_id"] == ident:
+        doc = _read_checked(("local", path, ident), path, SNAPSHOT_BYTES,
+                            lambda d: valid(d) and d["machine_id"] == ident)
+        if doc is not None:
             out.append((ident, doc, fresh(doc, now)))
         else:
             out.append((ident, None, False))
@@ -343,7 +387,11 @@ def exported_snapshots(profile, now):
     dir_fd = _cache_dir() if attempt is not None else None
     try:
         for cfg in cfgs:
-            out.append((cfg["id"],) + (_peer(cfg, ident, now, dir_fd, attempt) if dir_fd is not None else (None, False)))
+            # A scrape never waits on unbounded storage work: peers not reached by the deadline are unknown this
+            # time; checked results are reused on the next scrape, so later scrapes reach them.
+            late = time.monotonic() - started > READ_DEADLINE_S
+            out.append((cfg["id"],) + (_peer(cfg, ident, now, dir_fd, attempt) if dir_fd is not None and not late
+                                       else (None, False)))
     finally:
         if dir_fd is not None:
             os.close(dir_fd)

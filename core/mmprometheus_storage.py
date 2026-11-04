@@ -17,6 +17,7 @@ import math
 ROWS_MAX = 128  # mmstorage.RECORDS_MAX: devices and filesystems, independently
 STORAGE_TEXT_BYTES = 8 << 20  # at most half of mm serve's 16 MiB response cap
 RESPONSE_TEXT_BYTES = 15 << 20  # whole-exposition target: 1 MiB headroom under mm serve/Prometheus 16 MiB caps
+STATE_RESERVE_BYTES = 8192  # per machine: 9 always-emitted lines with a 120-character (up to 4-byte UTF-8) machine_id label
 STATES = ("OK", "PARTIAL", "UNKNOWN")
 SCOPES = ("whole_device", "driver")
 CAPACITY = (("total_bytes", "size_bytes", "Filesystem size in bytes."),
@@ -91,6 +92,11 @@ class Budget:
         self.limit = STORAGE_TEXT_BYTES if limit is None else limit
         self.used = 0
         self.headers, self.reserved = set(), set()  # completeness families/series already paid for
+
+
+def fits(legacy_bytes, machines):
+    """Whether storage may be added at all: its always-emitted state lines must also stay under the target."""
+    return legacy_bytes + STATE_RESERVE_BYTES * (machines + 1) <= RESPONSE_TEXT_BYTES
 
 
 def budget_for(legacy_bytes):

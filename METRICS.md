@@ -95,13 +95,19 @@ Each snapshot has at most 128 filesystems and 128 devices, so at most 6 x 128 + 
 per machine; 33 machines stay below 50 000. Labels are masked, cleaned, capped at 120 characters and escaped like
 the others.
 
+**Read cost.** Each scrape reads `storage.json` and the peer caches again, but a long-running `mm serve` reuses a
+checked document while its file identity (device, inode, size, times) is unchanged; writers replace files atomically,
+so each collection is checked once. Peers not reached within 2 s of reading (`READ_DEADLINE_S`) are reported as
+unavailable for that scrape (freshness 0), never as stale data, and later scrapes reach them from the reuse.
+
 **Byte budget.** Dense inventories with long labels can reach about 18-21 MiB for 33 machines, more than the 16 MiB
 `mm serve` response cap and Prometheus `body_size_limit`; an oversized body would fail the whole scrape (`up=0`) and
 hide every alert from that endpoint. The guarantee is: **storage never pushes the response past 15 MiB**
 (`RESPONSE_TEXT_BYTES`, 1 MiB headroom under both 16 MiB caps). After the legacy families are rendered, storage gets
 min(8 MiB, 15 MiB - legacy bytes), never less than zero (`STORAGE_TEXT_BYTES` is the 8 MiB ceiling). Freshness,
-source time, inventory state and `storage_export_complete` are reserved first and always exported (about 1 KB per
-machine; the only storage text that can exceed the budget). Filesystem and device series are then added machine by
+source time, inventory state and `storage_export_complete` are reserved first and exported for every listed machine
+(at most 8 KiB each, `STATE_RESERVE_BYTES`). If even those lines would pass 15 MiB, no storage line is exported at
+all and the legacy output stays whole. Filesystem and device series are then added machine by
 machine in snapshot order (local first, then peers in profile order). A machine whose series would exceed the
 remaining budget exports **none** of them, never part of a machine, and reports `storage_export_complete` 0; a
 later, smaller machine can still fit. Rows of a machine are not ranked or truncated, so no filesystem silently

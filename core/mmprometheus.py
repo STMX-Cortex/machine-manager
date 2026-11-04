@@ -233,7 +233,8 @@ def render(ident, status, resources, peers, now, settings, *, storage=()):
     storage = list(storage)
     if storage:  # storage gets what legacy text leaves under the response target, never more than its own budget
         legacy = len(out.text().encode("utf-8"))
-        mmprometheus_storage.add_all(out, storage, mmprometheus_storage.budget_for(legacy))
+        if mmprometheus_storage.fits(legacy, len(storage)):  # else no storage line at all: legacy output stays whole
+            mmprometheus_storage.add_all(out, storage, mmprometheus_storage.budget_for(legacy))
     return out.text(), local_fresh
 
 

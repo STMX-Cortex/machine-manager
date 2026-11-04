@@ -712,6 +712,35 @@ class Exported(TempData):
         self.assertEqual(fleet.exported_snapshots(profile, NOW + 2), [("peer-a", snap("peer-a", NOW), False),
                                                                       ("peer-c", snap("peer-c", NOW), False)])
 
+    def test_checked_documents_are_reused_until_the_file_changes(self):
+        profile = self.profile_with()
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(snap(cfg["id"], NOW)).encode())
+        self.write_local(fleet.dumps(snap(t=NOW)))
+        first = fleet.exported_snapshots(profile, NOW)
+        self.assertEqual([fresh for _, _, fresh in first], [True, True, True])
+        with mock.patch.object(fleet, "valid", side_effect=AssertionError("checked again")):
+            self.assertEqual(fleet.exported_snapshots(profile, NOW + 1), first[:1] + [
+                (ident, doc, True) for ident, doc, _ in first[1:]])
+        later = snap("peer-a", NOW + 2)  # a new collection replaces the file: a new identity is checked again
+        fleet.collect(profile, now=NOW + 2, fetcher=lambda cfg: fleet.dumps(
+            later if cfg["id"] == "peer-a" else snap(cfg["id"], NOW + 2)).encode())
+        calls, real = [], fleet.valid
+        with mock.patch.object(fleet, "valid", side_effect=lambda doc: calls.append(1) or real(doc)):
+            got = fleet.exported_snapshots(profile, NOW + 3)
+        self.assertEqual(len(calls), 2, "only the two replaced peer files")
+        self.assertEqual(got[1], ("peer-a", later, True))
+        Path(self.data, "fleet-storage", "peer-a.json").write_text("not json")
+        self.assertEqual(fleet.exported_snapshots(profile, NOW + 3)[1], ("peer-a", None, False))
+
+    def test_peers_after_the_read_deadline_are_unknown_for_that_scrape(self):
+        profile = self.profile_with()
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(snap(cfg["id"], NOW)).encode())
+        self.write_local(fleet.dumps(snap(t=NOW)))
+        with mock.patch.object(fleet, "READ_DEADLINE_S", -1):
+            got = fleet.exported_snapshots(profile, NOW)
+        self.assertEqual(got[0][0::2], (LOCAL, True))
+        self.assertEqual(got[1:], [("peer-a", None, False), ("peer-c", None, False)])
+
     def test_reader_is_read_only(self):
         profile = self.profile_with()
         self.write_local(fleet.dumps(snap(t=NOW)))
