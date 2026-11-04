@@ -1,0 +1,510 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "Fleet storage snapshot (storage.json, GET /storage.json, fleet-storage/<id>.json snapshot)",
+ "description": "Also requires mmstorage_fleet.valid: both sub-records pass mmstorage.valid and mmstorage_io.valid, one machine_id, time = min(capacity.time, io.time). At most 8 MiB serialized. $defs storage/storage_io are copies of storage.schema.json and storage-io.schema.json (tests keep them equal).",
+ "type": "object",
+ "required": [
+  "kind",
+  "schema_version",
+  "machine_id",
+  "time",
+  "capacity",
+  "io"
+ ],
+ "properties": {
+  "kind": {
+   "const": "storage_snapshot"
+  },
+  "schema_version": {
+   "type": "integer",
+   "const": 1
+  },
+  "machine_id": {
+   "type": "string",
+   "minLength": 1,
+   "maxLength": 120
+  },
+  "time": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 9007199254740991
+  },
+  "capacity": {
+   "$ref": "#/$defs/storage"
+  },
+  "io": {
+   "$ref": "#/$defs/storage_io"
+  }
+ },
+ "additionalProperties": false,
+ "$defs": {
+  "capacity": {
+   "type": "object",
+   "required": [
+    "total_bytes",
+    "free_bytes",
+    "available_bytes",
+    "used_bytes"
+   ],
+   "properties": {
+    "total_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    },
+    "free_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    },
+    "available_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    },
+    "used_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    }
+   },
+   "additionalProperties": false
+  },
+  "device": {
+   "type": "object",
+   "required": [
+    "id",
+    "name",
+    "kind",
+    "size_bytes"
+   ],
+   "properties": {
+    "id": {
+     "type": "string",
+     "pattern": "^device:(uuid|wwn|native|session):[0-9a-f]{64}$",
+     "maxLength": 96
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 1024
+    },
+    "kind": {
+     "enum": [
+      "block",
+      "virtual",
+      "unknown"
+     ]
+    },
+    "size_bytes": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 9223372036854775807
+    }
+   },
+   "additionalProperties": false
+  },
+  "filesystem": {
+   "type": "object",
+   "required": [
+    "id",
+    "fs_type",
+    "category",
+    "mounts",
+    "read_only",
+    "device_ids",
+    "capacity_group",
+    "capacity",
+    "capacity_reason"
+   ],
+   "properties": {
+    "id": {
+     "type": "string",
+     "pattern": "^filesystem:(uuid|wwn|native|session):[0-9a-f]{64}$",
+     "maxLength": 96
+    },
+    "fs_type": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 64
+    },
+    "category": {
+     "enum": [
+      "local",
+      "network",
+      "memory",
+      "pseudo",
+      "overlay",
+      "unknown"
+     ]
+    },
+    "mounts": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 32,
+     "uniqueItems": true,
+     "items": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^/(?:[^/]+(?:/[^/]+)*)?$"
+     }
+    },
+    "read_only": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "device_ids": {
+     "type": "array",
+     "maxItems": 128,
+     "uniqueItems": true,
+     "items": {
+      "type": "string",
+      "pattern": "^device:(uuid|wwn|native|session):[0-9a-f]{64}$",
+      "maxLength": 96
+     }
+    },
+    "capacity_group": {
+     "anyOf": [
+      {
+       "type": "null"
+      },
+      {
+       "type": "string",
+       "pattern": "^capacity:(uuid|wwn|native|session):[0-9a-f]{64}$",
+       "maxLength": 96
+      }
+     ]
+    },
+    "capacity": {
+     "$ref": "#/$defs/capacity"
+    },
+    "capacity_reason": {
+     "enum": [
+      null,
+      "unsupported",
+      "permission_denied",
+      "timeout",
+      "read_failed",
+      "invalid_data",
+      "truncated"
+     ]
+    }
+   },
+   "additionalProperties": false
+  },
+  "storage": {
+   "title": "Storage observation contract (not yet collected or exported)",
+   "description": "Also requires mmstorage.valid semantic validation: bounds, clean text/paths, ordering, references, unknown states and capacity relations. Capacity groups are non-additive allocation domains.",
+   "type": "object",
+   "required": [
+    "schema_version",
+    "machine_id",
+    "time",
+    "state",
+    "reason",
+    "devices",
+    "filesystems"
+   ],
+   "properties": {
+    "schema_version": {
+     "type": "integer",
+     "const": 1
+    },
+    "machine_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 120
+    },
+    "time": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 9007199254740991
+    },
+    "state": {
+     "enum": [
+      "OK",
+      "PARTIAL",
+      "UNKNOWN"
+     ]
+    },
+    "reason": {
+     "enum": [
+      null,
+      "unsupported",
+      "permission_denied",
+      "timeout",
+      "read_failed",
+      "invalid_data",
+      "truncated"
+     ]
+    },
+    "devices": {
+     "type": "array",
+     "maxItems": 128,
+     "items": {
+      "$ref": "#/$defs/device"
+     }
+    },
+    "filesystems": {
+     "type": "array",
+     "maxItems": 128,
+     "items": {
+      "$ref": "#/$defs/filesystem"
+     }
+    }
+   },
+   "additionalProperties": false
+  },
+  "storage_io": {
+   "type": "object",
+   "required": [
+    "schema_version",
+    "kind",
+    "machine_id",
+    "time",
+    "state",
+    "reason",
+    "requested_interval_s",
+    "devices",
+    "removed_ids"
+   ],
+   "properties": {
+    "schema_version": {
+     "type": "integer",
+     "const": 1
+    },
+    "kind": {
+     "const": "storage_io"
+    },
+    "machine_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 120
+    },
+    "time": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 9007199254740991
+    },
+    "state": {
+     "enum": [
+      "OK",
+      "PARTIAL",
+      "UNKNOWN"
+     ]
+    },
+    "reason": {
+     "enum": [
+      null,
+      "unsupported",
+      "permission_denied",
+      "timeout",
+      "read_failed",
+      "invalid_data",
+      "truncated"
+     ]
+    },
+    "requested_interval_s": {
+     "type": "number",
+     "minimum": 0.1,
+     "maximum": 30
+    },
+    "devices": {
+     "type": "array",
+     "maxItems": 128,
+     "items": {
+      "type": "object",
+      "required": [
+       "id",
+       "name",
+       "scope",
+       "time",
+       "counters",
+       "counter_reason",
+       "interval_s",
+       "rates",
+       "rate_reason"
+      ],
+      "properties": {
+       "id": {
+        "type": "string",
+        "pattern": "^device:(uuid|wwn|native|session):[0-9a-f]{64}$",
+        "maxLength": 96
+       },
+       "name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+       },
+       "scope": {
+        "enum": [
+         "whole_device",
+         "driver"
+        ]
+       },
+       "time": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 9007199254740991
+       },
+       "counters": {
+        "type": "object",
+        "required": [
+         "read_bytes",
+         "write_bytes",
+         "read_ops",
+         "write_ops"
+        ],
+        "properties": {
+         "read_bytes": {
+          "type": [
+           "integer",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615
+         },
+         "write_bytes": {
+          "type": [
+           "integer",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615
+         },
+         "read_ops": {
+          "type": [
+           "integer",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615
+         },
+         "write_ops": {
+          "type": [
+           "integer",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615
+         }
+        },
+        "additionalProperties": false
+       },
+       "counter_reason": {
+        "enum": [
+         null,
+         "unsupported",
+         "permission_denied",
+         "timeout",
+         "read_failed",
+         "invalid_data",
+         "truncated"
+        ]
+       },
+       "interval_s": {
+        "type": [
+         "number",
+         "null"
+        ],
+        "minimum": 0.001,
+        "maximum": 60
+       },
+       "rates": {
+        "type": "object",
+        "required": [
+         "read_bytes_per_s",
+         "write_bytes_per_s",
+         "read_ops_per_s",
+         "write_ops_per_s"
+        ],
+        "properties": {
+         "read_bytes_per_s": {
+          "type": [
+           "number",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615000
+         },
+         "write_bytes_per_s": {
+          "type": [
+           "number",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615000
+         },
+         "read_ops_per_s": {
+          "type": [
+           "number",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615000
+         },
+         "write_ops_per_s": {
+          "type": [
+           "number",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615000
+         }
+        },
+        "additionalProperties": false
+       },
+       "rate_reason": {
+        "enum": [
+         null,
+         "unsupported",
+         "permission_denied",
+         "timeout",
+         "read_failed",
+         "invalid_data",
+         "truncated",
+         "baseline_missing",
+         "counter_reset",
+         "identity_changed",
+         "interval_invalid"
+        ]
+       }
+      },
+      "additionalProperties": false
+     }
+    },
+    "removed_ids": {
+     "type": "array",
+     "maxItems": 128,
+     "uniqueItems": true,
+     "items": {
+      "type": "string",
+      "pattern": "^device:(uuid|wwn|native|session):[0-9a-f]{64}$",
+      "maxLength": 96
+     }
+    }
+   },
+   "additionalProperties": false,
+   "title": "Standalone storage device I/O observation",
+   "description": "Requires mmstorage_io.valid semantic validation. Device/driver counters are not additive across storage layers and are never per-filesystem metrics."
+  }
+ }
+}

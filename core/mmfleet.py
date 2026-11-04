@@ -22,6 +22,7 @@ import mmdecide
 import mmschema
 
 MAX_BYTES = 1 << 20
+FETCH_MAX = 8 << 20  # largest per-request byte limit a caller may ask the fetch worker for (storage snapshots)
 MAX_DEPTH = 32
 MAX_PEERS = 32
 CACHE_BYTES = MAX_PEERS * (MAX_BYTES + 4096)
@@ -83,7 +84,15 @@ def configs(profile):
             _url(cfg["status_url"])
         except FleetError:
             raise mmcore.MMError("E_PROFILE", "invalid machine status URL", "use HTTP(S), without URL credentials or fragment") from None
-        for key, low, high in (("timeout_s", 0.1, 30), ("stale_after_s", 1, 3600), ("job_minutes", 0.01, 1440)):
+        if "storage_url" in cfg:
+            try:
+                _url(cfg["storage_url"])
+            except FleetError:
+                raise mmcore.MMError("E_PROFILE", "invalid machine storage URL",
+                                     "use HTTP(S), without URL credentials or fragment") from None
+        cfg.setdefault("storage_stale_after_s", 300)
+        for key, low, high in (("timeout_s", 0.1, 30), ("stale_after_s", 1, 3600), ("job_minutes", 0.01, 1440),
+                               ("storage_stale_after_s", 1, 3600)):
             if not _number(cfg[key]) or not low <= cfg[key] <= high:
                 raise mmcore.MMError("E_PROFILE", "invalid machine %s" % key, "correct [[machines]]")
         if not cfg["kinds"] or len(cfg["kinds"]) > 128 or any(not isinstance(k, str) or not k or len(k) > 120
@@ -192,9 +201,11 @@ def validate_status(value, cfg, now):
     return status
 
 
-def _http(url, timeout):
+def _http(url, timeout, limit=MAX_BYTES):
     """Child-process transport: default CA verification/proxy settings; no redirects, credentials or decompression."""
     _url(url)
+    if type(limit) is not int or not 1 <= limit <= FETCH_MAX:
+        raise FleetError("invalid response limit")
     import urllib.request
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -205,28 +216,31 @@ def _http(url, timeout):
         if response.status != 200 or response.headers.get("Content-Encoding", "identity").lower() != "identity":
             raise FleetError("invalid HTTP response")
         length = response.headers.get("Content-Length")
-        if length is not None and (not length.isdigit() or int(length) > MAX_BYTES):
+        if length is not None and (not length.isdigit() or int(length) > limit):
             raise FleetError("status response too large")
-        raw = response.read(MAX_BYTES + 1)
-        if len(raw) > MAX_BYTES:
+        raw = response.read(limit + 1)
+        if len(raw) > limit:
             raise FleetError("status response too large")
         return raw
 
 
-def fetch(cfg):
+def fetch(cfg, key="status_url", limit=MAX_BYTES):
     """One worker process imposes a wall timeout, including DNS, TLS and slow/dripping response bodies.
-    The URL is sent over stdin rather than exposed in process arguments or error text."""
+    The URL is sent over stdin rather than exposed in process arguments or error text.
+    key/limit select another configured read URL (storage_url) and its byte limit; status reads keep MAX_BYTES."""
     import subprocess
+    if key not in ("status_url", "storage_url") or type(limit) is not int or not 1 <= limit <= FETCH_MAX:
+        raise FleetError("invalid fetch request")
     child = subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "--fetch"], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
-        out, _ = child.communicate(json.dumps({"url": cfg["status_url"], "timeout": cfg["timeout_s"]}).encode(),
+        out, _ = child.communicate(json.dumps({"url": cfg[key], "timeout": cfg["timeout_s"], "limit": limit}).encode(),
                                    timeout=cfg["timeout_s"])
     except subprocess.TimeoutExpired:
         child.kill()
         child.communicate()
         raise FleetError("status request timed out") from None
-    if child.returncode != 0 or len(out) > MAX_BYTES:
+    if child.returncode != 0 or len(out) > limit:
         raise FleetError("status request failed")
     return out
 
@@ -344,6 +358,6 @@ if __name__ == "__main__":
         sys.exit(2)
     try:
         args = json.loads(sys.stdin.buffer.read(MAX_URL * 2))
-        sys.stdout.buffer.write(_http(args["url"], args["timeout"]))
+        sys.stdout.buffer.write(_http(args["url"], args["timeout"], args.get("limit", MAX_BYTES)))
     except Exception:
         sys.exit(1)  # URLs (including query tokens) and transport exceptions never reach logs or output.

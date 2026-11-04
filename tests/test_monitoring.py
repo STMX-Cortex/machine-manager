@@ -304,4 +304,4 @@ class Examples(TempData):
             labels.add(doc["Label"])
             self.assertTrue(doc["ProgramArguments"][0].startswith("/ABS/"))
             self.assertEqual(doc["Umask"], 0o077)
-        self.assertEqual(len(labels), 3)
+        self.assertEqual(len(labels), 4)

@@ -38,7 +38,7 @@ Agents:
   mm collect                collect remote machine statuses into the local fleet cache
   mm metrics                Prometheus metrics from cached snapshots (files only)
   mm serve [--bind 127.0.0.1|::1] [--port 9877]   loopback /metrics and /status.json hosting
-  mm storage [--include PATH] [--exclude PATH]   capacity; io --interval SEC for rates; STORAGE.md
+  mm storage [io|record] [--include PATH] [--exclude PATH] [--interval SEC]   see STORAGE.md
   mm tailscale --peer PEER --user USER [--port N] [--dry-run]   SSH tunnel; TAILSCALE.md
   mm settings show [KEY|SECTION]   the settings in force, each with its default (read-only)
 Owner:
@@ -246,12 +246,21 @@ def cmd_collect(args, as_json, profile):
     import mmfleet
     if args:
         return err("E_USAGE", "unknown words: %s" % " ".join(mmcore.quoted(a) for a in args), "mm collect [--json]")
+    import mmstorage_fleet
     rec = mmfleet.collect(profile, settings(save=False))
     failures = sum(row["status"] is None for row in rec["machines"])
+    # Storage only after fleet.json is written; --json output stays the fleet record alone.
+    storage = dict(mmstorage_fleet.collect(profile))
+
+    def line(row):
+        fields = {"machine": row["id"], "state": (row["status"] or {}).get("state", "UNKNOWN"),
+                  "source_time": (row["status"] or {}).get("time"), "error": row["error"]}
+        if row["id"] in storage:
+            fields["storage"] = "OK" if storage[row["id"]] else "UNKNOWN"
+        return kv(fields)
     emit(as_json, rec, [kv({"collected": len(rec["machines"]), "unavailable": failures})] +
-         [kv({"machine": row["id"], "state": (row["status"] or {}).get("state", "UNKNOWN"),
-              "source_time": (row["status"] or {}).get("time"), "error": row["error"]}) for row in rec["machines"]])
-    return 1 if failures else 0
+         [line(row) for row in rec["machines"]])
+    return 1 if failures or not all(storage.values()) else 0
 
 
 def peek_settings():
@@ -689,9 +698,55 @@ def cmd_storage_io(args, as_json, profile):
     return 0 if rec["state"] == "OK" and all(d["rate_reason"] is None for d in rec["devices"]) else 1
 
 
+def cmd_storage_record(args, as_json, profile):
+    """One capacity and one I/O observation into storage.json (mode 0600), for mm serve /storage.json."""
+    import mmstorage_collect
+    import mmstorage_fleet
+    import mmstorage_io_collect
+    include, exclude, interval = [], [], None
+    if len(args) % 2 or len(args) > 4 * mmstorage_collect.model.POLICY_MAX + 2:
+        return err("E_USAGE", "storage record accepts --include PATH, --exclude PATH and one --interval SECONDS",
+                   "see STORAGE.md")
+    for i in range(0, len(args), 2):
+        key, value = args[i], args[i + 1]
+        if key == "--interval" and interval is None and len(value) <= 32:
+            try:
+                interval = float(value)
+            except ValueError:
+                return err("E_STORAGE", "invalid I/O interval", "use 0.1 to 30 seconds; see STORAGE.md")
+        elif key in ("--include", "--exclude"):
+            (include if key == "--include" else exclude).append(value)
+        else:
+            return err("E_USAGE", "storage record accepts --include PATH, --exclude PATH and one --interval SECONDS",
+                       "see STORAGE.md")
+    interval = 1.0 if interval is None else interval
+    if not mmstorage_fleet.mmstorage_io._number(interval, .1, 30):
+        return err("E_STORAGE", "invalid I/O interval", "use 0.1 to 30 seconds; see STORAGE.md")
+    if len(include) > mmstorage_collect.model.POLICY_MAX or len(exclude) > mmstorage_collect.model.POLICY_MAX:
+        return err("E_USAGE", "storage accepts up to 256 --include PATH and --exclude PATH pairs each", "see STORAGE.md")
+    ident = mmcore.machine_id(profile)
+    try:
+        capacity = mmstorage_collect.collect(ident, include=include, exclude=exclude)
+        io = mmstorage_io_collect.collect(ident, interval_s=interval)
+        doc = mmstorage_fleet.build(ident, capacity, io)
+    except ValueError:
+        return err("E_STORAGE", "invalid machine identity, mount selection or I/O interval",
+                   "use canonical absolute paths and 0.1 to 30 seconds; see STORAGE.md")
+    try:
+        mmstorage_fleet.write_local(doc)
+    except OSError:
+        return err("E_WRITE", "cannot write storage.json", "check that the data directory exists and is writable")
+    emit(as_json, doc, [kv({"storage_record": "written", "path": mmstorage_fleet.FILE,
+                            "capacity": doc["capacity"]["state"], "io": doc["io"]["state"],
+                            "filesystems": len(doc["capacity"]["filesystems"]), "devices": len(doc["io"]["devices"])})])
+    return 0 if mmstorage_fleet.complete(doc) else 1
+
+
 def cmd_storage(args, as_json, profile):
     if args and args[0] == "io":
         return cmd_storage_io(args[1:], as_json, profile)
+    if args and args[0] == "record":
+        return cmd_storage_record(args[1:], as_json, profile)
     import mmstorage_collect
     include, exclude = [], []
     if len(args) % 2 or len(args) > 4 * mmstorage_collect.model.POLICY_MAX:
@@ -740,7 +795,7 @@ def main(argv):
         print(refused)
         return 2
     profile = mmcore.load_profile()
-    if verb == "storage":  # opt-in observation only; creates no state/data/cache files
+    if verb == "storage":  # opt-in observation only; only `storage record` writes one file (storage.json)
         return cmd_storage(args, as_json, profile)
     if verb == "settings":  # read-only: before the state folder is made, so it creates nothing
         return cmd_settings(args, as_json, profile)

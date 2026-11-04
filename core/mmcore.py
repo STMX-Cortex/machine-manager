@@ -211,12 +211,23 @@ def now_local(t=None):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() if t is None else t))
 
 
-def write_atomic(target, text):
-    """Write text to target by a temporary file in the same folder and a rename."""
+def write_atomic(target, text, mode=None):
+    """Write text to target by a temporary file in the same folder and a rename.
+    mode: exact permission bits for the new file (not following a link at the temporary name)."""
     folder = os.path.dirname(target) or "."
     os.makedirs(folder, exist_ok=True)
     tmp = os.path.join(folder, ".%s.%d.tmp" % (os.path.basename(target), os.getpid()))
-    with open(tmp, "w") as f:
+    if mode is not None:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, mode)
+        try:
+            os.fchmod(fd, mode)
+        except BaseException:
+            os.close(fd)
+            raise
+        opened = os.fdopen(fd, "w")
+    else:
+        opened = open(tmp, "w")
+    with opened as f:
         f.write(text)
         f.flush()
         os.fsync(f.fileno())
