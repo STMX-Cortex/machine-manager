@@ -271,7 +271,10 @@ include `capacity_group`; JSON includes device records and all relationships.
   filesystems have filesystem records; unmounted volumes have no invented mount/capacity.
 - `/usr/sbin/diskutil apfs list -plist` supplies actual container/volume UUID membership
   when APFS is mounted. Optional `diskutil info -plist diskN...` queries supply missing
-  mounted volume/snapshot facts. Only validated device identifiers enter fixed argument
+  mounted volume/snapshot facts. They also run for mounted APFS devices outside `apfs list`
+  membership: macOS 26+ lists the sealed root snapshot with a VolumeUUID but no container,
+  so a known UUID alone does not prove live-volume identity or container membership.
+  Only validated device identifiers enter fixed argument
   arrays, never shell text or user labels. No raw device is opened for data.
 - Each selected path gets its own worker, opening an **O_EVTONLY**, no-follow descriptor.
   `fstatfs64` supplies fsid, mount path, filesystem type, local device identity and counters.
