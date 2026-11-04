@@ -7,26 +7,30 @@ Run Grafana on the central monitoring machine, beside Prometheus. Grafana reads 
 evaluates the supplied alert rules. Each is a separate program. Neither can change machine-manager settings,
 slots, placement, safe mode or services. These files do not install or start anything.
 
-The two dashboards work for Linux and macOS with the metrics in [METRICS.md](METRICS.md):
+The three dashboards work for Linux and macOS with the metrics in [METRICS.md](METRICS.md):
 
 | Dashboard | Contents |
 | --- | --- |
 | Fleet (`mm-fleet`) | Endpoint reachability, source freshness/state/mode, memory, CPU, main-filesystem capacity, queues, source alerts, snapshot age, optional PSI/compressor/swap, firing Prometheus alerts |
 | Resources (`mm-resources`) | Local resource freshness/state, capacity/total/reserve in native units, running/queued counts, numeric adapter values, resources document validity |
+| Storage (`mm-storage`) | Storage snapshot freshness/age (graphs and current table, with export completeness) and inventory state, a per-filesystem table (mount, type, capacity group, size, available, used fraction, known, read-only), per-filesystem available bytes and used fraction, per-device read/write bytes and operations per second, firing storage alerts |
 
 Select a **Producer** (scrape endpoint) and **Machine**. Resource panels also filter by kind, id and capacity unit.
 Parent and location remain in labels and legends, distinguishing equal runner/pool ids. The job is the supplied
-`machine-manager` scrape job; if you rename it, change the dashboard constant and rule selectors together.
-The datasource selector defaults to the provisioned `mm-prometheus` UID, but can select another Prometheus source.
-Stable dashboard UIDs support links between Fleet and Resources. Provisioned copies are read-only; change source
-JSON and review/deploy it rather than editing a live dashboard.
+`machine-manager` scrape job; if you rename it, change the dashboard constant and rule selectors together. The
+datasource selector defaults to the provisioned `mm-prometheus` UID, but can select another Prometheus source.
+Stable dashboard UIDs support links between Fleet, Resources and Storage. Provisioned copies are read-only; change
+source JSON and review/deploy it rather than editing a live dashboard.
 
 Unknown/unsupported readings are gaps or `Unknown`, never invented zeros. An empty table means no matching series,
 not a healthy machine. Last-value legends are historical; use freshness, state and mode tables for current status.
 Ratios use percent display, byte sizes use bytes, snapshot age uses seconds, and queue counts are gauges. Optional
-Linux PSI and macOS compressor panels can be empty on other platforms. Storage covers the main filesystem only;
-per-mount capacity and device I/O are still roadmap work. Resource units remain separate; the dashboard never sums
-credits, minutes or slots, and it never applies `rate()` to snapshot gauges.
+Linux PSI and macOS compressor panels can be empty on other platforms. Fleet storage panels cover the legacy main
+filesystem. The Storage dashboard lists only machines that export storage snapshots (`mm storage record` locally,
+`storage_url` for peers; METRICS.md). Each filesystem and device is its own row or series: volumes in one capacity
+group share space and are never added together, and device rates are never summed. Rates come from the collector,
+so the dashboard never applies `rate()`. Resource units remain separate; the dashboard never sums credits, minutes
+or slots, and it never applies `rate()` to snapshot gauges.
 
 Use one collection topology as described in [MONITORING.md](MONITORING.md). Central collection exports peer machine
 readings, not peer adapter records. To monitor each host's pools, use direct per-host scrapes with peer-free profiles
@@ -104,14 +108,22 @@ promtool test rules monitoring/tests/alerts.test.yml
 | ResourceStale | Resource freshness 0 with a valid document, 5 minutes | warning |
 | ResourcesInvalid | Missing/invalid local resources document, 5 minutes | warning |
 | ResourceReserve | Resource capacity left at or below its own reserve, 5 minutes | warning |
+| StorageStale | Storage snapshot freshness 0 with a working endpoint, 10 minutes | warning |
+| FilesystemLow | One filesystem's available/size below 10%, fresh snapshot, 15 minutes; size must be positive | warning |
+| StorageIncomplete | Fresh snapshot with a PARTIAL or UNKNOWN capacity or I/O inventory (either, continuously), 30 minutes | warning |
+| StorageExportIncomplete | Fresh snapshot whose filesystem/device series the exporter omitted for its byte budget, 30 minutes | warning |
 
 Every name has the prefix `MachineManager`. These are monitoring defaults, independent of controller thresholds;
 review them against the owner's workload. Machine measurement/state alerts require a fresh source and successful
-scrape. Resource reserve joins preserve resource, parent, location and native unit. Sustained conditions have a
-pending period before firing and resolve when the expression stops matching. Missing numerical measurements do
-not become low-capacity alarms. Endpoint failures suppress source/workload alerts rather than reviving old readings.
-The firing-alert table includes all machines on the selected producers so endpoint problems remain visible.
-`TargetMissing` lacks an instance label and is visible with Producer = All.
+scrape. Resource reserve joins preserve resource, parent, location and native unit. FilesystemLow keeps the
+filesystem labels (id, mount, type, capacity group) and fires per filesystem; a stale storage snapshot silences it and
+raises StorageStale instead. Storage alerts only exist for machines that export storage snapshots. StorageIncomplete
+keeps one alert per machine and source while the state moves between PARTIAL and UNKNOWN. StorageExportIncomplete
+means the exporter's storage byte budget omitted that machine's filesystem and device series (METRICS.md). Sustained
+conditions have a pending period before firing and resolve when the expression stops matching. Missing numerical
+measurements do not become low-capacity alarms. Endpoint failures suppress source/workload alerts rather than
+reviving old readings. The firing-alert table includes all machines on the selected producers so endpoint problems
+remain visible. `TargetMissing` lacks an instance label and is visible with Producer = All.
 
 These rules do not inventory removed machines/resources: if configuration removes an entity, its series eventually
 disappears. `TargetMissing` detects an entirely missing job, not each removed target. Prometheus cannot alert while
@@ -150,11 +162,12 @@ python3 -I tests/check_prometheus.py --prometheus /path/to/prometheus --promtool
 ```
 
 The rule fixtures test thresholds, pending/firing/recovery, stale and unavailable sources, missing targets, zero
-filesystem size and separate resource parents/units. The Prometheus fixture executes every dashboard query and
-loads/evaluates real rules, in isolated temporary data. These prove query/rule behavior, not production integrations.
-The separate optional Grafana check described in `tests/check_grafana.py --help` provisions a disposable container
-and verifies the API-visible dashboards/datasource; Docker is not required for normal Python tests or native use.
-For that optional check, use the same pinned official image as CI:
+filesystem size (main and per filesystem), stale storage snapshots and separate resource parents/units. The
+Prometheus fixture executes every dashboard query and loads/evaluates real rules, in isolated temporary data. These
+prove query/rule behavior, not production integrations. The separate optional Grafana check described in
+`tests/check_grafana.py --help` provisions a disposable container and verifies the API-visible
+dashboards/datasource; Docker is not required for normal Python tests or native use. For that optional check, use
+the same pinned official image as CI:
 
 ```sh
 docker pull grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205

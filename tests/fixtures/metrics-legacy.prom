@@ -1,0 +1,154 @@
+# HELP machine_manager_alerts_active Active alerts by level.
+# TYPE machine_manager_alerts_active gauge
+machine_manager_alerts_active{level="ACTION",machine_id="test-machine"} 0
+machine_manager_alerts_active{level="ATTENTION",machine_id="test-machine"} 0
+machine_manager_alerts_active{level="INFO",machine_id="test-machine"} 0
+machine_manager_alerts_active{level="ACTION",machine_id="remote-a"} 0
+machine_manager_alerts_active{level="ATTENTION",machine_id="remote-a"} 0
+machine_manager_alerts_active{level="INFO",machine_id="remote-a"} 0
+# HELP machine_manager_compressor_segments_ratio Compressor segments used as a fraction of the limit (macOS).
+# TYPE machine_manager_compressor_segments_ratio gauge
+machine_manager_compressor_segments_ratio{machine_id="test-machine"} 0.1
+# HELP machine_manager_cpu_busy_ratio CPU busy fraction over the sampler interval.
+# TYPE machine_manager_cpu_busy_ratio gauge
+machine_manager_cpu_busy_ratio{machine_id="remote-a"} 0.125
+# HELP machine_manager_cpu_cores Machine logical CPU cores.
+# TYPE machine_manager_cpu_cores gauge
+machine_manager_cpu_cores{machine_id="test-machine"} 12
+machine_manager_cpu_cores{machine_id="remote-a"} 12
+# HELP machine_manager_machine_mode Current supervisor mode (one hot).
+# TYPE machine_manager_machine_mode gauge
+machine_manager_machine_mode{machine_id="test-machine",mode="act"} 0
+machine_manager_machine_mode{machine_id="test-machine",mode="observe"} 1
+machine_manager_machine_mode{machine_id="test-machine",mode="off"} 0
+machine_manager_machine_mode{machine_id="test-machine",mode="safe"} 0
+machine_manager_machine_mode{machine_id="test-machine",mode="dry"} 0
+machine_manager_machine_mode{machine_id="remote-a",mode="act"} 0
+machine_manager_machine_mode{machine_id="remote-a",mode="observe"} 1
+machine_manager_machine_mode{machine_id="remote-a",mode="off"} 0
+machine_manager_machine_mode{machine_id="remote-a",mode="safe"} 0
+machine_manager_machine_mode{machine_id="remote-a",mode="dry"} 0
+# HELP machine_manager_machine_state Current machine state (one hot); stale snapshots are UNKNOWN.
+# TYPE machine_manager_machine_state gauge
+machine_manager_machine_state{machine_id="test-machine",state="GREEN"} 0
+machine_manager_machine_state{machine_id="test-machine",state="STEADY"} 0
+machine_manager_machine_state{machine_id="test-machine",state="AMBER"} 1
+machine_manager_machine_state{machine_id="test-machine",state="RED"} 0
+machine_manager_machine_state{machine_id="test-machine",state="UNKNOWN"} 0
+machine_manager_machine_state{machine_id="remote-a",state="GREEN"} 1
+machine_manager_machine_state{machine_id="remote-a",state="STEADY"} 0
+machine_manager_machine_state{machine_id="remote-a",state="AMBER"} 0
+machine_manager_machine_state{machine_id="remote-a",state="RED"} 0
+machine_manager_machine_state{machine_id="remote-a",state="UNKNOWN"} 0
+machine_manager_machine_state{machine_id="remote-b",state="GREEN"} 0
+machine_manager_machine_state{machine_id="remote-b",state="STEADY"} 0
+machine_manager_machine_state{machine_id="remote-b",state="AMBER"} 0
+machine_manager_machine_state{machine_id="remote-b",state="RED"} 0
+machine_manager_machine_state{machine_id="remote-b",state="UNKNOWN"} 1
+machine_manager_machine_state{machine_id="remote-c",state="GREEN"} 0
+machine_manager_machine_state{machine_id="remote-c",state="STEADY"} 0
+machine_manager_machine_state{machine_id="remote-c",state="AMBER"} 0
+machine_manager_machine_state{machine_id="remote-c",state="RED"} 0
+machine_manager_machine_state{machine_id="remote-c",state="UNKNOWN"} 1
+# HELP machine_manager_machine_status_fresh Whether the machine snapshot is valid and fresh.
+# TYPE machine_manager_machine_status_fresh gauge
+machine_manager_machine_status_fresh{machine_id="test-machine"} 1
+machine_manager_machine_status_fresh{machine_id="remote-a"} 1
+machine_manager_machine_status_fresh{machine_id="remote-b"} 0
+machine_manager_machine_status_fresh{machine_id="remote-c"} 0
+# HELP machine_manager_machine_status_timestamp_seconds Machine snapshot source time in Unix seconds.
+# TYPE machine_manager_machine_status_timestamp_seconds gauge
+machine_manager_machine_status_timestamp_seconds{machine_id="test-machine"} 1800000000.0
+machine_manager_machine_status_timestamp_seconds{machine_id="remote-a"} 1800000000.0
+machine_manager_machine_status_timestamp_seconds{machine_id="remote-c"} 1799990000.0
+# HELP machine_manager_memory_available_ratio Available memory as a fraction of the effective memory limit.
+# TYPE machine_manager_memory_available_ratio gauge
+machine_manager_memory_available_ratio{machine_id="remote-a"} 0.8
+# HELP machine_manager_memory_psi_full_ratio Memory PSI full avg10 fraction (Linux).
+# TYPE machine_manager_memory_psi_full_ratio gauge
+machine_manager_memory_psi_full_ratio{machine_id="test-machine"} 0.0
+# HELP machine_manager_memory_psi_some_ratio Memory PSI some avg10 fraction (Linux).
+# TYPE machine_manager_memory_psi_some_ratio gauge
+machine_manager_memory_psi_some_ratio{machine_id="test-machine"} 0.025
+# HELP machine_manager_memory_size_bytes Effective machine memory size in bytes.
+# TYPE machine_manager_memory_size_bytes gauge
+machine_manager_memory_size_bytes{machine_id="test-machine"} 34359738368
+machine_manager_memory_size_bytes{machine_id="remote-a"} 34359738368
+# HELP machine_manager_queue_busy_slots Queue slots held by running work.
+# TYPE machine_manager_queue_busy_slots gauge
+machine_manager_queue_busy_slots{machine_id="test-machine"} 3
+machine_manager_queue_busy_slots{machine_id="remote-a"} 3
+# HELP machine_manager_queue_running_calls Distinct queue calls holding slots.
+# TYPE machine_manager_queue_running_calls gauge
+machine_manager_queue_running_calls{machine_id="test-machine"} 2
+machine_manager_queue_running_calls{machine_id="remote-a"} 2
+# HELP machine_manager_queue_slots Actual queue slot count.
+# TYPE machine_manager_queue_slots gauge
+machine_manager_queue_slots{machine_id="test-machine"} 6
+machine_manager_queue_slots{machine_id="remote-a"} 6
+# HELP machine_manager_queue_slots_desired Controller desired slot count, including observe/dry mode.
+# TYPE machine_manager_queue_slots_desired gauge
+machine_manager_queue_slots_desired{machine_id="test-machine"} 6
+machine_manager_queue_slots_desired{machine_id="remote-a"} 6
+# HELP machine_manager_queue_waiting_jobs Jobs waiting in the queue.
+# TYPE machine_manager_queue_waiting_jobs gauge
+machine_manager_queue_waiting_jobs{machine_id="test-machine"} 0
+machine_manager_queue_waiting_jobs{machine_id="remote-a"} 0
+# HELP machine_manager_resource_capacity_left Resource capacity in its native unit.
+# TYPE machine_manager_resource_capacity_left gauge
+machine_manager_resource_capacity_left{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool",unit="credits"} 80
+machine_manager_resource_capacity_left{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool",unit="slots"} 4
+# HELP machine_manager_resource_capacity_reserve Resource capacity in its native unit.
+# TYPE machine_manager_resource_capacity_reserve gauge
+machine_manager_resource_capacity_reserve{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool",unit="credits"} 10
+machine_manager_resource_capacity_reserve{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool",unit="slots"} 1
+# HELP machine_manager_resource_capacity_total Resource capacity in its native unit.
+# TYPE machine_manager_resource_capacity_total gauge
+machine_manager_resource_capacity_total{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool",unit="credits"} 100
+machine_manager_resource_capacity_total{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool",unit="slots"} 8
+# HELP machine_manager_resource_fresh Whether a resource record and its source read are fresh.
+# TYPE machine_manager_resource_fresh gauge
+machine_manager_resource_fresh{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool"} 1
+machine_manager_resource_fresh{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool"} 1
+machine_manager_resource_fresh{id="old",location="cloud",machine_id="test-machine",parent="",resource="pool"} 0
+# HELP machine_manager_resource_queued Resource load count.
+# TYPE machine_manager_resource_queued gauge
+machine_manager_resource_queued{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool"} 3
+machine_manager_resource_queued{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool"} 3
+# HELP machine_manager_resource_running Resource load count.
+# TYPE machine_manager_resource_running gauge
+machine_manager_resource_running{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool"} 2
+machine_manager_resource_running{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool"} 2
+# HELP machine_manager_resource_state Resource state (one hot); stale records are UNKNOWN.
+# TYPE machine_manager_resource_state gauge
+machine_manager_resource_state{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool",state="GREEN"} 1
+machine_manager_resource_state{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool",state="STEADY"} 0
+machine_manager_resource_state{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool",state="AMBER"} 0
+machine_manager_resource_state{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool",state="RED"} 0
+machine_manager_resource_state{id="workers",location="cloud",machine_id="test-machine",parent="",resource="pool",state="UNKNOWN"} 0
+machine_manager_resource_state{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool",state="GREEN"} 1
+machine_manager_resource_state{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool",state="STEADY"} 0
+machine_manager_resource_state{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool",state="AMBER"} 0
+machine_manager_resource_state{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool",state="RED"} 0
+machine_manager_resource_state{id="slots",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool",state="UNKNOWN"} 0
+machine_manager_resource_state{id="old",location="cloud",machine_id="test-machine",parent="",resource="pool",state="GREEN"} 0
+machine_manager_resource_state{id="old",location="cloud",machine_id="test-machine",parent="",resource="pool",state="STEADY"} 0
+machine_manager_resource_state{id="old",location="cloud",machine_id="test-machine",parent="",resource="pool",state="AMBER"} 0
+machine_manager_resource_state{id="old",location="cloud",machine_id="test-machine",parent="",resource="pool",state="RED"} 0
+machine_manager_resource_state{id="old",location="cloud",machine_id="test-machine",parent="",resource="pool",state="UNKNOWN"} 1
+# HELP machine_manager_resource_value Numeric resource value in the key's documented native unit.
+# TYPE machine_manager_resource_value gauge
+machine_manager_resource_value{id="workers",key="busy",location="cloud",machine_id="test-machine",parent="",resource="pool"} 1
+machine_manager_resource_value{id="slots",key="busy",location="cloud",machine_id="test-machine",parent="pool-a",resource="pool"} 1
+# HELP machine_manager_snapshot_valid Whether the cached document has valid identity and envelope fields.
+# TYPE machine_manager_snapshot_valid gauge
+machine_manager_snapshot_valid{source="status"} 1
+machine_manager_snapshot_valid{source="resources"} 1
+# HELP machine_manager_storage_available_bytes Main filesystem space available to the supervisor in bytes.
+# TYPE machine_manager_storage_available_bytes gauge
+machine_manager_storage_available_bytes{machine_id="test-machine"} 210400000000.0
+machine_manager_storage_available_bytes{machine_id="remote-a"} 210400000000.0
+# HELP machine_manager_storage_size_bytes Main filesystem total size in bytes.
+# TYPE machine_manager_storage_size_bytes gauge
+machine_manager_storage_size_bytes{machine_id="test-machine"} 994700000000.0
+machine_manager_storage_size_bytes{machine_id="remote-a"} 994700000000.0

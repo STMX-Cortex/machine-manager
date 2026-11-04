@@ -12,6 +12,7 @@ import stat
 import mmcore
 import mmdecide
 import mmfleet
+import mmprometheus_storage
 
 STATUS_BYTES = 1 << 20
 RESOURCE_BYTES = 8 << 20
@@ -79,22 +80,37 @@ class Metrics:
         self.families = {}
         self.seen = set()
 
-    def add(self, name, help_text, labels, value):
+    @staticmethod
+    def sample(name, labels, value):
+        """(series key, exposition line) after masking/cleaning/escaping, or None for an unusable value."""
         if not number(value):
-            return
+            return None
         name = "machine_manager_" + name
         labels = tuple(sorted((key, label(value)) for key, value in labels.items()))
-        if (name, labels) in self.seen:
-            return  # duplicate records or identities that collide after masking/cleaning never duplicate a series
-        self.seen.add((name, labels))
-        family = self.families.setdefault(name, (help_text, []))[1]
         fields = ",".join('%s="%s"' % pair for pair in labels)
-        family.append("%s{%s} %s" % (name, fields, str(value)))
+        return (name, labels), "%s{%s} %s" % (name, fields, str(value))
+
+    @staticmethod
+    def header(name, help_text):
+        return "# HELP %s %s\n# TYPE %s gauge\n" % (name, help_text, name)
+
+    def put(self, help_text, sample):
+        key, line = sample
+        if key in self.seen:
+            return False  # duplicate records or identities that collide after masking/cleaning never duplicate a series
+        self.seen.add(key)
+        self.families.setdefault(key[0], (help_text, []))[1].append(line)
+        return True
+
+    def add(self, name, help_text, labels, value):
+        sample = self.sample(name, labels, value)
+        if sample is not None:
+            self.put(help_text, sample)
 
     def text(self):
         out = []
         for name, (help_text, samples) in sorted(self.families.items()):
-            out += ["# HELP %s %s" % (name, help_text), "# TYPE %s gauge" % name] + samples
+            out += self.header(name, help_text).splitlines() + samples
         return "\n".join(out) + "\n"
 
 
@@ -169,8 +185,11 @@ def machine_metrics(out, ident, doc, now, limit):
     return True
 
 
-def render(ident, status, resources, peers, now, settings):
-    """Pure snapshot rendering. Peer tuples are (configured id, validated cached status or None)."""
+def render(ident, status, resources, peers, now, settings, *, storage=()):
+    """Pure snapshot rendering. Peer tuples are (configured id, validated cached status or None).
+
+    Storage tuples are (machine id, validated storage snapshot or None, fresh); none means no storage series.
+    """
     out = Metrics()
     out.add("snapshot_valid", "Whether the cached document has valid identity and envelope fields.",
             {"source": "status"}, int(valid_status(status, ident)))
@@ -211,6 +230,10 @@ def render(ident, status, resources, peers, now, settings):
             if key not in mmdecide.FIXED and mmdecide.VALUE_KEY.fullmatch(key):
                 out.add("resource_value", "Numeric resource value in the key's documented native unit.",
                         dict(labels, key=key), int(value) if type(value) is bool else value)
+    storage = list(storage)
+    if storage:  # storage gets what legacy text leaves under the response target, never more than its own budget
+        legacy = len(out.text().encode("utf-8"))
+        mmprometheus_storage.add_all(out, storage, mmprometheus_storage.budget_for(legacy))
     return out.text(), local_fresh
 
 
