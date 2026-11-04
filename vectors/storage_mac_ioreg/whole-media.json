@@ -1,0 +1,48 @@
+{
+  "function": "storage_mac_ioreg",
+  "case": "whole-media",
+  "settings": "base",
+  "settings_over": {},
+  "input": [
+    {
+      "IORegistryEntryID": 100,
+      "Statistics": {
+        "Bytes (Read)": 1000,
+        "Bytes (Write)": 2000,
+        "Operations (Read)": 10,
+        "Operations (Write)": 20
+      },
+      "IORegistryEntryChildren": [
+        {
+          "IORegistryEntryID": 101,
+          "Whole": true,
+          "BSD Name": "disk0",
+          "IORegistryEntryChildren": [
+            {
+              "Whole": false,
+              "BSD Name": "disk0s1"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "devices": [
+      {
+        "key": "100",
+        "generation": "[100,101]",
+        "name": "/dev/disk0",
+        "scope": "whole_device",
+        "counters": {
+          "read_bytes": 1000,
+          "write_bytes": 2000,
+          "read_ops": 10,
+          "write_ops": 20
+        },
+        "reason": null
+      }
+    ],
+    "reason": null
+  }
+}

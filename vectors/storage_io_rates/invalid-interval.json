@@ -1,0 +1,30 @@
+{
+  "function": "storage_io_rates",
+  "case": "invalid-interval",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "before": {
+      "read_bytes": 1000,
+      "write_bytes": 2000,
+      "read_ops": 10,
+      "write_ops": 20
+    },
+    "after": {
+      "read_bytes": 3000,
+      "write_bytes": 6000,
+      "read_ops": 30,
+      "write_ops": 60
+    },
+    "elapsed_s": 0
+  },
+  "expected": {
+    "rates": {
+      "read_bytes_per_s": null,
+      "write_bytes_per_s": null,
+      "read_ops_per_s": null,
+      "write_ops_per_s": null
+    },
+    "reason": "interval_invalid"
+  }
+}

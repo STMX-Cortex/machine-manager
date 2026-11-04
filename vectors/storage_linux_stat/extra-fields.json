@@ -1,0 +1,15 @@
+{
+  "function": "storage_linux_stat",
+  "case": "extra-fields",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "text": "10 2 2 99 20 5 4 99 0 200 300 5 0 4 10 1 1"
+  },
+  "expected": {
+    "read_bytes": 1024,
+    "write_bytes": 2048,
+    "read_ops": 10,
+    "write_ops": 20
+  }
+}

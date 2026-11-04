@@ -1,0 +1,11 @@
+{
+  "function": "storage_mac_ioreg",
+  "case": "no-drivers",
+  "settings": "base",
+  "settings_over": {},
+  "input": [],
+  "expected": {
+    "devices": [],
+    "reason": null
+  }
+}

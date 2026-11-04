@@ -1,0 +1,35 @@
+{
+  "function": "storage_mac_ioreg",
+  "case": "driver-only",
+  "settings": "base",
+  "settings_over": {},
+  "input": [
+    {
+      "IORegistryEntryID": 100,
+      "Statistics": {
+        "Bytes (Read)": 1000,
+        "Bytes (Write)": 2000,
+        "Operations (Read)": 10,
+        "Operations (Write)": 20
+      }
+    }
+  ],
+  "expected": {
+    "devices": [
+      {
+        "key": "100",
+        "generation": "[100,null]",
+        "name": "IOBlockStorageDriver",
+        "scope": "driver",
+        "counters": {
+          "read_bytes": 1000,
+          "write_bytes": 2000,
+          "read_ops": 10,
+          "write_ops": 20
+        },
+        "reason": null
+      }
+    ],
+    "reason": null
+  }
+}

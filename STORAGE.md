@@ -346,15 +346,155 @@ on the intended kernel. Read-only hosted checks do not prove these layouts or pr
 service integrations. Do not mount/unmount/resize/create volumes or install services merely
 to run this command.
 
+## Device I/O counters and rates (PR #9)
+
+```sh
+mm storage io --json
+mm storage io --interval 1 --json
+python3 -I bin/mm --profile tests/fixtures/profile-test.toml storage io --interval 0.5 --json
+```
+
+This is an explicit foreground two-sample command on Linux and Mac. `--interval` is a
+finite number from **0.1 through 30 seconds**, default 1. It is the requested wait **between**
+reads, not the measured denominator. Each device's rate uses its actual monotonic sample
+interval, including command/sampling overhead. The supervisor never calls this command;
+there is no background sampler, persistent cache, service or profile/settings change.
+The capacity-only `mm storage` command and version-1 capacity schema remain unchanged.
+
+### Separate I/O contract
+
+`schemas/storage-io.schema.json` and `mmstorage_io.valid` define a standalone version-1
+record with `kind: storage_io`, machine/source identity, observation time, inventory
+state/reason, requested interval, `devices` and `removed_ids`. Use both schema and semantic
+validation; the small schema checker alone does not check all bounds/relations.
+
+Each device record has:
+
+| Field | Meaning |
+| --- | --- |
+| `id`, `name` | Opaque machine-local counter identity and safe display name |
+| `scope` | `whole_device` (one proven whole-device mapping) or `driver` (Mac driver without a unique media mapping) |
+| `time` | Current source counter sample time; never an old sample with a new timestamp |
+| `counters` | Exact unsigned cumulative `read_bytes`, `write_bytes`, `read_ops`, `write_ops`, each integer 0..2**64-1 or null |
+| `counter_reason` | Null for all-known counters, otherwise a fixed unavailable reason |
+| `interval_s` | Measured elapsed time between matched samples; null when unavailable/invalid |
+| `rates` | `read_bytes_per_s`, `write_bytes_per_s`, `read_ops_per_s`, `write_ops_per_s`, finite nonnegative numbers or all null |
+| `rate_reason` | Null exactly when all rates are known; otherwise a fixed reason below |
+
+Rate arithmetic subtracts exact integers **before** dividing by actual elapsed seconds.
+No fabricated block-size conversions, negative rates, wrap correction or zero-filled gaps.
+A real idle device has known zero rates. If any counter decreases, all rates for that device
+are null with `counter_reset`; current counters remain available. Any missing counter
+prevents a complete rate set. The valid interval range is 0.001..60 seconds; backward,
+zero, nonfinite or excessively long intervals give `interval_invalid`, not a misleading rate.
+Rates describe the sampled interval; they are not instantaneous peak throughput or latency.
+
+Other rate reasons: `baseline_missing` for new devices/failed baseline; `identity_changed`
+when the same display name has a different counter identity; `unsupported` when generation
+continuity cannot be proven; plus `permission_denied`, `timeout`, `read_failed`,
+`invalid_data` and `truncated`. Counter reasons use the six existing storage reason codes.
+
+Inventory `OK` means enumeration completed, even when individual rates are unavailable;
+`PARTIAL` means an incomplete/invalid/limited scan or failed baseline; `UNKNOWN` means the
+current scan is unavailable and both output arrays are empty. Exit **0** requires OK
+inventory and all displayed rates known; **1** reports unknown/partial/unavailable results;
+**2** is invalid usage/identity/interval. An all-known empty inventory is valid but does
+not establish that the host exposes storage counters. JSON contains counters and rates;
+plain output prints one header plus one device/rate line per row.
+
+A successful complete current scan may report formerly seen known-generation IDs under
+`removed_ids`. This means those counter identities are absent, not proof that physical
+hardware was unplugged. Replaced generations can therefore remove an old ID and introduce
+one at the same name. An incomplete/unreadable scan never claims disappearance. Missing
+generation information also does not prove an old ID disappeared. No previous-only device
+counters are retained or refreshed under the current timestamp.
+
+### Linux source and continuity
+
+The bounded worker scans `/sys/dev/block` and opens each sysfs **directory**, following the
+kernel's device link. Metadata files are read relative to that pinned descriptor with
+no-follow/nonblocking flags and small byte bounds. `uevent` and `dev` establish the native
+identity/name. **Partitions are excluded**, avoiding the same traffic appearing once for
+a whole disk and again for each partition. Whole devices can still be stacked (for example
+LVM/device-mapper, RAID and their members); no sum across those layers is offered.
+
+The `stat` file supplies completed reads/writes and sectors read/written. Linux sector
+counters use **512 bytes per sector**, regardless of hardware logical/physical block size.
+Discard, flush, merged-operation, busy-time, queue-depth and latency fields are not exported
+as read/write activity. Unsupported/invalid statistics preserve device metadata with null
+counters. No raw `/dev` file, mount, filesystem capacity probe or external utility is needed.
+
+Read `diskseq` before and after counters, verify metadata, then reopen the directory and
+compare inode/sequence before accepting the sample. A sequence change/replaced directory
+is omitted with PARTIAL instead of borrowing its counters. Session identity hashes compact
+JSON `[boot_uuid,"linux-sysfs-v1:"+mount_namespace,scope,major_minor,diskseq,null]`.
+On kernels without diskseq, counters remain useful but rates are `unsupported`; a per-sample
+monotonic suffix replaces the final null, so no false continuity is claimed. Session IDs
+are counter-source identities, not the capacity collector's UUID/WWN hardware identities.
+
+### Mac source and APFS scope
+
+A bounded worker reads `kern.bootsessionuuid` and invokes fixed read-only argv
+`/usr/sbin/ioreg -a -r -c IOBlockStorageDriver`. Only `Bytes (Read)`, `Bytes (Write)`,
+`Operations (Read)` and `Operations (Write)` from `Statistics` are used. Byte counts are
+already bytes. Other registry properties, serials and user labels are discarded.
+
+One driver is one counter source. A unique whole IOMedia with a valid registry entry ID
+and `BSD Name` supplies the `/dev/diskN` display name and `whole_device` scope. Partition
+and APFS-volume child nodes do **not** get copies of the parent's traffic. If a unique
+mapping cannot be proven, retain `driver` scope with the name `IOBlockStorageDriver`.
+Session identity hashes compact JSON `[boot_uuid,"darwin-iokit-v1",scope,driver_entry_id,
+"[driver_entry_id,whole_media_entry_id_or_null]",null]`. Both driver and media entry IDs
+participate, so media replacement on a surviving driver also prevents a baseline match.
+These are registry counter identities within a boot, not persistent disk UUIDs or serials.
+Duplicate registry identities are omitted with PARTIAL/invalid_data.
+
+Underlying physical/virtual driver activity can include all volumes, snapshots and other
+users of its device. It is not per-volume, per-process, per-job or per-filesystem I/O.
+This scope does not join I/O IDs to capacity IDs or infer storage topology. It emits no
+APFS/container, pool or host I/O sum. Network filesystem traffic is not attributed to local
+block devices. Caching, compression, encryption and layered devices prevent simple equality
+between application bytes, volume bytes and physical-device bytes.
+
+### Timing, bounds and target acceptance
+
+Linux timestamps each counter read at its monotonic/Unix midpoint. Mac uses the midpoint
+of its bounded registry query/decode window for the driver batch. Queries/readings are
+not globally atomic, and the OS may publish asynchronous statistics. Monotonic clocks are
+shared across worker processes on supported Python versions; wall-clock changes cannot
+become the rate denominator. Per-device timestamps/intervals remain separate from capacity.
+
+Each sample worker has a **2-second deadline**, 2 MiB stdout limit and owned process-group
+cleanup, using the existing bounded runner. The Mac `ioreg` child inherits that same group;
+no nested independent command session can survive the outer cleanup. Default total time
+is at most two sample budgets plus the requested wait (about 5 seconds default), with
+process scheduling/cleanup overhead. Kernel uninterruptible I/O can delay actual worker
+termination; the caller does not wait indefinitely. The wait is only in this explicit CLI.
+
+Scan at most 1024 sysfs entries, retain at most 128 device records. Mac registry XML and
+tree use the capacity collector's 2 MiB, 16384-node and depth-12 bounds; entities and binary
+plists are rejected. Sysfs stat/uevent reads are at most 4096 bytes, identity files smaller.
+Internal JSON is byte/depth bounded and semantically validated before pairing. Limits give
+PARTIAL/truncated; fixed error codes replace raw exceptions/stderr. Arrays sort by ID and
+removed IDs are unique/disjoint from current records. Imports perform no collection or
+Darwin ctypes loading on Linux.
+
+Native tests read real counters/rates without generating a benchmark workload. Target
+acceptance remains for controlled known I/O, reset/wrap, hotplug/removable media, encrypted
+and virtual disks, RAID/LVM/storage layers, registry permissions, older kernels without
+diskseq, suspend/resume and worst-case sampling latency/cleanup. Hosted fixtures and native
+API reads do not prove production integrations or exact hardware throughput. No mounts,
+services, queues, safety settings or production jobs are changed for these tests.
+
 ## Next scopes and acceptance
 
 1. **Scopes 2 and 3 implemented:** opt-in Linux/Mac inventory/capacity; target-host acceptance remains.
-2. Device I/O: separately timestamped counters/rates, resets and disappearing devices; never attach whole-device
-   throughput to each filesystem as if it were separate traffic.
+2. **Device I/O implemented:** explicit Linux/Mac counters/rates, resets and disappearing identities; target acceptance remains.
+   No whole-device traffic is repeated for each filesystem.
 3. Fleet/status/export: explicit compatibility, freshness, payload/label limits and metrics; preserve legacy guards.
 4. Grafana views and then alerts from proven readings; optional hardware health later.
 
 ```sh
-python3 -I tests/run_tests.py storage_darwin storage_linux storage vectors
+python3 -I tests/run_tests.py storage_io storage_darwin storage_linux storage vectors
 python3 -I tests/run_vectors.py
 ```

@@ -641,12 +641,14 @@ you add any resource with a profile entry, and a new kind of resource needs one 
    a standalone schema and portable tests. `mm storage [--include PATH] [--exclude PATH] [--json]` now performs one
    bounded read-only inventory/capacity observation on either platform without changing supervisor state or exporting metrics.
    Mac APFS volumes retain separate capacities and share a container identity when proven; capacities are never summed
-   into a host or container total. Next, implement device read/write byte and operation rates,
-   and optional latency or device-health readings where the platform exposes them. Keep filesystem capacity separate
+   into a host or container total. `mm storage io --interval 1 --json` now samples cumulative device read/write
+   bytes and completed operations twice, with measured byte/operation rates, reset/replacement handling and
+   unknown values when continuity cannot be established. Linux uses whole-device sysfs counters; Mac uses IOKit
+   driver counters, not per-APFS-volume activity. Fleet storage export comes next; optional latency/device health later. Keep filesystem capacity separate
    from device I/O: several mounts can share one device or storage pool. Missing or unsupported readings stay unknown.
    Collect and export the records across machines without changing storage or adding automatic storage actions.
    Existing status/metrics still report only the main filesystem's capacity and free space per machine. Broader Linux/Mac
-   discovery is an explicit local command; fleet storage export, I/O readings and Grafana storage views remain separate scopes.
+   discovery is an explicit local command; fleet storage export and Grafana storage views remain separate scopes.
 
 ## Tests
 

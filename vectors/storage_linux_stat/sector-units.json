@@ -1,0 +1,15 @@
+{
+  "function": "storage_linux_stat",
+  "case": "sector-units",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "text": "10 0 2 99 20 0 4 99 0 200 300"
+  },
+  "expected": {
+    "read_bytes": 1024,
+    "write_bytes": 2048,
+    "read_ops": 10,
+    "write_ops": 20
+  }
+}
