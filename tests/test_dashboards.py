@@ -79,3 +79,23 @@ class Dashboards(TempData):
                      "device_write_bytes_per_second", "device_read_ops_per_second", "device_write_ops_per_second"):
             self.assertIn("machine_manager_storage_" + name + "{", exprs)
         self.assertNotRegex(exprs, r"\b(by|without)\s*\(|\b(avg|min|max|count|topk|bottomk|group)\s*\(")
+
+    def test_merged_tables_drop_metric_names_before_joining_rows(self):
+        def drops_name(step):
+            options = step.get("options", {})
+            if step["id"] == "organize":
+                return options.get("excludeByName", {}).get("__name__") is True
+            return step["id"] == "filterFieldsByName" and "__name__" in options.get("exclude", {}).get("names", [])
+
+        merged = 0
+        for path in sorted((CODE / "monitoring/grafana/dashboards").glob("*.json")):
+            for panel in json.loads(path.read_text())["panels"]:
+                steps = panel.get("transformations", [])
+                for index, step in enumerate(steps):
+                    if step["id"] == "merge":
+                        merged += 1
+                        with self.subTest(dashboard=path.name, panel=panel["title"]):
+                            self.assertEqual(panel["type"], "table")
+                            self.assertTrue(any(drops_name(s) for s in steps[:index]),
+                                            "different __name__ values would split merged rows")
+        self.assertGreaterEqual(merged, 2)

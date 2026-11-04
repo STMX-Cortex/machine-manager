@@ -63,6 +63,10 @@
         {
           "series": "machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
           "values": "100+0x40"
+        },
+        {
+          "series": "machine_manager_storage_export_complete{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x40"
         }
       ],
       "alert_rule_test": [
@@ -129,6 +133,11 @@
         {
           "eval_time": "20m",
           "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageExportIncomplete",
           "exp_alerts": []
         }
       ]
@@ -213,6 +222,11 @@
           "eval_time": "3m",
           "alertname": "MachineManagerStorageIncomplete",
           "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerStorageExportIncomplete",
+          "exp_alerts": []
         }
       ]
     },
@@ -259,6 +273,10 @@
         {
           "series": "machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
           "values": "100+0x30"
+        },
+        {
+          "series": "machine_manager_storage_export_complete{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x30"
         }
       ],
       "alert_rule_test": [
@@ -337,6 +355,11 @@
         {
           "eval_time": "20m",
           "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageExportIncomplete",
           "exp_alerts": []
         }
       ]
@@ -1175,7 +1198,6 @@
                 "filesystem_id": "filesystem:native:1111111111111111111111111111111111111111111111111111111111111111",
                 "mount": "/",
                 "fs_type": "ext4",
-                "capacity_group": "",
                 "severity": "warning"
               },
               "exp_annotations": {
@@ -1231,6 +1253,11 @@
         {
           "eval_time": "30m",
           "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerStorageExportIncomplete",
           "exp_alerts": []
         }
       ],
@@ -1291,7 +1318,6 @@
                 "instance": "central:9877",
                 "machine_id": "worker",
                 "source": "io",
-                "state": "PARTIAL",
                 "severity": "warning"
               },
               "exp_annotations": {
@@ -1300,6 +1326,139 @@
               }
             }
           ]
+        },
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "storage inventory alternating PARTIAL and UNKNOWN keeps one pending alert",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_snapshot_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"OK\"}",
+          "values": "0+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"PARTIAL\"}",
+          "values": "1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"UNKNOWN\"}",
+          "values": "0 0 0 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0 1 1"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"capacity\",state=\"OK\"}",
+          "values": "1+0x40"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "29m",
+          "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "source": "io",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager storage inventory is incomplete",
+                "description": "A fresh snapshot reports a PARTIAL or UNKNOWN capacity or I/O inventory. Run mm storage or mm storage io on the source host for the reason; stale snapshots raise StorageStale instead."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "40m",
+          "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "source": "io",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager storage inventory is incomplete",
+                "description": "A fresh snapshot reports a PARTIAL or UNKNOWN capacity or I/O inventory. Run mm storage or mm storage io on the source host for the reason; stale snapshots raise StorageStale instead."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "storage export budget omission pending firing and recovery",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_snapshot_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_export_complete{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x30 1+0x5"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "29m",
+          "alertname": "MachineManagerStorageExportIncomplete",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerStorageExportIncomplete",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Exporter omitted a machine's filesystem and device series",
+                "description": "The storage byte budget of this scrape endpoint was full, so all of this machine's filesystem and device series are absent. Exclude mounts on the source with mm storage record, or scrape that host directly; the source snapshot is unaffected."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "31m",
+          "alertname": "MachineManagerStorageExportIncomplete",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": []
         },
         {
           "eval_time": "30m",

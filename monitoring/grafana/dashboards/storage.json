@@ -230,6 +230,122 @@
       }
     },
     {
+      "id": 11,
+      "title": "Current storage snapshot freshness and age",
+      "type": "table",
+      "description": "Current values per machine. Export complete = 0 means the exporter's storage byte budget omitted this machine's filesystem and device series; empty for stale snapshots.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_storage_snapshot_fresh{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "clamp_min(time() - machine_manager_storage_snapshot_timestamp_seconds{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}, 0)",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "expr": "machine_manager_storage_export_complete{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Age"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "__name__": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "machine_id": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "instance": 4
+            },
+            "renameByName": {
+              "machine_id": "Machine",
+              "Value #A": "Fresh",
+              "Value #B": "Age",
+              "Value #C": "Export complete",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": 3,
       "title": "Current storage inventory state",
       "type": "table",
@@ -239,9 +355,9 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 0,
+        "x": 12,
         "y": 6,
-        "w": 24,
+        "w": 12,
         "h": 6
       },
       "targets": [
@@ -417,6 +533,16 @@
       },
       "transformations": [
         {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "__name__": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         },
@@ -478,7 +604,7 @@
         {
           "refId": "A",
           "expr": "machine_manager_storage_filesystem_available_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
-          "legendFormat": "{{instance}} / {{machine_id}} {{mount}}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{mount}} {{filesystem_id}}",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -536,7 +662,7 @@
         {
           "refId": "A",
           "expr": "(machine_manager_storage_filesystem_used_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"} / machine_manager_storage_filesystem_size_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}) and (machine_manager_storage_filesystem_size_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"} > 0)",
-          "legendFormat": "{{instance}} / {{machine_id}} {{mount}}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{mount}} {{filesystem_id}}",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -594,7 +720,7 @@
         {
           "refId": "A",
           "expr": "machine_manager_storage_device_read_bytes_per_second{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
-          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) read",
+          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) {{device_id}} read",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -603,7 +729,7 @@
         {
           "refId": "B",
           "expr": "machine_manager_storage_device_write_bytes_per_second{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
-          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) write",
+          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) {{device_id}} write",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -661,7 +787,7 @@
         {
           "refId": "A",
           "expr": "machine_manager_storage_device_read_ops_per_second{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
-          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) read",
+          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) {{device_id}} read",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -670,7 +796,7 @@
         {
           "refId": "B",
           "expr": "machine_manager_storage_device_write_ops_per_second{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
-          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) write",
+          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) {{device_id}} write",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -835,7 +961,6 @@
               "job": true,
               "Value": true,
               "alertstate": true,
-              "filesystem_id": true,
               "fs_type": true,
               "capacity_group": true
             },
@@ -845,7 +970,7 @@
               "machine_id": 2,
               "mount": 3,
               "source": 4,
-              "state": 5,
+              "filesystem_id": 5,
               "instance": 6
             },
             "renameByName": {
@@ -854,7 +979,7 @@
               "machine_id": "Machine",
               "mount": "Mount",
               "source": "Source",
-              "state": "State",
+              "filesystem_id": "Filesystem ID",
               "instance": "Producer"
             }
           }

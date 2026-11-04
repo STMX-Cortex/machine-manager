@@ -100,10 +100,18 @@ groups:
           summary: A filesystem has less than ten percent available
           description: Each filesystem is compared with its own size; volumes in one capacity group are never added together. Inspect mm storage and mm cleanup suggestions; this alert never deletes files.
       - alert: MachineManagerStorageIncomplete
-        expr: (machine_manager_storage_inventory_state{job="machine-manager",state!="OK"} == 1) and on(job, instance, machine_id) (machine_manager_storage_snapshot_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        expr: (max without(state) (machine_manager_storage_inventory_state{job="machine-manager",state!="OK"} == 1)) and on(job, instance, machine_id) (machine_manager_storage_snapshot_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
         for: 30m
         labels:
           severity: warning
         annotations:
           summary: Machine-manager storage inventory is incomplete
           description: A fresh snapshot reports a PARTIAL or UNKNOWN capacity or I/O inventory. Run mm storage or mm storage io on the source host for the reason; stale snapshots raise StorageStale instead.
+      - alert: MachineManagerStorageExportIncomplete
+        expr: (machine_manager_storage_export_complete{job="machine-manager"} == 0) and on(job, instance, machine_id) (machine_manager_storage_snapshot_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Exporter omitted a machine's filesystem and device series
+          description: The storage byte budget of this scrape endpoint was full, so all of this machine's filesystem and device series are absent. Exclude mounts on the source with mm storage record, or scrape that host directly; the source snapshot is unaffected.

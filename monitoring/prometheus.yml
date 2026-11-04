@@ -14,7 +14,8 @@ scrape_configs:
     follow_redirects: false
     honor_labels: false
     # Fleet storage adds at most 33 machines x (128 filesystems x 7 + 128 devices x 5) = 50688 series to the
-    # resource maximum (1000 records x 75). Bodies stay within mm serve's 16 MiB response cap; see METRICS.md.
+    # resource maximum (1000 records x 75). The exporter's 8 MiB storage byte budget keeps bodies within
+    # mm serve's 16 MiB response cap; see METRICS.md.
     sample_limit: 200000
     body_size_limit: 16MB
     label_limit: 16
