@@ -5,10 +5,15 @@ Callers pass (machine_id, snapshot_or_None, fresh) tuples from a validating read
 defensive anyway: malformed rows are skipped, unknown values are absent (never zero), and a stale or missing
 snapshot exports only freshness 0, its source time when known, and UNKNOWN inventory state. Each filesystem
 and device is its own series; nothing is summed across filesystems, capacity groups or devices.
+
+Storage text has one byte budget per exposition (STORAGE_TEXT_BYTES), filled in tuple order (local first, then
+peers). A machine whose filesystem/device series would exceed it exports none of them (never part of a machine)
+and reports storage_export_complete 0; freshness, time and inventory state series are always exported.
 """
 import math
 
 ROWS_MAX = 128  # mmstorage.RECORDS_MAX: devices and filesystems, independently
+STORAGE_TEXT_BYTES = 8 << 20  # half of mm serve's 16 MiB response cap; the rest stays for legacy families
 STATES = ("OK", "PARTIAL", "UNKNOWN")
 SCOPES = ("whole_device", "driver")
 CAPACITY = (("total_bytes", "size_bytes", "Filesystem size in bytes."),
@@ -77,25 +82,104 @@ def _device(out, ident, row):
         out.add("storage_device_" + name, help_text, labels, rates[key])
 
 
-def add(out, machine_id, snapshot, fresh):
-    """Add one machine's storage series to an mmprometheus.Metrics; returns whether measurements were exported."""
+class Budget:
+    """Encoded storage exposition bytes (sample lines plus new family headers) shared by all machines."""
+    def __init__(self, limit=None):
+        self.limit = STORAGE_TEXT_BYTES if limit is None else limit
+        self.used = 0
+
+
+class _Pending:
+    """Collects one machine's measurement samples so their size is known before any is exported."""
+    def __init__(self, out):
+        self.out, self.samples = out, []
+
+    def add(self, name, help_text, labels, value):
+        sample = self.out.sample(name, labels, value)
+        if sample is not None:
+            self.samples.append((help_text, sample))
+
+
+def _size(out, help_text, key, line, families):
+    size = len(line.encode("utf-8")) + 1
+    if key[0] not in out.families and key[0] not in families:
+        families.add(key[0])
+        size += len(out.header(key[0], help_text).encode("utf-8"))
+    return size
+
+
+def _put(out, budget, name, help_text, labels, value, counted=True):
+    sample = out.sample(name, labels, value)
+    if sample is not None:
+        size = _size(out, help_text, *sample, set())
+        if out.put(help_text, sample) and counted:
+            budget.used += size
+
+
+COMPLETE = ("storage_export_complete",
+            "Whether every filesystem and device series of a fresh snapshot fit the storage byte budget (1/0).")
+
+
+def _state(out, budget, machine_id, snapshot, fresh):
+    """Freshness, time and inventory state (always exported); returns the fresh sub-records or None."""
     labels = {"machine_id": machine_id}
     if not isinstance(snapshot, dict) or snapshot.get("machine_id") != machine_id:
         snapshot = None
     is_fresh = fresh is True and snapshot is not None
-    out.add("storage_snapshot_fresh", "Whether the storage snapshot is valid and fresh.", labels, int(is_fresh))
+    _put(out, budget, "storage_snapshot_fresh", "Whether the storage snapshot is valid and fresh.", labels,
+         int(is_fresh))
     if snapshot is not None and _number(snapshot.get("time")):
-        out.add("storage_snapshot_timestamp_seconds", "Storage snapshot source time in Unix seconds.",
-                labels, snapshot["time"])
+        _put(out, budget, "storage_snapshot_timestamp_seconds", "Storage snapshot source time in Unix seconds.",
+             labels, snapshot["time"])
     docs = {"capacity": _record(snapshot, "capacity", machine_id) if is_fresh else None,
             "io": _record(snapshot, "io", machine_id) if is_fresh else None}
     for source, doc in docs.items():
         state = doc["state"] if doc is not None else "UNKNOWN"
         for name in STATES:
-            out.add("storage_inventory_state", "Storage inventory state (one hot); stale snapshots are UNKNOWN.",
-                    dict(labels, source=source, state=name), int(state == name))
+            _put(out, budget, "storage_inventory_state",
+                 "Storage inventory state (one hot); stale snapshots are UNKNOWN.",
+                 dict(labels, source=source, state=name), int(state == name))
+    if not is_fresh:
+        return None
+    key, line = out.sample(COMPLETE[0], labels, 0)
+    if key not in out.seen:
+        budget.used += _size(out, COMPLETE[1], key, line, set())  # reserved now, exported after measurement
+    return docs
+
+
+def _measure(out, budget, machine_id, docs):
+    """All of one fresh machine's filesystem/device series if they fit the remaining budget, else none."""
+    pending = _Pending(out)
     for row in _rows(docs["capacity"], "filesystems"):
-        _filesystem(out, machine_id, row)
+        _filesystem(pending, machine_id, row)
     for row in _rows(docs["io"], "devices"):
-        _device(out, machine_id, row)
-    return is_fresh
+        _device(pending, machine_id, row)
+    keys, families, size = set(), set(), 0
+    for help_text, (key, line) in pending.samples:
+        if key not in out.seen and key not in keys:
+            keys.add(key)
+            size += _size(out, help_text, key, line, families)
+    complete = size == 0 or budget.used + size <= budget.limit
+    if complete:
+        for help_text, sample in pending.samples:
+            out.put(help_text, sample)
+        budget.used += size
+    _put(out, budget, *COMPLETE, {"machine_id": machine_id}, int(complete), counted=False)
+    return complete
+
+
+def add(out, machine_id, snapshot, fresh, budget=None):
+    """Add one machine's storage series to an mmprometheus.Metrics; returns whether measurements were exported."""
+    budget = Budget() if budget is None else budget
+    docs = _state(out, budget, machine_id, snapshot, fresh)
+    return docs is not None and _measure(out, budget, machine_id, docs)
+
+
+def add_all(out, storage, budget=None):
+    """Section-5 tuples in order: every machine's state series first, then measurements while the budget lasts."""
+    budget = Budget() if budget is None else budget
+    states = [(machine_id, _state(out, budget, machine_id, snapshot, fresh)) for machine_id, snapshot, fresh in storage]
+    for machine_id, docs in states:
+        if docs is not None:
+            _measure(out, budget, machine_id, docs)
+    return budget

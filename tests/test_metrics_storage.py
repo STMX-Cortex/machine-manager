@@ -4,7 +4,9 @@ import copy
 import importlib.util
 import json
 import re
+from pathlib import Path
 import unittest
+from unittest import mock
 
 from mmtest import TempData, base_settings
 import mmprometheus as prom
@@ -12,15 +14,48 @@ import mmprometheus_storage as storage_metrics
 import mmstorage
 import mmstorage_io
 import storage_fixtures as fx
-from test_metrics import machine, samples, metric, MID, NOW
+from test_metrics import machine, resource, document, samples, metric, MID, NOW
 
 FS = ("capacity_known", "size_bytes", "free_bytes", "available_bytes", "used_bytes", "read_only")
 DEV = ("rates_known", "read_bytes_per_second", "write_bytes_per_second", "read_ops_per_second",
        "write_ops_per_second")
 FAMILIES = {"machine_manager_storage_" + name for name in
-            ("snapshot_fresh", "snapshot_timestamp_seconds", "inventory_state")
+            ("snapshot_fresh", "snapshot_timestamp_seconds", "inventory_state", "export_complete")
             + tuple("filesystem_" + f for f in FS) + tuple("device_" + d for d in DEV)}
+GOLDEN = Path(__file__).resolve().parent / "fixtures" / "metrics-legacy.prom"
 LINE = re.compile(r'^machine_manager_[a-z0-9_]+\{(?:[a-z_]+="(?:[^"\\]|\\[\\"n])*",?)*\} [-+0-9.e]+$')
+
+
+def legacy_fixture(module=prom):
+    """Representative legacy exposition; tests/fixtures/metrics-legacy.prom holds main's (7db4be3) output for it."""
+    peers = (("remote-a", machine(machine_id="remote-a", readings={"free_pct": 80, "cpu_pct": 12.5})),
+             ("remote-b", None), ("remote-c", machine(machine_id="remote-c", time=NOW - 10000)))
+    resources = document(resource(), resource(id="slots", parent="pool-a", capacity={
+        "unit": "slots", "total": 8, "left": 4, "reserve": 1}), resource(id="old", read_time=NOW - 1000))
+    status = machine(state="AMBER", mode="observe", readings={"psi_some_pct": 2.5, "psi_full_pct": 0, "seg_pct": 10})
+    return module.render(MID, status, resources, peers, NOW, base_settings())[0]
+
+
+def storage_bytes(text):
+    """Encoded bytes of every storage-contract line (HELP/TYPE headers included), newline-terminated."""
+    return sum(len(line.encode("utf-8")) + 1 for line in text.splitlines()
+               if re.search(r"machine_manager_\w+", line).group() in FAMILIES)
+
+
+def relabel(snapshot, ident):
+    """The same rows under another machine id (shared row objects keep large fixtures small in memory)."""
+    return dict(snapshot, machine_id=ident, capacity=dict(snapshot["capacity"], machine_id=ident),
+                io=dict(snapshot["io"], machine_id=ident))
+
+
+def dense(long=False):
+    rows = [fx.filesystem("fs-%03d" % i, ["/" + ("m" * 110 if long else "fs") + "%03d" % i], group=fx.GROUP)
+            for i in range(mmstorage.RECORDS_MAX)]
+    io = fx.io_record(cases=["actual-interval"] * mmstorage.RECORDS_MAX)
+    if long:
+        for row in io["devices"]:
+            row["name"] = row["name"] + "x" * 110
+    return fx.snapshot(capacity=fx.capacity_record(rows=rows), io=io)
 
 
 def render(*storage, peers=()):
@@ -61,6 +96,7 @@ class StorageMetrics(unittest.TestCase):
         self.assertEqual(families(text), FAMILIES)
         self.assertEqual(metric(text, "storage_snapshot_fresh", machine_id=MID), 1)
         self.assertEqual(metric(text, "storage_snapshot_timestamp_seconds", machine_id=MID), NOW)
+        self.assertEqual(metric(text, "storage_export_complete", machine_id=MID), 1)
         for source in ("capacity", "io"):
             for state, value in (("OK", 1), ("PARTIAL", 0), ("UNKNOWN", 0)):
                 self.assertEqual(metric(text, "storage_inventory_state", machine_id=MID, source=source,
@@ -129,6 +165,7 @@ class StorageMetrics(unittest.TestCase):
                     self.assertEqual(metric(text, "storage_inventory_state", machine_id=MID, source=source,
                                             state="OK"), 0)
                 self.assertEqual("storage_snapshot_timestamp_seconds" in text, stamp)
+                self.assertNotIn("storage_export_complete", text)
                 self.assertFalse([k for k in samples(text) if k.startswith(("machine_manager_storage_filesystem_",
                                                                             "machine_manager_storage_device_"))])
 
@@ -249,7 +286,7 @@ class StorageMetrics(unittest.TestCase):
         snap = fx.snapshot(capacity=fx.capacity_record(rows=rows), io=fx.io_record(cases=cases))
         self.assertTrue(mmstorage.valid(snap["capacity"]) and mmstorage_io.valid(snap["io"]))
         series = storage_samples(render((MID, snap, True)))
-        self.assertEqual(len(series), 128 * 6 + 128 * 5 + 8)
+        self.assertEqual(len(series), 128 * 6 + 128 * 5 + 9)
         self.assertLessEqual(len(series) * 33, 33 * (128 * 7 + 128 * 5))
 
     def test_never_a_sum_each_filesystem_and_device_is_its_own_series(self):
@@ -274,7 +311,76 @@ class StorageMetrics(unittest.TestCase):
         json.dumps(fx.snapshot())  # fixtures stay JSON-serializable for file-based callers
 
 
+class StorageBudget(unittest.TestCase):
+    def machines(self, count, snapshot=None):
+        snapshot = fx.snapshot() if snapshot is None else snapshot
+        return [("m-%02d" % i, relabel(snapshot, "m-%02d" % i), True) for i in range(count)]
+
+    def one_machine_bytes(self):
+        return storage_bytes(render(*self.machines(1)))
+
+    def test_budget_omits_whole_machines_in_order_and_reports_them(self):
+        limit = int(self.one_machine_bytes() * 2.5)
+        full = len([k for k in samples(render(*self.machines(1))) if "_filesystem_" in k or "_device_" in k])
+        with mock.patch.object(storage_metrics, "STORAGE_TEXT_BYTES", limit):
+            text = render(*self.machines(4))
+        self.assertLessEqual(storage_bytes(text), limit)
+        series = samples(text)
+        for index, complete in enumerate((1, 1, 0, 0)):
+            ident = "m-%02d" % index
+            with self.subTest(machine=ident):
+                self.assertEqual(metric(text, "storage_export_complete", machine_id=ident), complete)
+                self.assertEqual(metric(text, "storage_snapshot_fresh", machine_id=ident), 1)
+                self.assertEqual(metric(text, "storage_inventory_state", machine_id=ident, source="io", state="OK"), 1)
+                rows = [k for k in series if ('machine_id="%s"' % ident) in k
+                        and ("_filesystem_" in k or "_device_" in k)]
+                self.assertEqual(len(rows), full if complete else 0)  # never part of a machine
+
+    def test_a_later_smaller_machine_can_still_fit(self):
+        small = fx.snapshot(capacity=fx.capacity_record(rows=fx.filesystems()[:1]), io=fx.io_record(cases=["idle"]))
+        storage = self.machines(2) + [("small", relabel(small, "small"), True), ("stale", None, False)]
+        limit = int(self.one_machine_bytes() * 1.5)
+        with mock.patch.object(storage_metrics, "STORAGE_TEXT_BYTES", limit):
+            text = render(*storage)
+        self.assertLessEqual(storage_bytes(text), limit)
+        self.assertEqual(metric(text, "storage_export_complete", machine_id="m-00"), 1)
+        self.assertEqual(metric(text, "storage_export_complete", machine_id="m-01"), 0)
+        self.assertEqual(metric(text, "storage_export_complete", machine_id="small"), 1)
+        self.assertNotRegex(text, r'storage_export_complete\{machine_id="stale"')
+        self.assertEqual(metric(text, "storage_snapshot_fresh", machine_id="stale"), 0)
+
+    def test_tiny_budget_still_exports_state_and_completeness(self):
+        out = prom.Metrics()
+        self.assertFalse(storage_metrics.add(out, MID, fx.snapshot(), True, storage_metrics.Budget(limit=100)))
+        text = out.text()
+        self.assertEqual(metric(text, "storage_export_complete", machine_id=MID), 0)
+        self.assertEqual(metric(text, "storage_inventory_state", machine_id=MID, source="capacity", state="OK"), 1)
+        self.assertNotIn("_filesystem_", text)
+        empty = fx.snapshot(capacity=fx.capacity_record(rows=[]), io=fx.io_record(cases=[]))
+        out = prom.Metrics()
+        self.assertTrue(storage_metrics.add(out, MID, empty, True, storage_metrics.Budget(limit=0)))
+
+    def test_dense_fleet_stays_within_the_real_budget(self):
+        storage = self.machines(33, dense(long=True))
+        text = render(*storage)
+        self.assertLessEqual(storage_bytes(text), storage_metrics.STORAGE_TEXT_BYTES)
+        complete = [metric(text, "storage_export_complete", machine_id=m) for m, _, _ in storage]
+        self.assertEqual(complete[0], 1, "the local machine comes first and is exported")
+        self.assertIn(0, complete)
+        self.assertEqual(complete, sorted(complete, reverse=True), "equal machines fill the budget in order")
+        exported = sum(complete)
+        self.assertEqual(len([k for k in samples(text) if k.startswith("machine_manager_storage_filesystem_size_bytes")]),
+                         exported * mmstorage.RECORDS_MAX)
+        self.assertLess(len(text.encode("utf-8")), 9 << 20)
+
+
 class StorageExport(TempData):
+    def test_legacy_output_matches_main_byte_for_byte(self):
+        self.assertEqual(legacy_fixture(), GOLDEN.read_text())
+        text = prom.render(MID, machine(), None, (), NOW, base_settings(), storage=())[0]
+        self.assertFalse(families(text))
+
+
     def test_export_without_storage_inputs_has_no_storage_series(self):
         text, _ = prom.export(self.profile(), base_settings(), NOW)
         self.assertFalse(families(text))
