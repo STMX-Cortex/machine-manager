@@ -159,6 +159,10 @@ def validate_status(value, cfg, now):
         raise FleetError("source status stale")
     for key in ("slots", "busy", "waiting"):
         n = value.get(key)
+        # Null slots means the source supervisor cannot read a queue (status.schema.json), for example an
+        # observe-only machine. Publish and collect it as unknown; views() never makes such a machine eligible.
+        if key == "slots" and n is None:
+            continue
         if type(n) is not int or not 0 <= n <= (1024 if key == "slots" else 1000000):
             raise FleetError("machine status lacks valid queue counts")
     free = (value.get("readings") or {}).get("free_pct")

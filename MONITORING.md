@@ -35,7 +35,7 @@ this separate endpoint; settings are read on each request without saving a last-
 | Endpoint | Response |
 | --- | --- |
 | `GET /metrics` | Prometheus text, including health/freshness series. HTTP 200 even if the supervisor is stale; inspect freshness/state. |
-| `GET /status.json` | Bounded, schema-validated local status for `mm collect`, with the original source time. HTTP 503 for missing, invalid, stale or unusable queue counts. |
+| `GET /status.json` | Bounded, schema-validated local status for `mm collect`, with the original source time. HTTP 503 for missing, invalid or stale status or malformed queue counts; unknown (null) slots stay null. |
 | `GET /-/healthy` | HTTP 200 `ok` while the HTTP process can respond, independent of supervisor health. |
 
 HEAD has the same status and headers, with no body. Other paths (including query strings) are 404. Write methods

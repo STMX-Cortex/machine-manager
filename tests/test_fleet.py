@@ -259,6 +259,28 @@ class Collection(TempData):
         self.collect(response=blob(dict(status(), slots=0)))
         self.assertFalse(self.view()["eligible"])
 
+    def test_unknown_queue_slots_are_collected_but_never_scheduled(self):
+        for over in ({"slots": None}, {"slots": None, "mode": "observe"}):
+            with self.subTest(over=over):
+                result = self.collect(response=blob(dict(status(), **over)))
+                self.assertIsNone(result["machines"][0]["error"])
+                self.assertIsNone(result["machines"][0]["status"]["slots"])
+                view = self.view()
+                self.assertEqual(view["state"], "GREEN")
+                self.assertFalse(view["eligible"])
+                self.assertIsNone(view["wait_minutes"])
+                resource = mmfleet.resources(self.fleet_profile(), NOW, self.settings)[0]
+                self.assertIsNone(resource["capacity"]["total"])
+                self.assertIsNone(resource["capacity"]["left"])
+
+    def test_malformed_queue_counts_still_fail_closed(self):
+        for over in ({"slots": -1}, {"slots": True}, {"slots": 1.0}, {"slots": 1025}, {"busy": None},
+                     {"waiting": None}, {"busy": -1}, {"waiting": False}):
+            with self.subTest(over=over):
+                result = self.collect(response=blob(dict(status(), **over)))
+                self.assertIsNone(result["machines"][0]["status"])
+                self.assertFalse(self.view()["eligible"])
+
     def test_fetch_worker_deadline_kills_and_reaps_without_putting_url_in_argv(self):
         cfg = dict(machine_config(status_url="https://example.invalid/status.json?token=secret-do-not-log"), timeout_s=1)
         process = mock.Mock()
