@@ -17,12 +17,13 @@ are in MONITORING.md. Live service managers, private peer hosting and production
 owner's target machines. Grafana fleet/resource dashboards and Prometheus alert rules/provisioning are in
 GRAFANA.md; real dashboard rendering and notification delivery need owner acceptance. Scope 1's pure shared storage
 model, schema, limits and mount-selection contract are in STORAGE.md. Scope 2 adds opt-in Linux discovery/capacity
-through `mm storage`, with bounded owned workers and no runtime cache/supervisor changes or new metrics. Scope 3 adds Mac discovery/capacity and proven APFS shared-container
-identities through the same command, preserving Linux collection. `mm storage io --interval SEC` adds bounded
-Linux sysfs/Mac IOKit device counters and rates in a separate standalone schema. Fleet storage export is opt-in:
-`mm storage record` (its own timer, never the supervisor) writes `storage.json`, `mm serve` adds `/storage.json`,
-`[[machines]].storage_url` lets `mm collect` cache peers under `fleet-storage/`, and `mm metrics` exports
-`machine_manager_storage_*` families; the Storage dashboard and storage alerts are in GRAFANA.md.
+through `mm storage`, with bounded owned workers and no runtime cache/supervisor changes or new metrics. Scope 3 adds
+Mac discovery/capacity and proven APFS shared-container identities through the same command, preserving Linux
+collection. `mm storage io --interval SEC` adds bounded Linux sysfs/Mac IOKit device counters and rates in a separate
+standalone schema. Fleet storage export is opt-in: `mm storage record` (its own timer, never the supervisor) writes
+`storage.json`, `mm serve` adds `/storage.json`, `[[machines]].storage_url` lets `mm collect` cache peers under
+`fleet-storage/`, and `mm metrics` exports `machine_manager_storage_*` families; the Storage dashboard and storage
+alerts are in GRAFANA.md.
 See STORAGE.md for target checks.
 Tailscale is the preferred private transport; TAILSCALE.md documents the opt-in `mm tailscale` SSH helper and
 per-peer service templates. Cloud fixtures do not authorize a tailnet login, policy changes or persistent tunnels.
