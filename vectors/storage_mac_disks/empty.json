@@ -1,0 +1,13 @@
+{
+  "function": "storage_mac_disks",
+  "case": "empty",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "AllDisksAndPartitions": []
+  },
+  "expected": {
+    "disks": [],
+    "reason": null
+  }
+}

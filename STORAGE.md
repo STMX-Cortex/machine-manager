@@ -3,7 +3,7 @@
 Scope 1 supplies `core/mmstorage.py`, `schemas/storage.schema.json`, acceptance fixtures and portable decision
 vectors. The module is pure: it does not discover storage, run commands, read mounts, write runtime files, or add
 metrics. Existing main-filesystem readings, safety thresholds, placement and supervisor behavior stay in place.
-Scope 2 adds the opt-in Linux collector described below. The Mac collector, fleet collection/export and dashboards
+Scopes 2 and 3 add the opt-in Linux and Mac collectors described below. Fleet collection/export and dashboards
 remain separate scopes. The shared model itself stays pure.
 
 ## Devices, filesystems and allocation domains
@@ -80,7 +80,7 @@ this model does not make network or unresponsive mounts safe to probe.
 
 ## Record and limits
 
-`schemas/storage.schema.json` specifies a standalone version-1 observation. The Linux command prints it without
+`schemas/storage.schema.json` specifies a standalone version-1 observation. The storage command prints it without
 writing a runtime cache; no automatic supervisor writer or fleet exporter is enabled yet.
 Its required envelope fields are `schema_version`, `machine_id`, `time`, `state`, `reason`, `devices`, `filesystems`.
 `time` is the source observation's nonnegative finite Unix timestamp (at most `2**53 - 1`), not fleet fetch time.
@@ -124,7 +124,7 @@ The repository's small schema checker supports a subset of JSON Schema, so it al
 Adapters classify filesystem mounts before probing capacity. `select_mounts(category, mounts, include, exclude)`
 returns sorted unique selected aliases, using exact canonical paths. Both policy lists default to empty, each
 with at most 256 entries. They are additive includes and overriding excludes, not globs, recursive roots or an
-include-only mode. The Linux command exposes these helper arguments as repeated CLI options; no persistent
+include-only mode. The storage command exposes these helper arguments as repeated CLI options; no persistent
 profile/settings keys are added.
 
 | Category | Default selection |
@@ -154,8 +154,8 @@ mm storage --include /mnt/archive --exclude /mnt/scratch --json
 includes add to the defaults. JSON output is the full standalone observation. Plain output starts with inventory
 state/reason and device/filesystem counts, followed by one line per filesystem with byte counts and reasons.
 Exit 0 means inventory OK and all selected filesystem capacities known. Exit 1 means partial/unknown inventory
-or unavailable capacity. Invalid options/paths/identity return one error line and exit 2. On actual non-Linux hosts
-the command returns UNKNOWN/unsupported without spawning workers, including when MM_PLATFORM forces Linux.
+or unavailable capacity. Invalid options/paths/identity return one error line and exit 2. Actual macOS hosts use
+the Mac collector below; other non-Linux platforms return UNKNOWN/unsupported. Dispatch ignores MM_PLATFORM.
 Detailed device records are in JSON; this is a fresh local read, unlike the cached-only `mm resources` command.
 Text that would need secret masking is omitted with PARTIAL/invalid_data rather than rewriting a mount or
 device name into a different identity. The active profile's text-line bounds also apply to output eligibility.
@@ -244,23 +244,117 @@ alias supplies known capacity. These errors do not alter the machine's existing 
 Fixture tests cover parsing/escaping, cloned identities, bind aliases, filters, overmounts, missing metadata,
 limits and real disposable stuck-worker cleanup. Linux-native tests compare root capacity with `statvfs`, check
 mount-ID changes and prove unselected mounts receive no capacity syscall. Native tests skip on Mac; the Mac
-collector remains scope 3. Real hotplug/remounts, nontrivial RAID/LVM/Btrfs/ZFS layouts, disconnected network mounts,
+collector is described below. Real hotplug/remounts, nontrivial RAID/LVM/Btrfs/ZFS layouts, disconnected network mounts,
 containers with restricted proc/sys/udev, and worst-case latency still need target-machine acceptance.
+
+## macOS collector (scope 3)
+
+The same `mm storage [--include PATH] [--exclude PATH] [--json]` command now selects
+`core/mmstorage_darwin.py` on actual macOS. Linux continues to use its existing collector;
+no Darwin ABI or ctypes is loaded when these storage modules are imported on Linux.
+Neither collector runs in supervisor ticks or writes runtime files. The shared schema,
+selection policy, exit codes and exact byte arithmetic are unchanged. Plain filesystem lines
+include `capacity_group`; JSON includes device records and all relationships.
+
+### Native discovery and capacity
+
+- A disposable worker calls Darwin's 64-bit `getfsstat64` with **MNT_NOWAIT**, copying mount
+  metadata without asking all network filesystems to refresh. The fixed 2168-byte xnu
+  `statfs64` layout is checked on 64-bit Python. A bounded `kern.bootsessionuuid` read supplies
+  boot identity. Keep fsid, mount path, filesystem type, read-only state and a strict local
+  `diskN[sN[sN]]` device identifier only. Raw mount sources, labels and options are discarded.
+- Bounded read-only `/usr/sbin/diskutil list -plist` enumerates visible whole disks,
+  partitions and synthetic APFS devices/volumes, including unmounted devices. These are
+  separate device records with no implied sum or parent hierarchy. Device kind is `unknown`
+  because this observation does not prove physical versus virtual hardware. Mounted selected
+  filesystems have filesystem records; unmounted volumes have no invented mount/capacity.
+- `/usr/sbin/diskutil apfs list -plist` supplies actual container/volume UUID membership
+  when APFS is mounted. Optional `diskutil info -plist diskN...` queries supply missing
+  mounted volume/snapshot facts. Only validated device identifiers enter fixed argument
+  arrays, never shell text or user labels. No raw device is opened for data.
+- Each selected path gets its own worker, opening an **O_EVTONLY**, no-follow descriptor.
+  `fstatfs64` supplies fsid, mount path, filesystem type, local device identity and counters.
+  All identity fields must match a discovered candidate at that exact path. Reopen and
+  recheck identity/read-only state before accepting capacity. Hidden/replaced paths are
+  omitted with PARTIAL/read_failed rather than borrowing a covering filesystem's sample.
+  Darwin's identity query itself obtains filesystem statistics; it is bounded even when
+  a new overmount is discovered. It is not Linux's O_PATH identity-only precheck.
+- Capacity is blocks times `f_bsize`, with total/free/account-available semantics from
+  Darwin. Reject inconsistent, negative-equivalent or overflowing counters instead of
+  inventing zeros. Quotas, snapshots and reservations can affect each volume differently.
+  Mount aliases with the same fsid/type/device become one record; keep the first successful
+  capacity, never add or average aliases. Mixed read-only flags become null.
+
+Local types: APFS, HFS, FAT, exFAT, NTFS, CD9660, UDF, ZFS and UFS. Network types: NFS,
+SMBFS/CIFS, AFPFS and WebDAV. Autofs/devfs/fdesc/volfs are pseudo; tmpfs/ramfs are memory;
+unrecognized types (including unrecognized FUSE variants) are unknown. Network, pseudo,
+memory and unknown mounts require explicit exact includes. Known autofs mounts and their
+children remain metadata-only even when included, without opening paths or waking automounts.
+
+### APFS and identities: no double counting
+
+A unique OS-reported volume UUID identifies a live filesystem. A snapshot uses its own
+reported snapshot UUID; it must never reuse its live volume UUID as filesystem identity.
+Different volumes and snapshots remain distinct records. A proven APFS container UUID
+provides their shared `capacity_group`. This includes the sealed root snapshot when its
+native info reports the container. Missing membership stays null, never inferred from diskN
+spelling. The group is a relationship only: this command emits **no container or host total**.
+Do not sum volume capacities, free space, disk sizes, or rows with null groups. Volume quotas
+and shared allocation prevent those sums from describing independent usable capacity.
+
+Device identities prefer a unique disk/partition UUID when diskutil supplies it. Filesystem,
+device and container UUID clones attached as distinct native objects are disambiguated, not
+merged. Any duplicate persistent filesystem identity discovered across native fsids falls
+back and marks inventory partial. Missing stable IDs use `session` with compact JSON
+`[boot_uuid,"darwin-global",observation_nonce,...native_identity]`. For devices the suffix
+is disk identifier; for filesystems it is `[fsid_pair,fs_type,device_or_null]` as three suffix
+values; for capacity groups it is container reference. The per-observation nonce means
+fallback IDs intentionally change between observations: recycled disk names or fsids cannot
+claim persistent continuity. This trades series continuity for correctness when stable
+metadata is unavailable. Known volume UUIDs survive mount renames. Backing device references
+only resolve to a retained matching volume device; unknown physical-store topology stays unknown.
+
+### Bounds, failures and acceptance
+
+Default total budget: **5 seconds**, mount discovery at most **1.5 seconds**, disk/APFS
+metadata commands at most **0.8 seconds each**, each capacity or optional info command at
+most **0.35 seconds**, all limited by remaining time. Root is probed first, then paths in
+lexical order. Capacity probes precede optional per-device info so missing UUID lookups
+cannot starve root capacity. Owned process groups, stdout suppression/limits and timeout
+cleanup use the existing bounded runner. Kernel uninterruptible I/O can delay worker exit;
+the caller does not wait indefinitely. Scheduling and cleanup add overhead to these budgets.
+
+Native enumeration retains at most 4096 mounts, detecting an extra row. Command stdout
+is at most 2 MiB; XML plist entities/binary plists are rejected; XML container depth is
+checked before decoding, with at most 16384 decoded tree nodes and depth 12. Internal
+worker JSON has the existing byte/depth bounds. Retain at most 128 devices/filesystems
+and 32 aliases per filesystem. Size/identity/path constraints remain those of the shared
+validator. Limits yield PARTIAL/truncated. Unrepresentable or secret-shaped paths are
+omitted with PARTIAL/invalid_data without rewriting their identity.
+
+A failed mount scan gives UNKNOWN. Missing/failed diskutil metadata preserves usable mount
+readings with PARTIAL and session IDs/null relationships where needed. Failed capacity
+keeps discovered metadata with null bytes and a fixed reason. No cached sample gets a fresh
+timestamp. Real native Mac CI checks mount ABI/root capacity, disk/APFS metadata and a fresh
+observation; portable fixtures cover snapshots, clones, shared capacity, aliases, bounds,
+filters and owned-worker timeout/recovery. Linux-native tests continue independently.
+
+Target acceptance still needs actual APFS quotas/reservations/snapshots, multiple containers,
+encrypted/locked volumes, disk images, removable media, UUID stability, hotplug/remount races,
+permission failures and disconnected network filesystems. Check latency and worker cleanup
+on the intended kernel. Read-only hosted checks do not prove these layouts or production
+service integrations. Do not mount/unmount/resize/create volumes or install services merely
+to run this command.
 
 ## Next scopes and acceptance
 
-1. **Scope 2 implemented:** opt-in Linux inventory/capacity command; owner target-host acceptance remains.
-2. **Scope 3 next:** Mac collector with bounded discovery, APFS volume/container relationships, capacity, aliases and errors.
-3. Device I/O: separately timestamped counters/rates, resets and disappearing devices; never attach whole-device
+1. **Scopes 2 and 3 implemented:** opt-in Linux/Mac inventory/capacity; target-host acceptance remains.
+2. Device I/O: separately timestamped counters/rates, resets and disappearing devices; never attach whole-device
    throughput to each filesystem as if it were separate traffic.
-4. Fleet/status/export: explicit compatibility, freshness, payload/label limits and metrics; preserve legacy guards.
-5. Grafana views and then alerts from proven readings; optional hardware health later.
-
-The Mac collector can use the same contract independently. Real UUID stability,
-APFS accounting, containers/namespaces, disconnected mounts and sampling latency need target-machine validation
-when those collectors exist. Scope-1 fixtures prove contract behavior only, not production storage discovery.
+3. Fleet/status/export: explicit compatibility, freshness, payload/label limits and metrics; preserve legacy guards.
+4. Grafana views and then alerts from proven readings; optional hardware health later.
 
 ```sh
-python3 -I tests/run_tests.py storage_linux storage vectors
+python3 -I tests/run_tests.py storage_darwin storage_linux storage vectors
 python3 -I tests/run_vectors.py
 ```

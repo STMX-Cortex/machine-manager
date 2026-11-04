@@ -1,0 +1,13 @@
+{
+  "function": "storage_mac_apfs",
+  "case": "empty",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "Containers": []
+  },
+  "expected": {
+    "volumes": {},
+    "reason": null
+  }
+}

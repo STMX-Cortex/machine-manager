@@ -38,7 +38,7 @@ Agents:
   mm collect                collect remote machine statuses into the local fleet cache
   mm metrics                Prometheus metrics from cached snapshots (files only)
   mm serve [--bind 127.0.0.1|::1] [--port 9877]   loopback /metrics and /status.json hosting
-  mm storage [--include PATH] [--exclude PATH]   one Linux storage observation; STORAGE.md
+  mm storage [--include PATH] [--exclude PATH]   one local storage observation; STORAGE.md
   mm tailscale --peer PEER --user USER [--port N] [--dry-run]   SSH tunnel; TAILSCALE.md
   mm settings show [KEY|SECTION]   the settings in force, each with its default (read-only)
 Owner:
@@ -667,9 +667,9 @@ def cmd_tailscale(args, as_json):
 
 
 def cmd_storage(args, as_json, profile):
-    import mmstorage_linux
+    import mmstorage_collect
     include, exclude = [], []
-    if len(args) % 2 or len(args) > 4 * mmstorage_linux.model.POLICY_MAX:
+    if len(args) % 2 or len(args) > 4 * mmstorage_collect.model.POLICY_MAX:
         return err("E_USAGE", "storage accepts up to 256 --include PATH and --exclude PATH pairs each", "see STORAGE.md")
     for i in range(0, len(args), 2):
         key = args[i]
@@ -677,14 +677,14 @@ def cmd_storage(args, as_json, profile):
             return err("E_USAGE", "storage accepts repeated --include PATH and --exclude PATH", "see STORAGE.md")
         (include if key == "--include" else exclude).append(args[i + 1])
     try:
-        rec = mmstorage_linux.collect(mmcore.machine_id(profile), include=include, exclude=exclude)
+        rec = mmstorage_collect.collect(mmcore.machine_id(profile), include=include, exclude=exclude)
     except ValueError:
         return err("E_STORAGE", "invalid machine identity or mount selection", "use canonical absolute paths; see STORAGE.md")
     rec = mmcore.clean_obj(mmcore.mask_obj(rec))
     lines = [kv({"storage": rec["state"], "reason": rec["reason"], "devices": len(rec["devices"]),
                  "filesystems": len(rec["filesystems"])})]
     lines.extend(kv(dict({"filesystem": f["id"], "type": f["fs_type"], "mounts": json.dumps(f["mounts"]),
-                          "read_only": f["read_only"], "reason": f["capacity_reason"]}, **f["capacity"]))
+                          "read_only": f["read_only"], "capacity_group": f["capacity_group"], "reason": f["capacity_reason"]}, **f["capacity"]))
                  for f in rec["filesystems"])
     emit(as_json, rec, lines)
     return 0 if rec["state"] == "OK" and all(f["capacity_reason"] is None for f in rec["filesystems"]) else 1

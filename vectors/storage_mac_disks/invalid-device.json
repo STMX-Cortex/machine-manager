@@ -1,0 +1,18 @@
+{
+  "function": "storage_mac_disks",
+  "case": "invalid-device",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "AllDisksAndPartitions": [
+      {
+        "DeviceIdentifier": "../private",
+        "Size": 100
+      }
+    ]
+  },
+  "expected": {
+    "disks": [],
+    "reason": "invalid_data"
+  }
+}

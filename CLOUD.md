@@ -18,7 +18,8 @@ owner's target machines. Grafana fleet/resource dashboards and Prometheus alert 
 GRAFANA.md; real dashboard rendering and notification delivery need owner acceptance. Storage discovery and fleet
 export have separate scopes. Scope 1's pure shared storage model, schema, limits and mount-selection contract are in
 STORAGE.md. Scope 2 adds opt-in Linux discovery/capacity through `mm storage`, with bounded owned workers and no
-runtime cache/supervisor changes or new metrics. Mac discovery remains a separate scope; see STORAGE.md for target checks.
+runtime cache/supervisor changes or new metrics. Scope 3 adds Mac discovery/capacity and proven APFS shared-container
+identities through the same command, preserving Linux collection. See STORAGE.md for target checks.
 Tailscale is the preferred private transport; TAILSCALE.md documents the opt-in `mm tailscale` SSH helper and
 per-peer service templates. Cloud fixtures do not authorize a tailnet login, policy changes or persistent tunnels.
 Use the README roadmap as the source when its details change.
