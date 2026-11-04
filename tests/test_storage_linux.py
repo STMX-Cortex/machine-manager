@@ -187,6 +187,25 @@ class Collector(unittest.TestCase):
         self.assertRecord(rec)
         self.assertEqual(rec["filesystems"][0]["mounts"], ["/"])
 
+    def test_probe_device_uses_the_mountinfo_row_and_rejects_a_vanished_mount(self):
+        table = "10 1 0:31 / / rw - btrfs /dev/test rw\n"
+        info = {"/proc/self/fdinfo/7": "pos:\t0\nflags:\t010000000\nmnt_id:\t10\n", "/proc/self/mountinfo": table}
+        stat = os.stat_result((0o40755, 1, os.makedev(0, 33), 1, 0, 0, 0, 0, 0, 0))
+        vfs = os.statvfs_result((4096, 4096, 100, 30, 20, 0, 0, 0, 0, 255))
+        def read(path, limit=16384):
+            return info[path]
+        with mock.patch.object(linux.os, "O_PATH", getattr(os, "O_PATH", 0o10000000), create=True), \
+                mock.patch.object(linux.os, "open", return_value=7), mock.patch.object(linux.os, "close"), \
+                mock.patch.object(linux.os, "fstat", return_value=stat), \
+                mock.patch.object(linux.os, "fstatvfs", return_value=vfs), mock.patch.object(linux, "_read", side_effect=read):
+            result = linux.probe("/", [10])
+            self.assertEqual((result["mount_id"], result["dev"], result["reason"]), (10, "0:31", None))
+            self.assertEqual(result["capacity"], model.capacity(409600, 122880, 81920))
+            info["/proc/self/mountinfo"] = "11 1 0:31 / / rw - btrfs /dev/test rw\n"
+            result = linux.probe("/", [10])
+        self.assertEqual((result["mount_id"], result["dev"], result["reason"]), (None, None, "read_failed"))
+        self.assertEqual(result["capacity"], model.capacity())
+
     def test_changed_or_recycled_mount_identity_is_not_accepted(self):
         row = mount()
         for reply in (reading(mount(900)), reading(mount(dev="8:9"))):
@@ -410,6 +429,19 @@ class Native(unittest.TestCase):
         native = os.statvfs("/")
         self.assertEqual(result["capacity"]["total_bytes"], native.f_blocks * native.f_frsize)
         self.assertGreaterEqual(result["capacity"]["free_bytes"], result["capacity"]["available_bytes"])
+
+    def test_device_comes_from_mountinfo_not_a_btrfs_style_subvolume_st_dev(self):
+        mid = self.root_id()
+        expected = linux._mount_dev(mid)
+        self.assertRegex(expected, r"^[0-9]+:[0-9]+$")
+        real = os.fstat
+        def subvolume(fd):  # btrfs reports a per-subvolume anon st_dev, not the superblock's mountinfo device
+            st = list(real(fd))
+            st[2] = os.makedev(0, 999999)
+            return os.stat_result(st)
+        with mock.patch.object(linux.os, "fstat", side_effect=subvolume):
+            result = linux.probe("/", [mid])
+        self.assertEqual((result["mount_id"], result["dev"], result["reason"]), (mid, expected, None))
 
     def test_unselected_mount_is_identified_without_a_capacity_syscall(self):
         with mock.patch.object(linux.os, "fstatvfs", side_effect=AssertionError("unselected mount sampled")):
