@@ -83,3 +83,27 @@ groups:
         annotations:
           summary: Resource capacity is at or below its reserve
           description: Capacity is compared within one resource and native unit. Check the pool guard and budget; monitoring never dispatches work or buys capacity.
+      - alert: MachineManagerStorageStale
+        expr: (machine_manager_storage_snapshot_fresh{job="machine-manager"} == 0) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Machine-manager storage snapshot is stale or unavailable
+          description: Check the mm storage record timer on the source host and, for peers, storage collection. Filesystem and device measurements stay absent while stale.
+      - alert: MachineManagerFilesystemLow
+        expr: ((machine_manager_storage_filesystem_available_bytes{job="machine-manager"} / machine_manager_storage_filesystem_size_bytes{job="machine-manager"}) < 0.10) and (machine_manager_storage_filesystem_size_bytes{job="machine-manager"} > 0) and on(job, instance, machine_id) (machine_manager_storage_snapshot_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: A filesystem has less than ten percent available
+          description: Each filesystem is compared with its own size; volumes in one capacity group are never added together. Inspect mm storage and mm cleanup suggestions; this alert never deletes files.
+      - alert: MachineManagerStorageIncomplete
+        expr: (machine_manager_storage_inventory_state{job="machine-manager",state!="OK"} == 1) and on(job, instance, machine_id) (machine_manager_storage_snapshot_fresh{job="machine-manager"} == 1) and on(job, instance) (up{job="machine-manager"} == 1)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Machine-manager storage inventory is incomplete
+          description: A fresh snapshot reports a PARTIAL or UNKNOWN capacity or I/O inventory. Run mm storage or mm storage io on the source host for the reason; stale snapshots raise StorageStale instead.

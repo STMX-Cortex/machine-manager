@@ -35,6 +35,34 @@
         {
           "series": "machine_manager_storage_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
           "values": "100+0x30"
+        },
+        {
+          "series": "machine_manager_storage_snapshot_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"capacity\",state=\"OK\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"capacity\",state=\"PARTIAL\"}",
+          "values": "0+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"OK\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"UNKNOWN\"}",
+          "values": "0+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_available_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
+          "values": "50+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
+          "values": "100+0x40"
         }
       ],
       "alert_rule_test": [
@@ -86,6 +114,21 @@
         {
           "eval_time": "20m",
           "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerFilesystemLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageIncomplete",
           "exp_alerts": []
         }
       ]
@@ -155,6 +198,21 @@
           "eval_time": "3m",
           "alertname": "MachineManagerResourceReserve",
           "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerFilesystemLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "3m",
+          "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": []
         }
       ]
     },
@@ -185,6 +243,22 @@
         {
           "series": "machine_manager_resource_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",resource=\"pool\",id=\"workers\",parent=\"team-a\",location=\"cloud\"}",
           "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_storage_snapshot_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x30"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"UNKNOWN\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_available_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
+          "values": "100+0x30"
         }
       ],
       "alert_rule_test": [
@@ -248,6 +322,21 @@
         {
           "eval_time": "20m",
           "alertname": "MachineManagerResourceReserve",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerFilesystemLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "20m",
+          "alertname": "MachineManagerStorageIncomplete",
           "exp_alerts": []
         }
       ]
@@ -927,6 +1016,295 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "storage snapshot stale pending firing and recovery",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_snapshot_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x10 1+0x5"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "9m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "10m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager storage snapshot is stale or unavailable",
+                "description": "Check the mm storage record timer on the source host and, for peers, storage collection. Filesystem and device measurements stay absent while stale."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "11m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "stale storage silences old low filesystem readings",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_snapshot_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "0+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"capacity\",state=\"UNKNOWN\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"UNKNOWN\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_available_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
+          "values": "100+0x40"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "35m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager storage snapshot is stale or unavailable",
+                "description": "Check the mm storage record timer on the source host and, for peers, storage collection. Filesystem and device measurements stay absent while stale."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "35m",
+          "alertname": "MachineManagerFilesystemLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "35m",
+          "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "35m",
+          "alertname": "MachineManagerStorageLow",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "filesystem low pending firing and recovery per filesystem",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_snapshot_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_available_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
+          "values": "5+0x15 50+0x5"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:1111111111111111111111111111111111111111111111111111111111111111\",mount=\"/\",fs_type=\"ext4\",capacity_group=\"\"}",
+          "values": "100+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_available_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:2222222222222222222222222222222222222222222222222222222222222222\",mount=\"/data\",fs_type=\"apfs\",capacity_group=\"capacity:native:3333333333333333333333333333333333333333333333333333333333333333\"}",
+          "values": "50+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:2222222222222222222222222222222222222222222222222222222222222222\",mount=\"/data\",fs_type=\"apfs\",capacity_group=\"capacity:native:3333333333333333333333333333333333333333333333333333333333333333\"}",
+          "values": "100+0x40"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "14m",
+          "alertname": "MachineManagerFilesystemLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "15m",
+          "alertname": "MachineManagerFilesystemLow",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "filesystem_id": "filesystem:native:1111111111111111111111111111111111111111111111111111111111111111",
+                "mount": "/",
+                "fs_type": "ext4",
+                "capacity_group": "",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "A filesystem has less than ten percent available",
+                "description": "Each filesystem is compared with its own size; volumes in one capacity group are never added together. Inspect mm storage and mm cleanup suggestions; this alert never deletes files."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "16m",
+          "alertname": "MachineManagerFilesystemLow",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "zero filesystem size remains unknown",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_snapshot_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_available_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:4444444444444444444444444444444444444444444444444444444444444444\",mount=\"/boot/efi\",fs_type=\"vfat\",capacity_group=\"\"}",
+          "values": "0+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:4444444444444444444444444444444444444444444444444444444444444444\",mount=\"/boot/efi\",fs_type=\"vfat\",capacity_group=\"\"}",
+          "values": "0+0x40"
+        },
+        {
+          "series": "machine_manager_storage_filesystem_used_bytes{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",filesystem_id=\"filesystem:native:4444444444444444444444444444444444444444444444444444444444444444\",mount=\"/boot/efi\",fs_type=\"vfat\",capacity_group=\"\"}",
+          "values": "0+0x40"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerFilesystemLow",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": []
+        }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "(machine_manager_storage_filesystem_used_bytes{job=\"machine-manager\",instance=~\".*\",machine_id=~\".*\"} / machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=~\".*\",machine_id=~\".*\"}) and (machine_manager_storage_filesystem_size_bytes{job=\"machine-manager\",instance=~\".*\",machine_id=~\".*\"} > 0)",
+          "eval_time": "30m",
+          "exp_samples": []
+        }
+      ]
+    },
+    {
+      "name": "incomplete storage inventory needs a sustained fresh snapshot",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "up{job=\"machine-manager\",instance=\"central:9877\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_snapshot_fresh{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"capacity\",state=\"OK\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"capacity\",state=\"PARTIAL\"}",
+          "values": "0+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"OK\"}",
+          "values": "0+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"PARTIAL\"}",
+          "values": "1+0x40"
+        },
+        {
+          "series": "machine_manager_storage_inventory_state{job=\"machine-manager\",instance=\"central:9877\",machine_id=\"worker\",source=\"io\",state=\"UNKNOWN\"}",
+          "values": "0+0x40"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "29m",
+          "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": []
+        },
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerStorageIncomplete",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "machine-manager",
+                "instance": "central:9877",
+                "machine_id": "worker",
+                "source": "io",
+                "state": "PARTIAL",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Machine-manager storage inventory is incomplete",
+                "description": "A fresh snapshot reports a PARTIAL or UNKNOWN capacity or I/O inventory. Run mm storage or mm storage io on the source host for the reason; stale snapshots raise StorageStale instead."
+              }
+            }
+          ]
+        },
+        {
+          "eval_time": "30m",
+          "alertname": "MachineManagerStorageStale",
+          "exp_alerts": []
         }
       ]
     }

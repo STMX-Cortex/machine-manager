@@ -103,6 +103,13 @@
       "url": "/d/mm-resources",
       "includeVars": true,
       "keepTime": true
+    },
+    {
+      "title": "Storage",
+      "type": "link",
+      "url": "/d/mm-storage",
+      "includeVars": true,
+      "keepTime": true
     }
   ],
   "panels": [
