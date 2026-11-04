@@ -435,7 +435,7 @@ are counter-source identities, not the capacity collector's UUID/WWN hardware id
 ### Mac source and APFS scope
 
 A bounded worker reads `kern.bootsessionuuid` and invokes fixed read-only argv
-`/usr/sbin/ioreg -a -r -c IOBlockStorageDriver`. Only `Bytes (Read)`, `Bytes (Write)`,
+`/usr/sbin/ioreg -a -r -c IOBlockStorageDriver -d 2`. Only `Bytes (Read)`, `Bytes (Write)`,
 `Operations (Read)` and `Operations (Write)` from `Statistics` are used. Byte counts are
 already bytes. Other registry properties, serials and user labels are discarded.
 
@@ -471,9 +471,10 @@ is at most two sample budgets plus the requested wait (about 5 seconds default),
 process scheduling/cleanup overhead. Kernel uninterruptible I/O can delay actual worker
 termination; the caller does not wait indefinitely. The wait is only in this explicit CLI.
 
-Scan at most 1024 sysfs entries, retain at most 128 device records. Mac registry XML and
-tree use the capacity collector's 2 MiB, 16384-node and depth-12 bounds; entities and binary
-plists are rejected. Sysfs stat/uevent reads are at most 4096 bytes, identity files smaller.
+Scan at most 1024 sysfs entries, retain at most 128 device records. The Mac query limits
+registry children to driver/media levels. Registry XML/tree keep 2 MiB and 16384-node
+bounds, with a separate depth-32 limit for nested driver properties; capacity metadata
+retains its original depth-12 default. Entities and binary plists are rejected. Sysfs stat/uevent reads are at most 4096 bytes, identity files smaller.
 Internal JSON is byte/depth bounded and semantically validated before pairing. Limits give
 PARTIAL/truncated; fixed error codes replace raw exceptions/stderr. Arrays sort by ID and
 removed IDs are unique/disjoint from current records. Imports perform no collection or

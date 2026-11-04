@@ -10,7 +10,8 @@ import mmstorage as storage
 import mmstorage_darwin as mac
 import mmstorage_io as model
 
-IOREG = ['/usr/sbin/ioreg', '-a', '-r', '-c', 'IOBlockStorageDriver']
+IOREG = ['/usr/sbin/ioreg', '-a', '-r', '-c', 'IOBlockStorageDriver', '-d', '2']
+REGISTRY_DEPTH = 32
 STAT_KEYS = ('Bytes (Read)', 'Bytes (Write)', 'Operations (Read)', 'Operations (Write)')
 
 
@@ -39,7 +40,7 @@ def _media(driver):
 
 def parse_ioreg(doc):
     """Whitelisted driver counters only. Device serials, user labels and other properties are discarded."""
-    mac._bounded_tree(doc)
+    mac._bounded_tree(doc, depth_max=REGISTRY_DEPTH)
     if not isinstance(doc, list):
         raise ValueError('invalid registry inventory')
     rows, seen, problem = [], set(), None
@@ -102,7 +103,7 @@ def _registry():
             raise mac.common.Cut('registry output limit')
         if p.wait() != 0:
             raise OSError('registry unavailable')
-        return mac._plist(raw)
+        return mac._plist(raw, depth_max=REGISTRY_DEPTH)
     finally:
         if p.poll() is None:
             p.kill()

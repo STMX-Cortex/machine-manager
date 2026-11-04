@@ -287,6 +287,28 @@ class Mac(unittest.TestCase):
         with mock.patch.object(mac.mac, 'NODES_MAX', 1), self.assertRaises(ValueError):
             mac.parse_ioreg([driver()])
 
+    def test_registry_metadata_has_its_own_bounded_depth_without_changing_capacity_default(self):
+        deep = 1
+        for _ in range(15):
+            deep = {'nested': deep}
+        data = [driver()]
+        data[0]['extra_driver_properties'] = deep
+        raw = plistlib.dumps(data)
+        with self.assertRaises(ValueError):
+            mac.mac._plist(raw)  # capacity metadata retains its original depth limit
+        self.assertEqual(mac.mac._plist(raw, depth_max=mac.REGISTRY_DEPTH), data)
+        self.assertEqual(mac.parse_ioreg(data)['devices'][0]['name'], '/dev/disk0')
+        for _ in range(33):
+            deep = {'nested': deep}
+        data[0]['extra_driver_properties'] = deep
+        with self.assertRaises(ValueError):
+            mac.mac._plist(plistlib.dumps(data), depth_max=mac.REGISTRY_DEPTH)
+        with self.assertRaises(ValueError):
+            mac.parse_ioreg(data)
+
+    def test_fixed_query_bounds_children_to_driver_and_media_levels(self):
+        self.assertEqual(mac.IOREG, ['/usr/sbin/ioreg', '-a', '-r', '-c', 'IOBlockStorageDriver', '-d', '2'])
+
     def test_registry_child_inherits_owned_process_group_and_has_byte_bound(self):
         p = mock.Mock()
         p.stdout.read.return_value = plistlib.dumps([driver()])
