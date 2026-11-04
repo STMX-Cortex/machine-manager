@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import subprocess
 import sys
 import time
@@ -155,6 +156,28 @@ class Collector(unittest.TestCase):
         self.assertEqual(len(rec['filesystems']), 2)
         self.assertEqual(len({f['id'] for f in rec['filesystems']}), 2)
         self.assertEqual(len({f['capacity_group'] for f in rec['filesystems']}), 1)
+
+    def test_root_snapshot_listed_by_diskutil_keeps_its_uuid_and_container_group(self):
+        # macOS 26+ `diskutil list` includes the mounted root snapshot with its snapshot UUID as VolumeUUID,
+        # while `apfs list` names only the live system volume.
+        rows = [mount(dev='disk3s1s1', ro=True), mount('/System/Volumes/Data', 2, 'disk3s5')]
+        disks = [disk(), disk('disk3s1s1', OTHER), disk('disk3s5', POOL.replace('3', '4'))]
+        volumes = {'disk3s1': volume(), 'disk3s5': volume(POOL.replace('3', '4'))}
+        snap = {'volume_uuid': OTHER, 'snapshot_uuid': OTHER, 'snapshot': True, 'container': 'disk3'}
+        first, calls = fixture(rows, disks, volumes, info={'disk3s1s1': (snap, None)})
+        second, _ = fixture(rows, disks, volumes, info={'disk3s1s1': (snap, None)})
+        self.assertEqual([p for m, p in calls if m == '--info'], ['disk3s1s1'])
+        self.assertEqual(first['state'], 'OK')
+        root = next(f for f in first['filesystems'] if f['mounts'] == ['/'])
+        self.assertEqual(root['id'], model.storage_id('filesystem', 'uuid', OTHER))
+        self.assertEqual(root['capacity_group'], model.storage_id('capacity', 'uuid', POOL))
+        self.assertEqual({f['capacity_group'] for f in first['filesystems']}, {root['capacity_group']})
+        self.assertEqual([f['id'] for f in first['filesystems']], [f['id'] for f in second['filesystems']])
+        failed, _ = fixture(rows, disks, volumes, info={'disk3s1s1': (None, 'timeout')})
+        root = next(f for f in failed['filesystems'] if f['mounts'] == ['/'])
+        self.assertEqual((failed['state'], failed['reason']), ('PARTIAL', 'timeout'))
+        self.assertIn(':session:', root['id'])
+        self.assertIsNone(root['capacity_group'])
 
     def test_cloned_volume_and_container_uuids_do_not_merge_native_objects(self):
         rows = [mount(), mount('/clone', 2, 'disk4s1')]
@@ -400,3 +423,13 @@ class Native(unittest.TestCase):
         self.assertTrue(any('/' in f['mounts'] for f in rec['filesystems']), rec)
         apfs = [f for f in rec['filesystems'] if f['fs_type'] == 'apfs']
         self.assertTrue(any(f['capacity_group'] for f in apfs), rec)
+
+    def test_real_sealed_root_snapshot_has_stable_uuid_identity_and_container_group(self):
+        root = next(r for r in mac.mounts()['mounts'] if r['mount'] == '/')
+        if root['fs_type'] != 'apfs' or not re.fullmatch(r'disk[0-9]+s[0-9]+s[0-9]+', root['dev'] or ''):
+            self.skipTest('root is not a mounted APFS snapshot on this host')
+        first, second = collect.collect('test-machine'), collect.collect('test-machine')
+        ids = [next(f for f in rec['filesystems'] if '/' in f['mounts']) for rec in (first, second)]
+        self.assertTrue(ids[0]['id'].startswith('filesystem:uuid:'), first)
+        self.assertEqual(ids[0]['id'], ids[1]['id'])
+        self.assertIsNotNone(ids[0]['capacity_group'], first)
