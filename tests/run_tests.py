@@ -23,6 +23,7 @@ GROUPS = {
     "dashboards": ["test_dashboards"],
     "monitoring": ["test_monitoring"],
     "metrics": ["test_metrics"],
+    "metrics_storage": ["test_metrics_storage"],  # fleet storage families: unknown/stale omission, no sums
     "generic_pools": ["test_generic_pools"],
     "fleet": ["test_fleet"],
     "linux": ["test_linux"],

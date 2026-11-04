@@ -12,6 +12,7 @@ import stat
 import mmcore
 import mmdecide
 import mmfleet
+import mmprometheus_storage
 
 STATUS_BYTES = 1 << 20
 RESOURCE_BYTES = 8 << 20
@@ -169,8 +170,11 @@ def machine_metrics(out, ident, doc, now, limit):
     return True
 
 
-def render(ident, status, resources, peers, now, settings):
-    """Pure snapshot rendering. Peer tuples are (configured id, validated cached status or None)."""
+def render(ident, status, resources, peers, now, settings, *, storage=()):
+    """Pure snapshot rendering. Peer tuples are (configured id, validated cached status or None).
+
+    Storage tuples are (machine id, validated storage snapshot or None, fresh); none means no storage series.
+    """
     out = Metrics()
     out.add("snapshot_valid", "Whether the cached document has valid identity and envelope fields.",
             {"source": "status"}, int(valid_status(status, ident)))
@@ -211,6 +215,8 @@ def render(ident, status, resources, peers, now, settings):
             if key not in mmdecide.FIXED and mmdecide.VALUE_KEY.fullmatch(key):
                 out.add("resource_value", "Numeric resource value in the key's documented native unit.",
                         dict(labels, key=key), int(value) if type(value) is bool else value)
+    for machine, snapshot, is_fresh in storage:
+        mmprometheus_storage.add(out, machine, snapshot, is_fresh)
     return out.text(), local_fresh
 
 
