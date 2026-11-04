@@ -633,22 +633,25 @@ you add any resource with a profile entry, and a new kind of resource needs one 
    HTTP endpoint, Prometheus scrape configuration and Linux/macOS service templates ([MONITORING.md](MONITORING.md));
    Grafana fleet/resource dashboards, read-only provisioning and ten Prometheus alert rules are provided in
    [GRAFANA.md](GRAFANA.md). Owner deployment, visual checks and actual notification delivery remain.
-   Each runs as its own program. Next feature: broader storage discovery (item 4).
+   Each runs as its own program. Storage export and views are item 4.
    `mm` keeps the decisions: the slots,
    the placement, the guards and the usage meters across the fleet. Monitoring does not acquire control authority.
-4. **Storage: shared model and opt-in Linux/Mac collectors implemented.** [STORAGE.md](STORAGE.md)
+4. **Storage: shared model, Linux/Mac collectors and fleet export implemented.** [STORAGE.md](STORAGE.md)
    defines device/filesystem/shared-capacity identities, exact byte counts, unknown readings, bounded mount selection,
-   a standalone schema and portable tests. `mm storage [--include PATH] [--exclude PATH] [--json]` now performs one
-   bounded read-only inventory/capacity observation on either platform without changing supervisor state or exporting metrics.
+   a standalone schema and portable tests. `mm storage [--include PATH] [--exclude PATH] [--json]` performs one
+   bounded read-only inventory/capacity observation on either platform without changing supervisor state.
    Mac APFS volumes retain separate capacities and share a container identity when proven; capacities are never summed
-   into a host or container total. `mm storage io --interval 1 --json` now samples cumulative device read/write
+   into a host or container total. `mm storage io --interval 1 --json` samples cumulative device read/write
    bytes and completed operations twice, with measured byte/operation rates, reset/replacement handling and
    unknown values when continuity cannot be established. Linux uses whole-device sysfs counters; Mac uses IOKit
-   driver counters, not per-APFS-volume activity. Fleet storage export comes next; optional latency/device health later. Keep filesystem capacity separate
-   from device I/O: several mounts can share one device or storage pool. Missing or unsupported readings stay unknown.
-   Collect and export the records across machines without changing storage or adding automatic storage actions.
-   Existing status/metrics still report only the main filesystem's capacity and free space per machine. Broader Linux/Mac
-   discovery is an explicit local command; fleet storage export and Grafana storage views remain separate scopes.
+   driver counters, not per-APFS-volume activity. Keep filesystem capacity separate from device I/O: several mounts
+   can share one device or storage pool. Missing or unsupported readings stay unknown.
+   **Fleet export (opt-in):** `mm storage record`, run by its own timer/agent (never by the supervisor), writes a
+   validated `storage.json`; `mm serve` publishes it at `/storage.json`; a peer's optional `storage_url` lets
+   `mm collect` cache it under `fleet-storage/`; `mm metrics` exports `machine_manager_storage_*` families
+   ([METRICS.md](METRICS.md)), within an 8 MiB storage text budget. The Storage Grafana dashboard and four storage
+   alerts are in [GRAFANA.md](GRAFANA.md). Existing status, fleet.json, metrics and guards still use only the main
+   filesystem. Owner deployment and target-host acceptance remain; optional latency/device health later.
 
 ## Tests
 
