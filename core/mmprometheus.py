@@ -230,7 +230,10 @@ def render(ident, status, resources, peers, now, settings, *, storage=()):
             if key not in mmdecide.FIXED and mmdecide.VALUE_KEY.fullmatch(key):
                 out.add("resource_value", "Numeric resource value in the key's documented native unit.",
                         dict(labels, key=key), int(value) if type(value) is bool else value)
-    mmprometheus_storage.add_all(out, storage)  # one storage byte budget for the whole exposition, in tuple order
+    storage = list(storage)
+    if storage:  # storage gets what legacy text leaves under the response target, never more than its own budget
+        legacy = len(out.text().encode("utf-8"))
+        mmprometheus_storage.add_all(out, storage, mmprometheus_storage.budget_for(legacy))
     return out.text(), local_fresh
 
 

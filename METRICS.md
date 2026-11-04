@@ -96,15 +96,20 @@ per machine; 33 machines stay below 50 000. Labels are masked, cleaned, capped a
 the others.
 
 **Byte budget.** Dense inventories with long labels can reach about 18-21 MiB for 33 machines, more than the 16 MiB
-`mm serve` response cap and Prometheus `body_size_limit`; an oversized body would fail the whole scrape (`up=0`).
-Storage text therefore has one budget of 8 MiB per exposition (`STORAGE_TEXT_BYTES`), leaving the other half for
-the legacy families. Freshness, source time, inventory state and `storage_export_complete` are always exported.
-Filesystem and device series are then added machine by machine in snapshot order (local first, then peers in
-profile order). A machine whose series would exceed the remaining budget exports **none** of them, never part of a
-machine, and reports `storage_export_complete` 0; a later, smaller machine can still fit. Rows of a machine are
-not ranked or truncated, so no filesystem silently disappears from a machine that looks complete. With typical
-labels a full 33-machine inventory is about 12 MiB, so expect the last machines to be omitted at that size; exclude
-mounts on the source or scrape those hosts directly. `MachineManagerStorageExportIncomplete` reports it.
+`mm serve` response cap and Prometheus `body_size_limit`; an oversized body would fail the whole scrape (`up=0`) and
+hide every alert from that endpoint. The guarantee is: **storage never pushes the response past 15 MiB**
+(`RESPONSE_TEXT_BYTES`, 1 MiB headroom under both 16 MiB caps). After the legacy families are rendered, storage gets
+min(8 MiB, 15 MiB - legacy bytes), never less than zero (`STORAGE_TEXT_BYTES` is the 8 MiB ceiling). Freshness,
+source time, inventory state and `storage_export_complete` are reserved first and always exported (about 1 KB per
+machine; the only storage text that can exceed the budget). Filesystem and device series are then added machine by
+machine in snapshot order (local first, then peers in profile order). A machine whose series would exceed the
+remaining budget exports **none** of them, never part of a machine, and reports `storage_export_complete` 0; a
+later, smaller machine can still fit. Rows of a machine are not ranked or truncated, so no filesystem silently
+disappears from a machine that looks complete. With typical labels a full 33-machine inventory is about 12 MiB, so
+expect the last machines to be omitted at that size; exclude mounts on the source or scrape those hosts directly.
+`MachineManagerStorageExportIncomplete` reports it. Legacy output alone is bounded only by its existing limits:
+1000 resource records with 64 values and labels near the 120-character cap are about 25 MiB, which already fails
+the scrape without any storage; keep resource records and values well below those caps.
 
 ## Freshness, unknowns and limits
 

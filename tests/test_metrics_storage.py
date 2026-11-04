@@ -11,6 +11,7 @@ from unittest import mock
 from mmtest import TempData, base_settings
 import mmprometheus as prom
 import mmprometheus_storage as storage_metrics
+import mmserve
 import mmstorage
 import mmstorage_io
 import storage_fixtures as fx
@@ -56,6 +57,12 @@ def dense(long=False):
         for row in io["devices"]:
             row["name"] = row["name"] + "x" * 110
     return fx.snapshot(capacity=fx.capacity_record(rows=rows), io=io)
+
+
+def completeness(text, storage):
+    """storage_export_complete per machine without building a dict of a multi-MiB exposition."""
+    return [int(re.search(r'^machine_manager_storage_export_complete\{machine_id="%s"\} ([01])$' % re.escape(m),
+                          text, re.M).group(1)) for m, _, _ in storage]
 
 
 def render(*storage, peers=()):
@@ -364,14 +371,83 @@ class StorageBudget(unittest.TestCase):
         storage = self.machines(33, dense(long=True))
         text = render(*storage)
         self.assertLessEqual(storage_bytes(text), storage_metrics.STORAGE_TEXT_BYTES)
-        complete = [metric(text, "storage_export_complete", machine_id=m) for m, _, _ in storage]
+        complete = completeness(text, storage)
         self.assertEqual(complete[0], 1, "the local machine comes first and is exported")
         self.assertIn(0, complete)
         self.assertEqual(complete, sorted(complete, reverse=True), "equal machines fill the budget in order")
         exported = sum(complete)
-        self.assertEqual(len([k for k in samples(text) if k.startswith("machine_manager_storage_filesystem_size_bytes")]),
-                         exported * mmstorage.RECORDS_MAX)
+        self.assertEqual(text.count("\nmachine_manager_storage_filesystem_size_bytes{"), exported * mmstorage.RECORDS_MAX)
         self.assertLess(len(text.encode("utf-8")), 9 << 20)
+
+
+STATE_FAMILIES = {"machine_manager_storage_" + n for n in
+                  ("snapshot_fresh", "snapshot_timestamp_seconds", "inventory_state", "export_complete")}
+
+
+def state_bytes(text):
+    return sum(len(line.encode("utf-8")) + 1 for line in text.splitlines()
+               if re.search(r"machine_manager_\w+", line).group() in STATE_FAMILIES)
+
+
+def big_resources(count, values=64):
+    """Legacy resource records near the label caps: 120-character id/parent/location, 64 numeric values each."""
+    return document(*[resource(id="i" * 116 + "%04d" % i, parent="p" * 116 + "%04d" % i, location="l" * 120,
+                               values=[{"key": "v%d" % v, "value": v} for v in range(values)])
+                      for i in range(count)])
+
+
+class StorageResponseBudget(unittest.TestCase):
+    machines = StorageBudget.machines
+
+    complete = staticmethod(completeness)
+
+    def test_budget_is_what_legacy_text_leaves_under_the_response_target(self):
+        self.assertEqual(storage_metrics.RESPONSE_TEXT_BYTES, mmserve.RESPONSE_BYTES - (1 << 20))
+        self.assertEqual(storage_metrics.budget_for(0).limit, storage_metrics.STORAGE_TEXT_BYTES)
+        self.assertEqual(storage_metrics.budget_for(10 << 20).limit, 5 << 20)
+        self.assertEqual(storage_metrics.budget_for(15 << 20).limit, 0)
+        self.assertEqual(storage_metrics.budget_for(40 << 20).limit, 0)
+
+    def test_machine_that_exactly_fills_the_budget_is_exported(self):
+        storage = self.machines(3)
+        full = render(*storage)
+        exact = storage_bytes(full)  # actual storage text, one header per family
+        with mock.patch.object(storage_metrics, "STORAGE_TEXT_BYTES", exact):
+            self.assertEqual(render(*storage), full)
+        with mock.patch.object(storage_metrics, "STORAGE_TEXT_BYTES", exact - 1):
+            short = render(*storage)
+        self.assertEqual(self.complete(short, storage), [1, 1, 0])
+        self.assertLessEqual(storage_bytes(short), exact - 1)
+
+    def test_full_legacy_text_leaves_only_state_series(self):
+        storage = self.machines(2)
+        legacy = render()
+        with mock.patch.object(storage_metrics, "RESPONSE_TEXT_BYTES", len(legacy.encode("utf-8"))):
+            text = render(*storage)
+        self.assertEqual(self.complete(text, storage), [0, 0])
+        self.assertEqual(len(text.encode("utf-8")), len(legacy.encode("utf-8")) + state_bytes(text))
+        self.assertEqual([l for l in text.splitlines() if re.search(r"machine_manager_\w+", l).group() not in FAMILIES],
+                         legacy.splitlines())
+
+    def test_large_legacy_resources_plus_storage_stay_under_the_response_target(self):
+        # A 2 MiB response target keeps memory small; legacy text takes over half of it, as 8+ MiB would of 15 MiB.
+        target = 2 << 20
+        storage = self.machines(4, dense(long=True))
+        with mock.patch.object(storage_metrics, "RESPONSE_TEXT_BYTES", target):
+            text = prom.render(MID, machine(), big_resources(48), (), NOW, base_settings(), storage=storage)[0]
+        total = len(text.encode("utf-8"))
+        legacy_bytes = total - storage_bytes(text)  # legacy lines are unchanged by storage (golden test)
+        self.assertGreater(legacy_bytes, target // 2)
+        self.assertLessEqual(total, target + state_bytes(text))
+        self.assertLessEqual(storage_bytes(text) - state_bytes(text), target - legacy_bytes)
+        complete = self.complete(text, storage)
+        self.assertEqual(complete, sorted(complete, reverse=True))
+        self.assertIn(0, complete)
+        self.assertIn(1, complete)
+        self.assertEqual(text.count("\nmachine_manager_storage_filesystem_size_bytes{"),
+                         sum(complete) * mmstorage.RECORDS_MAX)
+        for ident, _, _ in storage:
+            self.assertIn('machine_manager_storage_snapshot_fresh{machine_id="%s"} 1' % ident, text)
 
 
 class StorageExport(TempData):

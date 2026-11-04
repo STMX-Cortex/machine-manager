@@ -6,14 +6,17 @@ defensive anyway: malformed rows are skipped, unknown values are absent (never z
 snapshot exports only freshness 0, its source time when known, and UNKNOWN inventory state. Each filesystem
 and device is its own series; nothing is summed across filesystems, capacity groups or devices.
 
-Storage text has one byte budget per exposition (STORAGE_TEXT_BYTES), filled in tuple order (local first, then
-peers). A machine whose filesystem/device series would exceed it exports none of them (never part of a machine)
-and reports storage_export_complete 0; freshness, time and inventory state series are always exported.
+Storage text has one byte budget per exposition, filled in tuple order (local first, then peers):
+min(STORAGE_TEXT_BYTES, RESPONSE_TEXT_BYTES - legacy bytes), never negative. A machine whose filesystem/device
+series would exceed it exports none of them (never part of a machine) and reports storage_export_complete 0;
+freshness, time, inventory state and completeness series are always exported, so storage never pushes the response
+past RESPONSE_TEXT_BYTES by more than those small series.
 """
 import math
 
 ROWS_MAX = 128  # mmstorage.RECORDS_MAX: devices and filesystems, independently
-STORAGE_TEXT_BYTES = 8 << 20  # half of mm serve's 16 MiB response cap; the rest stays for legacy families
+STORAGE_TEXT_BYTES = 8 << 20  # at most half of mm serve's 16 MiB response cap
+RESPONSE_TEXT_BYTES = 15 << 20  # whole-exposition target: 1 MiB headroom under mm serve/Prometheus 16 MiB caps
 STATES = ("OK", "PARTIAL", "UNKNOWN")
 SCOPES = ("whole_device", "driver")
 CAPACITY = (("total_bytes", "size_bytes", "Filesystem size in bytes."),
@@ -87,6 +90,12 @@ class Budget:
     def __init__(self, limit=None):
         self.limit = STORAGE_TEXT_BYTES if limit is None else limit
         self.used = 0
+        self.headers, self.reserved = set(), set()  # completeness families/series already paid for
+
+
+def budget_for(legacy_bytes):
+    """Storage budget left beside legacy_bytes of already-rendered exposition text."""
+    return Budget(max(0, min(STORAGE_TEXT_BYTES, RESPONSE_TEXT_BYTES - legacy_bytes)))
 
 
 class _Pending:
@@ -142,8 +151,9 @@ def _state(out, budget, machine_id, snapshot, fresh):
     if not is_fresh:
         return None
     key, line = out.sample(COMPLETE[0], labels, 0)
-    if key not in out.seen:
-        budget.used += _size(out, COMPLETE[1], key, line, set())  # reserved now, exported after measurement
+    if key not in out.seen and key not in budget.reserved:  # reserved now (header once), exported after measurement
+        budget.reserved.add(key)
+        budget.used += _size(out, COMPLETE[1], key, line, budget.headers)
     return docs
 
 
