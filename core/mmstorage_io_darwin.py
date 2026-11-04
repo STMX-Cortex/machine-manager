@@ -10,7 +10,9 @@ import mmstorage as storage
 import mmstorage_darwin as mac
 import mmstorage_io as model
 
-IOREG = ['/usr/sbin/ioreg', '-a', '-r', '-c', 'IOBlockStorageDriver', '-d', '2']
+# -l is required: without it ioreg prints properties only for the matched drivers, never the child IOMedia's
+# BSD Name/Whole, so no whole-media mapping could be proven on a real host.
+IOREG = ['/usr/sbin/ioreg', '-a', '-l', '-r', '-c', 'IOBlockStorageDriver', '-d', '2']
 REGISTRY_DEPTH = 32
 STAT_KEYS = ('Bytes (Read)', 'Bytes (Write)', 'Operations (Read)', 'Operations (Write)')
 

@@ -12,6 +12,7 @@ COUNTERS = ('read_bytes', 'write_bytes', 'read_ops', 'write_ops')
 RATE_KEYS = ('read_bytes_per_s', 'write_bytes_per_s', 'read_ops_per_s', 'write_ops_per_s')
 RATE_REASONS = (*storage.REASONS, 'baseline_missing', 'counter_reset', 'identity_changed', 'interval_invalid')
 SCOPES = ('whole_device', 'driver')
+RATE_MAX = MAX_COUNTER * 1000  # schema maximum: a full uint64 delta over the 1 ms minimum interval
 
 
 def _number(value, low=0, high=2**53 - 1):
@@ -43,7 +44,10 @@ def rates(before, after, elapsed_s):
         return dict(result, reason='read_failed')
     if any(after[k] < before[k] for k in COUNTERS):
         return dict(result, reason='counter_reset')
-    return {'rates': {r: (after[k] - before[k]) / elapsed_s for k, r in zip(COUNTERS, RATE_KEYS)}, 'reason': None}
+    values = {r: (after[k] - before[k]) / elapsed_s for k, r in zip(COUNTERS, RATE_KEYS)}
+    if not all(_number(v, 0, RATE_MAX) for v in values.values()):
+        return dict(result, reason='invalid_data')  # float rounding at the uint64/1 ms edge; never an unbounded rate
+    return {'rates': values, 'reason': None}
 
 
 def _safe(value, limit=1024):
@@ -176,7 +180,7 @@ def valid(record):
         if all(v is None for v in rv.values()):
             if d['rate_reason'] not in RATE_REASONS:
                 return False
-        elif (any(not _number(v, 0, MAX_COUNTER * 1000) for v in rv.values()) or d['rate_reason'] is not None
+        elif (any(not _number(v, 0, RATE_MAX) for v in rv.values()) or d['rate_reason'] is not None
               or d['interval_s'] is None or missing):
             return False
         ids.append(d['id'])

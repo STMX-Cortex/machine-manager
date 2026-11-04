@@ -435,7 +435,8 @@ are counter-source identities, not the capacity collector's UUID/WWN hardware id
 ### Mac source and APFS scope
 
 A bounded worker reads `kern.bootsessionuuid` and invokes fixed read-only argv
-`/usr/sbin/ioreg -a -r -c IOBlockStorageDriver -d 2`. Only `Bytes (Read)`, `Bytes (Write)`,
+`/usr/sbin/ioreg -a -l -r -c IOBlockStorageDriver -d 2`; `-l` is needed for the child IOMedia's
+`BSD Name`/`Whole` properties. Only `Bytes (Read)`, `Bytes (Write)`,
 `Operations (Read)` and `Operations (Write)` from `Statistics` are used. Byte counts are
 already bytes. Other registry properties, serials and user labels are discarded.
 

@@ -79,6 +79,14 @@ class Arithmetic(unittest.TestCase):
         after = model.counters(model.MAX_COUNTER, 0, 0, 0)
         self.assertEqual(model.rates(before, after, 1)['rates']['read_bytes_per_s'], 3)
 
+    def test_full_uint64_delta_at_minimum_interval_stays_within_the_validated_bound(self):
+        zero, full = model.counters(0, 0, 0, 0), model.counters(*(model.MAX_COUNTER,) * 4)
+        result = model.rates(zero, full, .001)  # float division rounds above MAX_COUNTER * 1000
+        self.assertEqual(result, {'rates': dict.fromkeys(model.RATE_KEYS), 'reason': 'invalid_data'})
+        rec = observed(snapshot([row(count=zero)]), snapshot([row(tick=1_001_000_000, count=full)]))
+        self.assertTrue(model.valid(rec))
+        self.assertEqual(rec['devices'][0]['rate_reason'], 'invalid_data')
+
 
 class Records(unittest.TestCase):
     def test_independent_versioned_schema_and_source_timestamps(self):
@@ -307,7 +315,7 @@ class Mac(unittest.TestCase):
             mac.parse_ioreg(data)
 
     def test_fixed_query_bounds_children_to_driver_and_media_levels(self):
-        self.assertEqual(mac.IOREG, ['/usr/sbin/ioreg', '-a', '-r', '-c', 'IOBlockStorageDriver', '-d', '2'])
+        self.assertEqual(mac.IOREG, ['/usr/sbin/ioreg', '-a', '-l', '-r', '-c', 'IOBlockStorageDriver', '-d', '2'])
 
     def test_registry_child_inherits_owned_process_group_and_has_byte_bound(self):
         p = mock.Mock()
@@ -428,6 +436,8 @@ class NativeMac(unittest.TestCase):
         self.assertTrue(model.snapshot_valid(doc))
         self.assertTrue(doc['devices'], 'no IOBlockStorageDriver entries')
         self.assertTrue(any(d['reason'] is None for d in doc['devices']), doc)
+        # Every Mac boots from a whole disk behind a storage driver; the fixed query must prove that mapping.
+        self.assertTrue(any(d['scope'] == 'whole_device' and d['name'].startswith('/dev/disk') for d in doc['devices']), doc)
 
     def test_real_two_sample_driver_rates_are_finite_and_nonnegative(self):
         rec = collector.collect('test-machine', .1)
