@@ -369,10 +369,12 @@ def _assemble(machine_id, now, data, include, exclude, work):
             continue
         samples.append((path, row, result, failure))
     # Probe capacity first: optional diskutil info cannot starve the root capacity sample.
-    # Unique mounted devices with missing UUIDs may supply snapshot/container facts.
+    # Mounted devices with missing UUIDs, and APFS mounts outside `apfs list` membership, may supply
+    # snapshot/container facts. Recent `diskutil list` reports a mounted root snapshot with a VolumeUUID
+    # but no container, so a known UUID alone does not prove live-volume identity or membership.
     for path, row, _, _ in samples:
         dev = row["dev"]
-        if (dev and dev not in fsuuids and dev not in info
+        if (dev and dev not in info and (dev not in fsuuids or (row["fs_type"] == "apfs" and dev not in volumes))
                 and not common._under_automount(automounts, path)):
             value, failure = work("--info", dev, PROBE_TIMEOUT)
             info[dev] = value or {}

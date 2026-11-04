@@ -202,8 +202,9 @@ available. Read-only local volumes remain eligible.
 
 For each selected path a worker opens an **O_PATH** descriptor, reads its kernel `mnt_id` from fdinfo, and checks
 that ID against the selected mountinfo candidates before taking capacity. An unselected overmount supplies no
-capacity sample. The parent resolves candidates using the actual mount ID and device, independent of row order
-or mount-ID magnitude. Hidden child paths cannot supply a covering filesystem's capacity. Unknown/replaced
+capacity sample. The worker takes that mount's device from a fresh mountinfo row, not from `fstat`: Btrfs
+reports a per-subvolume `st_dev` that differs from the mountinfo major:minor. The parent resolves candidates
+using the actual mount ID and device, independent of row order or mount-ID magnitude. Hidden child paths cannot supply a covering filesystem's capacity. Unknown/replaced
 mounts are omitted with PARTIAL/read_failed rather than attributed to the old filesystem.
 
 Capacity uses `fstatvfs` on the pinned descriptor: block counts times `f_frsize`. The worker reopens the path and
@@ -270,7 +271,10 @@ include `capacity_group`; JSON includes device records and all relationships.
   filesystems have filesystem records; unmounted volumes have no invented mount/capacity.
 - `/usr/sbin/diskutil apfs list -plist` supplies actual container/volume UUID membership
   when APFS is mounted. Optional `diskutil info -plist diskN...` queries supply missing
-  mounted volume/snapshot facts. Only validated device identifiers enter fixed argument
+  mounted volume/snapshot facts. They also run for mounted APFS devices outside `apfs list`
+  membership: macOS 26+ lists the sealed root snapshot with a VolumeUUID but no container,
+  so a known UUID alone does not prove live-volume identity or container membership.
+  Only validated device identifiers enter fixed argument
   arrays, never shell text or user labels. No raw device is opened for data.
 - Each selected path gets its own worker, opening an **O_EVTONLY**, no-follow descriptor.
   `fstatfs64` supplies fsid, mount path, filesystem type, local device identity and counters.
