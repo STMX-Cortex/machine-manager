@@ -18,6 +18,7 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Monitoring HTTP | `core/mmserve.py` | MONITORING.md; foreground loopback listener, fixed read-only paths, bounded connections/deadlines, filtered status with source time; no collection or control |
 | Private transport | `core/mmtailscale.py` | TAILSCALE.md; explicit foreground SSH tunnel over an owner-managed tailnet, fixed loopback forward, strict host keys, no profile/data writes; dry-run prints argv/URL |
 | Shared storage model | `core/mmstorage.py` | STORAGE.md and `storage.schema.json`; pure identities/capacity/selection/semantic validation; collectors and export remain separate scopes |
+| Mac storage collector | `core/mmstorage_darwin.py` | STORAGE.md; bounded MNT_NOWAIT/diskutil discovery, descriptor probes and APFS container identities; actual-host dispatch in `mmstorage_collect.py` |
 | Linux storage collector | `core/mmstorage_linux.py` | STORAGE.md; explicit `mm storage`, bounded namespace/sysfs/udev discovery and pinned mount-ID capacity probes; no cache/control/export |
 
 ## Vectors
@@ -83,7 +84,8 @@ Storage scope 1 adds `storage_id`, `storage_capacity` and `storage_mounts` vecto
 values and exact-path selection. `storage.schema.json` also requires the semantic checks in `mmstorage.valid`:
 bounded/sorted unique records, resolved references, state/reason consistency, clean paths and capacity relations.
 Scope 2 adds `storage_linux_mounts` parser vectors and the explicit Linux collector; the shared contract itself
-enables no automatic runtime writer, fleet storage field or exporter.
+enables no automatic runtime writer, fleet storage field or exporter. Scope 3 adds portable Mac disk/APFS parser vectors
+and real macOS mount/diskutil tests; Linux keeps its native collector and the contract is unchanged.
 
 Profiles may use legacy `[ci]` or `[[pools]]` with unique ids, never both. Each listed pool has an independent worker,
 read cache, status record and alert namespace (`POOL:<id>:`); GitHub pools also have their own watched-run file.

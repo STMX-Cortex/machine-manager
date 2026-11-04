@@ -1,0 +1,29 @@
+{
+  "function": "storage_mac_apfs",
+  "case": "unknown-uuids",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "Containers": [
+      {
+        "ContainerReference": "disk3",
+        "Volumes": [
+          {
+            "DeviceIdentifier": "disk3s1",
+            "APFSVolumeUUID": "bad"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "volumes": {
+      "disk3s1": {
+        "volume_uuid": null,
+        "container": "disk3",
+        "container_uuid": null
+      }
+    },
+    "reason": null
+  }
+}

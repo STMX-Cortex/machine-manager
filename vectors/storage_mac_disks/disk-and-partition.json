@@ -1,0 +1,38 @@
+{
+  "function": "storage_mac_disks",
+  "case": "disk-and-partition",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "AllDisksAndPartitions": [
+      {
+        "DeviceIdentifier": "disk0",
+        "Size": 1000,
+        "Partitions": [
+          {
+            "DeviceIdentifier": "disk0s1",
+            "Size": 900,
+            "VolumeUUID": "11111111-1111-1111-1111-111111111111"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "disks": [
+      {
+        "dev": "disk0",
+        "size_bytes": 1000,
+        "uuid": null,
+        "volume_uuid": null
+      },
+      {
+        "dev": "disk0s1",
+        "size_bytes": 900,
+        "uuid": null,
+        "volume_uuid": "11111111-1111-1111-1111-111111111111"
+      }
+    ],
+    "reason": null
+  }
+}

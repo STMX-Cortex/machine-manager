@@ -387,9 +387,9 @@ class Cli(TempData):
         cli = load_cli()
         for flags in (["--json"], []):
             out = io.StringIO()
-            with contextlib.redirect_stdout(out), mock.patch.object(linux, "collect", return_value=rec) as collect:
+            with mock.patch.object(linux.sys, "platform", "linux"), contextlib.redirect_stdout(out), mock.patch.object(linux, "collect", return_value=rec) as collect:
                 self.assertEqual(cli.main(["storage", "--include", "/data disk", "--exclude", "/remote", *flags]), 0)
-            collect.assert_called_once_with(mmcore.machine_id(mmcore.load_profile()), include=["/data disk"], exclude=["/remote"])
+            collect.assert_called_once_with(mmcore.machine_id(mmcore.load_profile()), include=["/data disk"], exclude=["/remote"], timeout_s=5.0)
             if flags:
                 self.assertEqual(json.loads(out.getvalue()), rec)
             else:
@@ -406,7 +406,7 @@ class Cli(TempData):
             self.assertRegex(out.getvalue(), r'^E_(USAGE|STORAGE) .+; fix: .+')
         rec = linux._envelope("test-machine", 1800000000, "unsupported")
         out = io.StringIO()
-        with contextlib.redirect_stdout(out), mock.patch.object(linux, "collect", return_value=rec):
+        with mock.patch.object(linux.sys, "platform", "linux"), contextlib.redirect_stdout(out), mock.patch.object(linux, "collect", return_value=rec):
             self.assertEqual(cli.main(["storage", "--json"]), 1)
         self.assertEqual(json.loads(out.getvalue()), rec)
 

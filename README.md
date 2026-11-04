@@ -636,16 +636,16 @@ you add any resource with a profile entry, and a new kind of resource needs one 
    Each runs as its own program. Next feature: broader storage discovery (item 4).
    `mm` keeps the decisions: the slots,
    the placement, the guards and the usage meters across the fleet. Monitoring does not acquire control authority.
-4. **Storage: shared model and opt-in Linux collector implemented; Mac collector planned.** [STORAGE.md](STORAGE.md)
+4. **Storage: shared model and opt-in Linux/Mac collectors implemented.** [STORAGE.md](STORAGE.md)
    defines device/filesystem/shared-capacity identities, exact byte counts, unknown readings, bounded mount selection,
    a standalone schema and portable tests. `mm storage [--include PATH] [--exclude PATH] [--json]` now performs one
-   bounded read-only Linux inventory/capacity observation without changing supervisor state or exporting metrics.
-   Next, implement the Mac collector using that contract: discover mounted filesystems and report capacity and
-   available space for each, with stable identities and bounded record counts. Follow with device read/write byte and operation rates,
+   bounded read-only inventory/capacity observation on either platform without changing supervisor state or exporting metrics.
+   Mac APFS volumes retain separate capacities and share a container identity when proven; capacities are never summed
+   into a host or container total. Next, implement device read/write byte and operation rates,
    and optional latency or device-health readings where the platform exposes them. Keep filesystem capacity separate
    from device I/O: several mounts can share one device or storage pool. Missing or unsupported readings stay unknown.
    Collect and export the records across machines without changing storage or adding automatic storage actions.
-   Existing status/metrics still report only the main filesystem's capacity and free space per machine. Broader Linux
+   Existing status/metrics still report only the main filesystem's capacity and free space per machine. Broader Linux/Mac
    discovery is an explicit local command; fleet storage export, I/O readings and Grafana storage views remain separate scopes.
 
 ## Tests

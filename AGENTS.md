@@ -22,7 +22,7 @@ Existing private transports remain supported. Monitoring grants no remote contro
 | `mm ack ID` | silence an alert you handled, until it gets worse |
 | `mm place --kind K [--shards N] [--wide] [--agents N]` | where a job runs: MACHINE, POOL or WAIT |
 | `mm resources` | one line per resource (machine, pools, runners, services); files only, fast |
-| `mm storage [--include PATH] [--exclude PATH]` | one bounded Linux inventory/capacity read; `--json` for devices; STORAGE.md |
+| `mm storage [--include PATH] [--exclude PATH]` | one bounded Linux/Mac inventory/capacity read; `--json` for devices; STORAGE.md |
 | `mm tailscale --peer HOST.TAILNET.ts.net --user USER [--port 19877]` | foreground SSH tunnel; add `--dry-run --json` for a plan without writes/connections |
 | `mm settings show [KEY\|SECTION]` | the settings in force, each with its default (read-only) |
 | `mm wait [--min-level action]` | block until an unseen alert (run it under a monitor) |
