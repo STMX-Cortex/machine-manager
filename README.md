@@ -613,7 +613,7 @@ the CI pool; `GUARD_NEAR`, `GUARD_STOP` the CI budget.
 Exit codes: 0 ok; 1 nothing found or problems listed; 2 error (one `E_` line); 3 stale; 10 `POOL`; 20 `WAIT`;
 75 the supervisor restarts itself (`mm run` only).
 Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFILE`, `E_NO_PROFILE`, `E_SETTINGS`, `E_HOOKS`, `E_READINGS`,
-`E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`, `E_PLATFORM`, `E_SERVE`.
+`E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`, `E_PLATFORM`, `E_SERVE`, `E_STORAGE`.
 
 ## Roadmap
 
@@ -636,16 +636,17 @@ you add any resource with a profile entry, and a new kind of resource needs one 
    Each runs as its own program. Next feature: broader storage discovery (item 4).
    `mm` keeps the decisions: the slots,
    the placement, the guards and the usage meters across the fleet. Monitoring does not acquire control authority.
-4. **Storage across Linux and macOS: shared model implemented; collectors planned.** [STORAGE.md](STORAGE.md)
+4. **Storage: shared model and opt-in Linux collector implemented; Mac collector planned.** [STORAGE.md](STORAGE.md)
    defines device/filesystem/shared-capacity identities, exact byte counts, unknown readings, bounded mount selection,
-   a standalone schema and portable tests. It does not enable discovery or export. Next, implement separate Linux
-   and Mac collectors using that contract. Discover mounted filesystems and report capacity and available space
-   for each, with stable identities and bounded record counts. Follow with device read/write byte and operation rates,
+   a standalone schema and portable tests. `mm storage [--include PATH] [--exclude PATH] [--json]` now performs one
+   bounded read-only Linux inventory/capacity observation without changing supervisor state or exporting metrics.
+   Next, implement the Mac collector using that contract: discover mounted filesystems and report capacity and
+   available space for each, with stable identities and bounded record counts. Follow with device read/write byte and operation rates,
    and optional latency or device-health readings where the platform exposes them. Keep filesystem capacity separate
    from device I/O: several mounts can share one device or storage pool. Missing or unsupported readings stay unknown.
    Collect and export the records across machines without changing storage or adding automatic storage actions.
-   Today only the main filesystem's capacity and free space are reported per machine; broader discovery is separate
-   from the first Prometheus metrics export.
+   Existing status/metrics still report only the main filesystem's capacity and free space per machine. Broader Linux
+   discovery is an explicit local command; fleet storage export, I/O readings and Grafana storage views remain separate scopes.
 
 ## Tests
 

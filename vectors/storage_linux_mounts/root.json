@@ -1,0 +1,23 @@
+{
+ "function": "storage_linux_mounts",
+ "case": "root",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "text": "10 1 8:1 / / rw - ext4 /dev/test rw\n"
+ },
+ "expected": {
+  "mounts": [
+   {
+    "mount_id": 10,
+    "parent_id": 1,
+    "dev": "8:1",
+    "mount": "/",
+    "fs_type": "ext4",
+    "category": "local",
+    "read_only": false
+   }
+  ],
+  "reason": null
+ }
+}

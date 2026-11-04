@@ -22,6 +22,7 @@ Existing private transports remain supported. Monitoring grants no remote contro
 | `mm ack ID` | silence an alert you handled, until it gets worse |
 | `mm place --kind K [--shards N] [--wide] [--agents N]` | where a job runs: MACHINE, POOL or WAIT |
 | `mm resources` | one line per resource (machine, pools, runners, services); files only, fast |
+| `mm storage [--include PATH] [--exclude PATH]` | one bounded Linux inventory/capacity read; `--json` for devices; STORAGE.md |
 | `mm tailscale --peer HOST.TAILNET.ts.net --user USER [--port 19877]` | foreground SSH tunnel; add `--dry-run --json` for a plan without writes/connections |
 | `mm settings show [KEY\|SECTION]` | the settings in force, each with its default (read-only) |
 | `mm wait [--min-level action]` | block until an unseen alert (run it under a monitor) |
@@ -40,8 +41,7 @@ Add `--json` for one JSON object.
 
 ## Exit codes
 
-0 ok; 1 nothing found or problems listed; 2 error; 3 the supervisor is stale (wait, then retry);
-10 place=POOL (run the printed `do=` commands yourself, if allowed); 20 place=WAIT.
+0 ok; 1 nothing found or problems listed; 2 error; 3 stale supervisor (wait, then retry); 10 place=POOL (run printed `do=` commands yourself, if allowed); 20 place=WAIT.
 
 ## Words
 

@@ -1,0 +1,13 @@
+{
+ "function": "storage_linux_mounts",
+ "case": "duplicate-ids",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "text": "10 1 8:1 / / rw - ext4 /dev/test rw\n10 1 8:2 / /data rw - xfs /dev/other rw\n"
+ },
+ "expected": {
+  "mounts": [],
+  "reason": "invalid_data"
+ }
+}

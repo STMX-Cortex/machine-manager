@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 GROUPS = {
+    "storage_linux": ["test_storage_linux"],
     "storage": ["test_storage"],
     "tailscale": ["test_tailscale"],
     "dashboards": ["test_dashboards"],

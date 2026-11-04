@@ -1,0 +1,23 @@
+{
+ "function": "storage_linux_mounts",
+ "case": "network-private-options",
+ "settings": "base",
+ "settings_over": {},
+ "input": {
+  "text": "12 1 0:2 / /remote rw - nfs4 PRIVATE_SOURCE rw,password=PRIVATE_OPTION\n"
+ },
+ "expected": {
+  "mounts": [
+   {
+    "mount_id": 12,
+    "parent_id": 1,
+    "dev": "0:2",
+    "mount": "/remote",
+    "fs_type": "nfs4",
+    "category": "network",
+    "read_only": false
+   }
+  ],
+  "reason": null
+ }
+}

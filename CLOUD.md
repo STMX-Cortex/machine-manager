@@ -15,9 +15,10 @@ Multiple GitHub pools, general `command`/`static` adapters, and read-only fleet 
 `mm serve` provides loopback HTTP hosting; Prometheus configuration and systemd/launchd collection/hosting templates
 are in MONITORING.md. Live service managers, private peer hosting and production integrations still require the
 owner's target machines. Grafana fleet/resource dashboards and Prometheus alert rules/provisioning are in
-GRAFANA.md; real dashboard rendering and notification delivery need owner acceptance. Broader storage discovery
-remains roadmap work. Scope 1's pure shared storage model, schema, limits and mount-selection contract are in
-STORAGE.md; it enables no collectors, runtime storage writes or new metrics. Linux and Mac discovery are separate scopes.
+GRAFANA.md; real dashboard rendering and notification delivery need owner acceptance. Storage discovery and fleet
+export have separate scopes. Scope 1's pure shared storage model, schema, limits and mount-selection contract are in
+STORAGE.md. Scope 2 adds opt-in Linux discovery/capacity through `mm storage`, with bounded owned workers and no
+runtime cache/supervisor changes or new metrics. Mac discovery remains a separate scope; see STORAGE.md for target checks.
 Tailscale is the preferred private transport; TAILSCALE.md documents the opt-in `mm tailscale` SSH helper and
 per-peer service templates. Cloud fixtures do not authorize a tailnet login, policy changes or persistent tunnels.
 Use the README roadmap as the source when its details change.
