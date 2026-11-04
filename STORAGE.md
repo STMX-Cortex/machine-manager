@@ -532,15 +532,19 @@ collects, samples or writes. Peer caches are never served.
 control is the private transport, never a URL token) and `storage_stale_after_s` (1..3600, default 300). `mm collect`
 first collects statuses and writes `fleet.json` exactly as before. Then, for peers with `storage_url` only:
 
-1. It atomically writes the attempt marker `fleet-storage-attempt.json` in the data directory (mode 0600):
-   `{"kind": "fleet_storage_attempt", "schema_version": 1, "machine_id": "CENTRAL", "time": T}`. If that fails,
-   nothing is fetched and every storage peer is unavailable.
+1. It removes the old attempt marker `fleet-storage-attempt.json` in the data directory (an unlink needs no free
+   space), then atomically writes the new one (mode 0600):
+   `{"kind": "fleet_storage_attempt", "schema_version": 1, "machine_id": "CENTRAL", "time": T}`. If the unlink fails
+   (other than a missing file) or the write fails, nothing is fetched and every storage peer is unavailable; without
+   a marker every cached peer reads as not available. If the whole data directory becomes unwritable, so that even
+   the unlink fails, earlier readings expire by their age limits, the same as `fleet.json`.
 2. It creates `fleet-storage/` (0700) when missing and opens it without following links. A link or non-directory
    there is never read or written; every storage peer is then unavailable.
 3. Each fetch runs in the peer worker process (`core/mmstorage_fleet.py --fetch`): HTTP read (no redirects, 8 MiB
    limit), strict JSON parse and full validation all inside the wall timeout `timeout_s`, so a huge or wide response
-   costs only the worker. The worker prints only the canonical validated snapshot; the collector strict-parses and
-   validates that bounded output again. Status reads keep their own 1 MiB worker, unchanged.
+   costs only the worker. The worker checks source age with its clock read after the response arrives, and prints
+   only the canonical validated snapshot; the collector strict-parses and validates that bounded output again with
+   its own clock. Status reads keep their own 1 MiB worker, unchanged.
 4. It writes `fleet-storage/<id>.json` (new random temp file, mode 0600, fsync, rename, all relative to the open
    directory):
 

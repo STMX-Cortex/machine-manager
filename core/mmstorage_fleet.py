@@ -179,12 +179,22 @@ def worker_output(raw, cfg, now):
     return out
 
 
-def fetch(cfg, now):
+def fetch(cfg):
     """Fetch, parse and validate in the worker process, under the wall timeout timeout_s. Returns its canonical output;
-    the caller strict-parses and validates it again. URL and errors never reach arguments or messages."""
+    the caller strict-parses and validates it again with its own clock. URL and errors never reach arguments or
+    messages."""
     request = {"url": cfg["storage_url"], "timeout": cfg["timeout_s"], "id": cfg["id"],
-               "stale_after_s": cfg["storage_stale_after_s"], "now": now}
+               "stale_after_s": cfg["storage_stale_after_s"]}
     return mmfleet.worker(os.path.abspath(__file__), request, cfg["timeout_s"], SNAPSHOT_BYTES)
+
+
+def worker_main(request_bytes):
+    """The worker: HTTP read, then the clock is read when the response is complete (a slow request never makes a
+    current snapshot look future), then worker_output()."""
+    args = json.loads(request_bytes)
+    cfg = {"id": args["id"], "storage_stale_after_s": args["stale_after_s"]}
+    raw = mmfleet._http(args["url"], args["timeout"], SNAPSHOT_BYTES)
+    return worker_output(raw, cfg, time.time())
 
 
 def _cache_dir(create=False):
@@ -235,9 +245,15 @@ def collect(profile, now=None, fetcher=None):
     if not cfgs:
         return []
     clock = time.time if now is None else lambda: now
-    fetcher = fetcher or (lambda cfg: fetch(cfg, clock()))
+    fetcher = fetcher or (lambda cfg: fetch(cfg))
     central = mmcore.machine_id(profile)
     try:
+        # Remove the old marker first (needs no free space): if the new one cannot be written, no earlier cache
+        # entry stays fresh. Any unlink failure other than a missing file also stops the collection.
+        try:
+            os.unlink(mmcore.path(ATTEMPT))
+        except FileNotFoundError:
+            pass
         marker = {"kind": "fleet_storage_attempt", "schema_version": 1, "machine_id": central, "time": clock()}
         mmcore.write_atomic(mmcore.path(ATTEMPT), json.dumps(marker, allow_nan=False, sort_keys=True), mode=0o600)
     except (OSError, ValueError):
@@ -338,9 +354,6 @@ if __name__ == "__main__":
     if sys.argv[1:] != ["--fetch"]:
         sys.exit(2)
     try:
-        args = json.loads(sys.stdin.buffer.read(mmfleet.MAX_URL * 2))
-        cfg = {"id": args["id"], "storage_stale_after_s": args["stale_after_s"]}
-        sys.stdout.buffer.write(worker_output(mmfleet._http(args["url"], args["timeout"], SNAPSHOT_BYTES), cfg,
-                                              args["now"]))
+        sys.stdout.buffer.write(worker_main(sys.stdin.buffer.read(mmfleet.MAX_URL * 2)))
     except Exception:
         sys.exit(1)  # URLs and transport/validation exceptions never reach logs or output.

@@ -4,6 +4,7 @@ exporter reader. Collectors and peers are fakes (no real sampling or waits); the
 loopback fixture servers and skip when the command sandbox forbids sockets."""
 import contextlib
 import copy
+import errno
 import http.client
 import http.server
 import io as stdio
@@ -488,11 +489,62 @@ class Collect(TempData):
             with self.assertRaises(mmfleet.FleetError):
                 mmfleet.fetch(machine_config(status_url=base + "/status", timeout_s=10))  # status: 1 MiB, unchanged
             cfg = mmfleet.configs(self.fleet_profile(machine_config("peer-a", storage_url=base + "/good", timeout_s=10)))[0]
-            self.assertEqual(fleet.fetch(cfg, now), fleet.dumps(doc).encode(), "canonical output, not the raw body")
+            self.assertEqual(fleet.fetch(cfg), fleet.dumps(doc).encode(), "canonical output, not the raw body")
             for path in ("/stale", "/missing"):
                 cfg["storage_url"] = base + path
                 with self.subTest(path=path), self.assertRaises(mmfleet.FleetError):
-                    fleet.fetch(cfg, now)
+                    fleet.fetch(cfg)
+
+    def test_marker_write_failure_after_unlink_leaves_no_peer_fresh(self):
+        profile, good = self.fleet_profile(), snap("peer-a", NOW)
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(good).encode())
+        self.assertEqual(fleet.exported_snapshots(profile, NOW + 1)[0], ("peer-a", good, True))
+        original = mmcore.write_atomic
+
+        def full(target, text, mode=None):
+            if os.path.basename(target) == fleet.ATTEMPT:
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return original(target, text, mode)
+        fetcher = mock.Mock(return_value=fleet.dumps(good).encode())
+        with mock.patch.object(mmcore, "write_atomic", side_effect=full):
+            self.assertEqual(fleet.collect(profile, now=NOW + 10, fetcher=fetcher), [("peer-a", False)])
+        fetcher.assert_not_called()
+        self.assertFalse(Path(self.data, fleet.ATTEMPT).exists(), "the old marker was removed first")
+        self.assertEqual(self.cache()["collected_at"], NOW, "the old entry is still on disk")
+        self.assertEqual(fleet.exported_snapshots(profile, NOW + 11)[0], ("peer-a", None, False))
+
+    def test_marker_unlink_failure_fetches_nothing(self):
+        profile, good = self.fleet_profile(), snap("peer-a", NOW)
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(good).encode())
+        unlink = os.unlink
+
+        def refuse(path, *args, **kwargs):
+            if os.path.basename(str(path)) == fleet.ATTEMPT:
+                raise PermissionError(errno.EACCES, "denied")
+            return unlink(path, *args, **kwargs)
+        fetcher = mock.Mock(return_value=fleet.dumps(good).encode())
+        with mock.patch("os.unlink", side_effect=refuse):
+            self.assertEqual(fleet.collect(profile, now=NOW + 10, fetcher=fetcher), [("peer-a", False)])
+        fetcher.assert_not_called()
+        os.unlink(Path(self.data, fleet.ATTEMPT))
+        self.assertEqual(fleet.collect(profile, now=NOW + 20, fetcher=fetcher), [("peer-a", True)], "a missing marker is fine")
+
+    def test_worker_checks_freshness_with_the_clock_after_the_response(self):
+        clock = [NOW]
+        doc = snap("peer-a", NOW + 7)  # the peer wrote it while the 7 s request was running
+
+        def slow(url, timeout, limit):
+            clock[0] += 7
+            return fleet.dumps(doc).encode()
+        request = json.dumps({"url": "https://example.invalid/storage.json", "timeout": 10, "id": "peer-a",
+                              "stale_after_s": 300}).encode()
+        with mock.patch.object(mmfleet, "_http", side_effect=slow), mock.patch.object(fleet.time, "time",
+                                                                                      side_effect=lambda: clock[0]):
+            self.assertEqual(fleet.worker_main(request), fleet.dumps(doc).encode())
+        with self.assertRaises(mmfleet.FleetError):
+            fleet.worker_output(fleet.dumps(doc).encode(), {"id": "peer-a", "storage_stale_after_s": 300}, NOW)
+        self.assertEqual(fleet.collect(self.fleet_profile(), now=NOW + 7, fetcher=lambda cfg: fleet.dumps(doc).encode()),
+                         [("peer-a", True)], "the collector's later check uses its own clock")
 
     def test_wide_json_is_rejected_in_the_worker_not_parsed_by_the_collector(self):
         wide = b"[" + b"0," * 999999 + b"0]"  # 2 MB, inside the byte bound
@@ -514,7 +566,7 @@ class Collect(TempData):
     def run_collect(self, profile, storage_response, *flags):
         cli, out = load_cli(), stdio.StringIO()
         with mock.patch.object(mmfleet, "fetch", side_effect=lambda cfg: blob(status(cfg["id"], time=time.time()))), \
-                mock.patch.object(fleet, "fetch", side_effect=lambda cfg, now: storage_response(cfg)), \
+                mock.patch.object(fleet, "fetch", side_effect=lambda cfg: storage_response(cfg)), \
                 mock.patch("mmcore.load_profile", return_value=profile), contextlib.redirect_stdout(out):
             rc = cli.main(["collect", *flags])
         return rc, out.getvalue()
