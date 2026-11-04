@@ -3,8 +3,8 @@
 Scope 1 supplies `core/mmstorage.py`, `schemas/storage.schema.json`, acceptance fixtures and portable decision
 vectors. The module is pure: it does not discover storage, run commands, read mounts, write runtime files, or add
 metrics. Existing main-filesystem readings, safety thresholds, placement and supervisor behavior stay in place.
-Scopes 2 and 3 add the opt-in Linux and Mac collectors described below. Fleet collection/export and dashboards
-remain separate scopes. The shared model itself stays pure.
+Scopes 2 and 3 add the opt-in Linux and Mac collectors described below. Fleet storage export (`mm storage record`,
+`/storage.json`, `mm collect`) is below; dashboards and alerts are a separate scope. The shared model stays pure.
 
 ## Devices, filesystems and allocation domains
 
@@ -80,8 +80,8 @@ this model does not make network or unresponsive mounts safe to probe.
 
 ## Record and limits
 
-`schemas/storage.schema.json` specifies a standalone version-1 observation. The storage command prints it without
-writing a runtime cache; no automatic supervisor writer or fleet exporter is enabled yet.
+`schemas/storage.schema.json` specifies a standalone version-1 observation. `mm storage` prints it without writing a
+runtime cache. The supervisor never writes or reads storage; only `mm storage record` writes `storage.json` (below).
 Its required envelope fields are `schema_version`, `machine_id`, `time`, `state`, `reason`, `devices`, `filesystems`.
 `time` is the source observation's nonnegative finite Unix timestamp (at most `2**53 - 1`), not fleet fetch time.
 Future collectors must sample each batch without refreshing timestamps on retained old readings; per-reading
@@ -492,15 +492,104 @@ diskseq, suspend/resume and worst-case sampling latency/cleanup. Hosted fixtures
 API reads do not prove production integrations or exact hardware throughput. No mounts,
 services, queues, safety settings or production jobs are changed for these tests.
 
+## Fleet storage export
+
+```sh
+mm storage record [--include PATH]... [--exclude PATH]... [--interval SEC] [--json]
+```
+
+`record` takes one capacity observation (same collector, selection rules and limits as `mm storage`), then one I/O
+observation (same as `mm storage io`; interval 0.1..30, default 1), and atomically writes **`storage.json`** in the
+data directory, mode 0600. It is the only storage writer; schedule it on every host that exports storage (central
+and peers) with [mm-storage.timer](monitoring/systemd/mm-storage.timer) or
+[org.machine-manager.storage.plist](monitoring/launchd/org.machine-manager.storage.plist): every 60 s, no overlap.
+
+```json
+{"kind": "storage_snapshot", "schema_version": 1, "machine_id": "ID", "time": T, "capacity": {...}, "io": {...}}
+```
+
+`capacity` is a version-1 storage record and `io` a version-1 `storage_io` record, each passing its own validator,
+with the same `machine_id` as the envelope. `time` = min(capacity.time, io.time): the older source observation, never
+the write time. No other keys. `schemas/storage-snapshot.schema.json` embeds exact copies of both record schemas
+(tests keep them equal); `mmstorage_fleet.valid(doc)` adds the semantic checks. Text is masked/cleaned as in
+`mm storage`; a sub-record that masking would make invalid is written as UNKNOWN/`invalid_data`.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | written; both inventories OK, every capacity and every rate known |
+| 1 | written; some part PARTIAL, UNKNOWN or unavailable (exported as such) |
+| 2 | usage error, invalid identity/selection/interval (nothing collected or written), or `E_WRITE` |
+
+Plain output is one line: `storage_record=written path=storage.json capacity=STATE io=STATE filesystems=N devices=N`
+(`devices` counts I/O devices). `--json` prints the snapshot.
+
+**Serve.** `mm serve` answers `GET`/`HEAD /storage.json` with 200 `application/json`: the local snapshot,
+re-serialized (compact ASCII JSON), when it is valid, of this profile's machine id and fresh. Otherwise 503
+`storage snapshot unavailable`. Same loopback/Host/connection/limit rules as the other endpoints; serving never
+collects, samples or writes. Peer caches are never served.
+
+**Collect.** A `[[machines]]` entry may add `storage_url` (same rules as `status_url`, and **no query string**: access
+control is the private transport, never a URL token) and `storage_stale_after_s` (1..3600, default 300). `mm collect`
+first collects statuses and writes `fleet.json` exactly as before. Then, for peers with `storage_url` only:
+
+1. It removes the old attempt marker `fleet-storage-attempt.json` in the data directory (an unlink needs no free
+   space), then atomically writes the new one (mode 0600):
+   `{"kind": "fleet_storage_attempt", "schema_version": 1, "machine_id": "CENTRAL", "time": T}`. If the unlink fails
+   (other than a missing file) or the write fails, nothing is fetched and every storage peer is unavailable; without
+   a marker every cached peer reads as not available. If the whole data directory becomes unwritable, so that even
+   the unlink fails, earlier readings expire by their age limits, the same as `fleet.json`.
+2. It creates `fleet-storage/` (0700) when missing and opens it without following links. A link or non-directory
+   there is never read or written; every storage peer is then unavailable.
+3. Each fetch runs in the peer worker process (`core/mmstorage_fleet.py --fetch`): HTTP read (no redirects, 8 MiB
+   limit), strict JSON parse and full validation all inside the wall timeout `timeout_s`, so a huge or wide response
+   costs only the worker. The worker checks source age with its clock read after the response arrives, and prints
+   only the canonical validated snapshot; the collector strict-parses and validates that bounded output again with
+   its own clock. Status reads keep their own 1 MiB worker, unchanged.
+4. It writes `fleet-storage/<id>.json` (new random temp file, mode 0600, fsync, rename, all relative to the open
+   directory):
+
+```json
+{"kind": "fleet_storage", "schema_version": 1, "machine_id": "CENTRAL", "id": "PEER", "collected_at": T,
+ "snapshot": {...} or null, "error": null or "storage unavailable or invalid"}
+```
+
+A snapshot is accepted only when valid, its `machine_id` is the peer id, its source time is at most 5 s in the future
+and younger than `storage_stale_after_s`, and no text would change under masking (rejected, not rewritten, so ordering
+relations stay intact). Any failure writes `snapshot: null`; if even that write fails, the old entry is removed. If
+removal also fails, the old entry is older than the attempt marker and so never fresh. Plain machine lines gain
+`storage=OK|UNKNOWN` for peers with `storage_url`; exit 1 when any status or configured storage is unavailable.
+`--json` output and `fleet.json` are unchanged. Peers without `storage_url` are not fetched, so peers on older versions
+keep working.
+
+**Freshness.** Local: fresh while -5 <= now - time < 300 s (`STORAGE_FRESH_S`). Peer: the attempt marker is valid,
+`collected_at` >= its time, and collection age **and** source age are both in [-5, `storage_stale_after_s`).
+`mmstorage_fleet.exported_snapshots(profile, now)` gives the exporter `(machine_id, snapshot or None, fresh)`: the
+local machine first, only when `storage.json` exists (invalid or foreign: None), then each peer with `storage_url` in
+profile order. A missing/invalid cache entry (including `error` not null exactly when a snapshot is present), a missing
+or invalid marker, or a linked/non-directory `fleet-storage` gives None. Valid but stale snapshots are returned with
+fresh false; consumers export no measurements for them. It reads files only.
+
+**Limits.** One serialized snapshot is at most 8 MiB (`SNAPSHOT_BYTES`). If a record would exceed it, the larger
+sub-record (then the other) becomes the UNKNOWN/`truncated` envelope with its source time and empty arrays. Readers
+bound bytes (peer cache: 8 MiB + 4096; marker: 4096), depth 32, and reject duplicate keys, nonfinite numbers, links
+and non-regular files. Serving re-checks the 8 MiB bound. One collection takes at most about 2 x 8 x `timeout_s`
+(status then storage, 32 peers, 4 at a time); the collect unit allows 600 s.
+
+**Unchanged.** The supervisor, `status.json`, `fleet.json`, `/status.json`, existing metrics (including legacy
+main-filesystem `storage_size_bytes`/`storage_available_bytes`), guards, placement, settings and profile defaults.
+`mm storage` and `mm storage io` still write nothing. Capacities and I/O are never summed across filesystems,
+groups, devices or hosts.
+
 ## Next scopes and acceptance
 
 1. **Scopes 2 and 3 implemented:** opt-in Linux/Mac inventory/capacity; target-host acceptance remains.
 2. **Device I/O implemented:** explicit Linux/Mac counters/rates, resets and disappearing identities; target acceptance remains.
    No whole-device traffic is repeated for each filesystem.
-3. Fleet/status/export: explicit compatibility, freshness, payload/label limits and metrics; preserve legacy guards.
+3. **Fleet storage export implemented:** `mm storage record`, `/storage.json`, `mm collect` peer caches, freshness and
+   limits (above); legacy guards unchanged. Target-host timers/agents and private-network acceptance remain.
 4. Grafana views and then alerts from proven readings; optional hardware health later.
 
 ```sh
-python3 -I tests/run_tests.py storage_io storage_darwin storage_linux storage vectors
+python3 -I tests/run_tests.py storage_fleet storage_io storage_darwin storage_linux storage vectors
 python3 -I tests/run_vectors.py
 ```

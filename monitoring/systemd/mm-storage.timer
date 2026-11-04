@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the machine-manager storage snapshot without overlapping runs
+
+[Timer]
+OnStartupSec=10
+OnUnitInactiveSec=60
+AccuracySec=5
+Unit=mm-storage.service
+
+[Install]
+WantedBy=timers.target

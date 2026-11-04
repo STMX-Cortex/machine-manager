@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>org.machine-manager.storage</string>
+  <key>ProgramArguments</key><array>
+    <string>/ABS/PYTHON3</string><string>-I</string><string>/ABS/MACHINE_MANAGER/bin/mm</string>
+    <string>storage</string><string>record</string><string>--profile</string><string>/ABS/PROFILE.toml</string>
+    <string>--data</string><string>/ABS/MM_DATA</string>
+  </array>
+  <key>RunAtLoad</key><true/><key>StartInterval</key><integer>60</integer>
+  <key>ExitTimeOut</key><integer>120</integer><key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>/ABS/MONITORING/mm-storage.log</string>
+  <key>StandardErrorPath</key><string>/ABS/MONITORING/mm-storage.err.log</string>
+</dict></plist>
