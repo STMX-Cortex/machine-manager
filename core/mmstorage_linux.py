@@ -252,14 +252,25 @@ def _mount_id(fd):
     raise ValueError("mount identity unavailable")
 
 
+def _mount_dev(mount_id):
+    """The mountinfo major:minor of one live mount. Btrfs fstat reports a per-subvolume st_dev instead."""
+    for row in parse_mountinfo(_read("/proc/self/mountinfo", MOUNT_BYTES))["mounts"]:
+        if row["mount_id"] == mount_id:
+            return row["dev"]
+    return None
+
+
 def probe(path, mount_ids):
     """Worker-only: pin an O_PATH descriptor, identify its mount, read capacity, recheck the path."""
     result = {"mount_id": None, "dev": None, "capacity": model.capacity(), "reason": "read_failed"}
     fd = os.open(path, os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
-        result["mount_id"] = _mount_id(fd)
-        st = os.fstat(fd)
-        result["dev"] = "%s:%s" % (os.major(st.st_dev), os.minor(st.st_dev))
+        mount_id = _mount_id(fd)
+        # Compare the same kernel field that discovery recorded; a vanished row is an unknown mount, not a sample.
+        dev = _mount_dev(mount_id)
+        if dev is None:
+            return result
+        result.update(mount_id=mount_id, dev=dev)
         if result["mount_id"] not in mount_ids:
             return dict(result, reason="unsupported")  # identity only: never sample an unselected overmount
         try:
