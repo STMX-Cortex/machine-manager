@@ -13,7 +13,7 @@ The three dashboards work for Linux and macOS with the metrics in [METRICS.md](M
 | --- | --- |
 | Fleet (`mm-fleet`) | Endpoint reachability, source freshness/state/mode, memory, CPU, main-filesystem capacity, queues, source alerts, snapshot age, optional PSI/compressor/swap, firing Prometheus alerts |
 | Resources (`mm-resources`) | Local resource freshness/state, capacity/total/reserve in native units, running/queued counts, numeric adapter values, resources document validity |
-| Storage (`mm-storage`) | Storage snapshot freshness/age and inventory state, a per-filesystem table (mount, type, capacity group, size, available, used fraction, known, read-only), per-filesystem available bytes and used fraction, per-device read/write bytes and operations per second, firing storage alerts |
+| Storage (`mm-storage`) | Storage snapshot freshness/age (graphs and current table, with export completeness) and inventory state, a per-filesystem table (mount, type, capacity group, size, available, used fraction, known, read-only), per-filesystem available bytes and used fraction, per-device read/write bytes and operations per second, firing storage alerts |
 
 Select a **Producer** (scrape endpoint) and **Machine**. Resource panels also filter by kind, id and capacity unit.
 Parent and location remain in labels and legends, distinguishing equal runner/pool ids. The job is the supplied
@@ -110,13 +110,16 @@ promtool test rules monitoring/tests/alerts.test.yml
 | ResourceReserve | Resource capacity left at or below its own reserve, 5 minutes | warning |
 | StorageStale | Storage snapshot freshness 0 with a working endpoint, 10 minutes | warning |
 | FilesystemLow | One filesystem's available/size below 10%, fresh snapshot, 15 minutes; size must be positive | warning |
-| StorageIncomplete | Fresh snapshot with a PARTIAL or UNKNOWN capacity or I/O inventory, 30 minutes | warning |
+| StorageIncomplete | Fresh snapshot with a PARTIAL or UNKNOWN capacity or I/O inventory (either, continuously), 30 minutes | warning |
+| StorageExportIncomplete | Fresh snapshot whose filesystem/device series the exporter omitted for its byte budget, 30 minutes | warning |
 
 Every name has the prefix `MachineManager`. These are monitoring defaults, independent of controller thresholds;
 review them against the owner's workload. Machine measurement/state alerts require a fresh source and successful
 scrape. Resource reserve joins preserve resource, parent, location and native unit. FilesystemLow keeps the
-filesystem labels (mount, type, capacity group) and fires per filesystem; a stale storage snapshot silences it and
-raises StorageStale instead. Storage alerts only exist for machines that export storage snapshots. Sustained
+filesystem labels (id, mount, type, capacity group) and fires per filesystem; a stale storage snapshot silences it and
+raises StorageStale instead. Storage alerts only exist for machines that export storage snapshots. StorageIncomplete
+keeps one alert per machine and source while the state moves between PARTIAL and UNKNOWN. StorageExportIncomplete
+means the exporter's storage byte budget omitted that machine's filesystem and device series (METRICS.md). Sustained
 conditions have a pending period before firing and resolve when the expression stops matching. Missing numerical
 measurements do not become low-capacity alarms. Endpoint failures suppress source/workload alerts rather than
 reviving old readings. The firing-alert table includes all machines on the selected producers so endpoint problems

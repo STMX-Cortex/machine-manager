@@ -71,6 +71,7 @@ machine when `storage.json` exists (written by `mm storage record`) and each pee
 | `storage_snapshot_fresh` | `machine_id` | Valid and fresh storage snapshot (1/0) |
 | `storage_snapshot_timestamp_seconds` | `machine_id` | Snapshot source time (the older of capacity and I/O), Unix seconds, even when stale |
 | `storage_inventory_state` | `machine_id`, `source` (`capacity`/`io`), `state` | One hot OK/PARTIAL/UNKNOWN; stale/missing is UNKNOWN |
+| `storage_export_complete` | `machine_id` | Fresh snapshots only: 1 when all its filesystem/device series fit the byte budget, 0 when all were omitted |
 | `storage_filesystem_capacity_known` | Filesystem labels | 1 when all capacity values are known, else 0 |
 | `storage_filesystem_size_bytes`, `_free_bytes`, `_available_bytes`, `_used_bytes` | Filesystem labels | Exact byte counts (STORAGE.md); each only when known |
 | `storage_filesystem_read_only` | Filesystem labels | 1/0; absent when unknown or mixed |
@@ -90,11 +91,20 @@ measured zero (idle device, zero-size filesystem) stays zero. Freshness is decid
 
 The exporter **never sums**: there is no host, capacity-group, container or device total. Volumes in one capacity
 group share space, so adding their sizes double counts it; partition and disk I/O can overlap in the same way.
-Each snapshot has at most 128 filesystems and 128 devices, so at most 6 x 128 + 5 x 128 + 8 = 1416 storage series
+Each snapshot has at most 128 filesystems and 128 devices, so at most 6 x 128 + 5 x 128 + 9 = 1417 storage series
 per machine; 33 machines stay below 50 000. Labels are masked, cleaned, capped at 120 characters and escaped like
-the others. With typical labels a full 33-machine inventory is about 12 MiB of text; labels at the 120-character
-cap can exceed the 16 MiB scrape body and `mm serve` response caps, which then fail the scrape (`up=0`) rather
-than truncate it.
+the others.
+
+**Byte budget.** Dense inventories with long labels can reach about 18-21 MiB for 33 machines, more than the 16 MiB
+`mm serve` response cap and Prometheus `body_size_limit`; an oversized body would fail the whole scrape (`up=0`).
+Storage text therefore has one budget of 8 MiB per exposition (`STORAGE_TEXT_BYTES`), leaving the other half for
+the legacy families. Freshness, source time, inventory state and `storage_export_complete` are always exported.
+Filesystem and device series are then added machine by machine in snapshot order (local first, then peers in
+profile order). A machine whose series would exceed the remaining budget exports **none** of them, never part of a
+machine, and reports `storage_export_complete` 0; a later, smaller machine can still fit. Rows of a machine are
+not ranked or truncated, so no filesystem silently disappears from a machine that looks complete. With typical
+labels a full 33-machine inventory is about 12 MiB, so expect the last machines to be omitted at that size; exclude
+mounts on the source or scrape those hosts directly. `MachineManagerStorageExportIncomplete` reports it.
 
 ## Freshness, unknowns and limits
 
