@@ -18,7 +18,9 @@ FAKE_UUID = re.compile(r"^([0-9a-f])\1{7}-|^(0123|1111|aaaa|4f1c2d3e)")
 
 def files():
     for d, dirs, names in os.walk(mmtest.CODE):
-        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS)
+        # A sub-folder with its own .git (file or folder) is another checkout, such as a local review
+        # worktree; its files are not this repository's content, and their fixtures would match here.
+        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS and not os.path.lexists(os.path.join(d, x, ".git")))
         for n in sorted(names):
             if n == ".git":
                 continue
@@ -45,6 +47,31 @@ class Public(unittest.TestCase):
                     self.assertEqual(list(files()), [("public.txt", "ordinary content\n")])
                     self.test_generic_leaks()
                     with open(public, "w") as f:
+                        f.write("/home/private-user/project\n")
+                    with self.assertRaises(AssertionError):
+                        self.test_generic_leaks()
+
+    def test_nested_checkout_is_skipped_but_its_parent_folder_is_scanned(self):
+        os.makedirs(mmtest.TMP_BASE, exist_ok=True)
+        for directory in (False, True):
+            with self.subTest(git_is_directory=directory), tempfile.TemporaryDirectory(dir=mmtest.TMP_BASE) as root:
+                nested = os.path.join(root, ".claude", "worktrees", "review")
+                os.makedirs(nested)
+                git = os.path.join(nested, ".git")
+                if directory:
+                    os.makedirs(git)
+                else:
+                    with open(git, "w") as f:
+                        f.write("gitdir: elsewhere\n")
+                with open(os.path.join(nested, "fixture.txt"), "w") as f:
+                    f.write("/home/private-user/project\n")
+                notes = os.path.join(root, ".claude", "notes.md")
+                with open(notes, "w") as f:
+                    f.write("ordinary content\n")
+                with patch.object(mmtest, "CODE", root):
+                    self.assertEqual(list(files()), [(os.path.join(".claude", "notes.md"), "ordinary content\n")])
+                    self.test_generic_leaks()
+                    with open(notes, "w") as f:
                         f.write("/home/private-user/project\n")
                     with self.assertRaises(AssertionError):
                         self.test_generic_leaks()
