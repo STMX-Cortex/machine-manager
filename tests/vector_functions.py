@@ -18,6 +18,9 @@ import mmreplay
 import mmstorage
 import mmstorage_linux
 import mmstorage_darwin
+import mmstorage_io
+import mmstorage_io_linux
+import mmstorage_io_darwin
 
 
 def _drop(d, *keys):
@@ -46,6 +49,9 @@ def _read_usage(i, s):
 
 
 FUNCTIONS = {
+    "storage_io_rates": lambda i, s: mmstorage_io.rates(**i),
+    "storage_linux_stat": lambda i, s: mmstorage_io_linux.parse_stat(i["text"]),
+    "storage_mac_ioreg": lambda i, s: mmstorage_io_darwin.parse_ioreg(i),
     "storage_mac_disks": lambda i, s: mmstorage_darwin.parse_disks(i),
     "storage_mac_apfs": lambda i, s: mmstorage_darwin.parse_apfs(i),
     "storage_linux_mounts": lambda i, s: mmstorage_linux.parse_mountinfo(i["text"]),

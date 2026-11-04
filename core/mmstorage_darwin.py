@@ -55,12 +55,12 @@ def _safe(value, path=False, limit=model.TEXT_MAX):
     return (model._path(value) if path else model._text(value, limit)) and mmtext.mask(value) == value
 
 
-def _bounded_tree(doc):
+def _bounded_tree(doc, depth_max=12):
     stack, count = [(doc, 0)], 0
     while stack:
         value, depth = stack.pop()
         count += 1
-        if count > NODES_MAX or depth > 12:
+        if count > NODES_MAX or depth > depth_max:
             raise common.Cut("metadata tree limit")
         if isinstance(value, dict):
             stack.extend((v, depth + 1) for v in value.values())
@@ -69,7 +69,7 @@ def _bounded_tree(doc):
     return doc
 
 
-def _plist(raw):
+def _plist(raw, depth_max=12):
     # diskutil emits XML; reject entities and binary offset-table expansion before decoding.
     if not isinstance(raw, bytes) or len(raw) > PLIST_BYTES:
         raise common.Cut("metadata byte limit")
@@ -83,9 +83,9 @@ def _plist(raw):
             depth -= 1
         elif not tag[0].endswith(b'/>'):
             depth += 1
-        if depth > 12 or depth < 0:
+        if depth > depth_max or depth < 0:
             raise common.Cut("metadata depth limit")
-    return _bounded_tree(plistlib.loads(raw))
+    return _bounded_tree(plistlib.loads(raw), depth_max=depth_max)
 
 
 def parse_disks(doc):

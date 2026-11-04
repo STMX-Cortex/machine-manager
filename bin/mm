@@ -38,7 +38,7 @@ Agents:
   mm collect                collect remote machine statuses into the local fleet cache
   mm metrics                Prometheus metrics from cached snapshots (files only)
   mm serve [--bind 127.0.0.1|::1] [--port 9877]   loopback /metrics and /status.json hosting
-  mm storage [--include PATH] [--exclude PATH]   one local storage observation; STORAGE.md
+  mm storage [--include PATH] [--exclude PATH]   capacity; io --interval SEC for rates; STORAGE.md
   mm tailscale --peer PEER --user USER [--port N] [--dry-run]   SSH tunnel; TAILSCALE.md
   mm settings show [KEY|SECTION]   the settings in force, each with its default (read-only)
 Owner:
@@ -666,7 +666,32 @@ def cmd_tailscale(args, as_json):
         return err("E_TAILSCALE", "cannot execute /usr/bin/ssh", "install OpenSSH; see TAILSCALE.md")
 
 
+def cmd_storage_io(args, as_json, profile):
+    import mmstorage_io_collect
+    interval = 1.0
+    if args:
+        if len(args) != 2 or args[0] != "--interval" or len(args[1]) > 32:
+            return err("E_USAGE", "storage io accepts --interval SECONDS", "see STORAGE.md")
+        try:
+            interval = float(args[1])
+        except ValueError:
+            return err("E_STORAGE", "invalid I/O interval", "use 0.1 to 30 seconds; see STORAGE.md")
+    try:
+        rec = mmstorage_io_collect.collect(mmcore.machine_id(profile), interval_s=interval)
+    except ValueError:
+        return err("E_STORAGE", "invalid machine identity or I/O interval", "use 0.1 to 30 seconds; see STORAGE.md")
+    rec = mmcore.clean_obj(mmcore.mask_obj(rec))
+    lines = [kv({"storage_io": rec["state"], "reason": rec["reason"], "devices": len(rec["devices"]),
+                 "removed": len(rec["removed_ids"])})]
+    lines.extend(kv(dict({"device": d["id"], "name": d["name"], "scope": d["scope"],
+                          "interval_s": d["interval_s"], "reason": d["rate_reason"]}, **d["rates"])) for d in rec["devices"])
+    emit(as_json, rec, lines)
+    return 0 if rec["state"] == "OK" and all(d["rate_reason"] is None for d in rec["devices"]) else 1
+
+
 def cmd_storage(args, as_json, profile):
+    if args and args[0] == "io":
+        return cmd_storage_io(args[1:], as_json, profile)
     import mmstorage_collect
     include, exclude = [], []
     if len(args) % 2 or len(args) > 4 * mmstorage_collect.model.POLICY_MAX:

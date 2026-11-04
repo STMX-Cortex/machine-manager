@@ -1,0 +1,15 @@
+{
+  "function": "storage_linux_stat",
+  "case": "idle",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "text": "0 0 0 0 0 0 0 0 0 0 0"
+  },
+  "expected": {
+    "read_bytes": 0,
+    "write_bytes": 0,
+    "read_ops": 0,
+    "write_ops": 0
+  }
+}

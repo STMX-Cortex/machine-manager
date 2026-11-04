@@ -30,7 +30,7 @@ class Vectors(unittest.TestCase):
                    "drill_stop", "replay", "parse_billing", "mask", "sample_problems", "self_check", "crash_loop",
                    "resume_targets", "reboot_check", "resource_row", "machine_resource", "pool_resources",
                    "usage_resources", "cap_records", "timing_warnings", "storage_id", "storage_capacity", "storage_mounts",
-                   "storage_linux_mounts", "storage_mac_disks", "storage_mac_apfs"):
+                   "storage_linux_mounts", "storage_mac_disks", "storage_mac_apfs", "storage_io_rates", "storage_linux_stat", "storage_mac_ioreg"):
             self.assertGreaterEqual(counts.get(fn, 0), 3 if fn != "alert_absent" else 3, fn)
         mmtest.write_result("vector-counts.txt", ["%s=%d" % kv for kv in sorted(counts.items())])
 
@@ -154,7 +154,7 @@ class Schemas(unittest.TestCase):
     def test_schema_files_load_and_settings_schema_matches_code(self):
         names = sorted(f[:-12] for f in os.listdir(mmschema.SCHEMAS) if f.endswith(".schema.json"))
         self.assertEqual(names, ["alert", "delete-line", "fleet", "off", "override", "placement", "placement-request", "pool-read", "profile",
-                                 "reading", "resource", "settings", "status", "storage"])
+                                 "reading", "resource", "settings", "status", "storage", "storage-io"])
         self.assertEqual(mmschema.load("settings"), mmcore.settings_json_schema(), "regenerate schemas/settings.schema.json")
         self.assertEqual(mmschema.validate(mmcore.defaults(), mmschema.load("settings")), [])
         self.assertTrue(mmschema.validate(dict(mmcore.defaults(), **{"slots.floor": 0}), mmschema.load("settings")))

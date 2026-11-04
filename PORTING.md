@@ -19,6 +19,7 @@ schemas in `schemas/`. The Python code is the reference; the vectors and schemas
 | Private transport | `core/mmtailscale.py` | TAILSCALE.md; explicit foreground SSH tunnel over an owner-managed tailnet, fixed loopback forward, strict host keys, no profile/data writes; dry-run prints argv/URL |
 | Shared storage model | `core/mmstorage.py` | STORAGE.md and `storage.schema.json`; pure identities/capacity/selection/semantic validation; collectors and export remain separate scopes |
 | Mac storage collector | `core/mmstorage_darwin.py` | STORAGE.md; bounded MNT_NOWAIT/diskutil discovery, descriptor probes and APFS container identities; actual-host dispatch in `mmstorage_collect.py` |
+| Storage I/O | `core/mmstorage_io*.py` | STORAGE.md and `storage-io.schema.json`; pure exact counters/rates, bounded sysfs/IOKit readers, explicit two-sample CLI; no layer/host sum or per-filesystem attribution |
 | Linux storage collector | `core/mmstorage_linux.py` | STORAGE.md; explicit `mm storage`, bounded namespace/sysfs/udev discovery and pinned mount-ID capacity probes; no cache/control/export |
 
 ## Vectors
@@ -86,6 +87,10 @@ bounded/sorted unique records, resolved references, state/reason consistency, cl
 Scope 2 adds `storage_linux_mounts` parser vectors and the explicit Linux collector; the shared contract itself
 enables no automatic runtime writer, fleet storage field or exporter. Scope 3 adds portable Mac disk/APFS parser vectors
 and real macOS mount/diskutil tests; Linux keeps its native collector and the contract is unchanged.
+Storage I/O has a separate version-1 `storage-io.schema.json`, with semantic validation by `mmstorage_io.valid`,
+uint64 counters, measured monotonic intervals, source timestamps and explicit rate reasons. `storage_io_rates`,
+`storage_linux_stat` and `storage_mac_ioreg` vectors pin arithmetic, 512-byte Linux sectors and driver-level Mac scope.
+Do not fold this record into capacity schema version 1 or sum storage layers.
 
 Profiles may use legacy `[ci]` or `[[pools]]` with unique ids, never both. Each listed pool has an independent worker,
 read cache, status record and alert namespace (`POOL:<id>:`); GitHub pools also have their own watched-run file.
@@ -100,7 +105,7 @@ adapter uses owner-maintained profile capacity; it does not consume capacity aut
 Both adapters retain the resource record contract, including the profile's reserve and their own freshness rule.
 
 JSON Schema (2020-12) files: `reading`, `status` (kind `machine` or `pool`), `resource` (`resources.json`), `alert`,
-`placement-request`, `placement`, `fleet` (collected peer snapshots), `storage` (standalone future collector contract), `delete-line`, `off`, `override`, `profile`, `pool-read`, `settings`. `settings.schema.json` is
+`placement-request`, `placement`, `fleet` (collected peer snapshots), `storage` (standalone capacity), `storage-io` (standalone device activity), `delete-line`, `off`, `override`, `profile`, `pool-read`, `settings`. `settings.schema.json` is
 generated from the code's table (`mmcore.settings_json_schema()`); `tests/test_vectors.py` fails when they differ.
 
 Every file the tool writes as a record, and every log record, carries `machine_id` and `schema_version` (now 1); the

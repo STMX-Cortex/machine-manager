@@ -1,0 +1,25 @@
+{
+  "function": "storage_io_rates",
+  "case": "first-sample",
+  "settings": "base",
+  "settings_over": {},
+  "input": {
+    "before": null,
+    "after": {
+      "read_bytes": 1000,
+      "write_bytes": 2000,
+      "read_ops": 10,
+      "write_ops": 20
+    },
+    "elapsed_s": 1
+  },
+  "expected": {
+    "rates": {
+      "read_bytes_per_s": null,
+      "write_bytes_per_s": null,
+      "read_ops_per_s": null,
+      "write_ops_per_s": null
+    },
+    "reason": "baseline_missing"
+  }
+}
