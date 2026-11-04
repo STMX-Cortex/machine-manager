@@ -36,6 +36,7 @@ this separate endpoint; settings are read on each request without saving a last-
 | --- | --- |
 | `GET /metrics` | Prometheus text, including health/freshness series. HTTP 200 even if the supervisor is stale; inspect freshness/state. |
 | `GET /status.json` | Bounded, schema-validated local status for `mm collect`, with the original source time. HTTP 503 for missing, invalid, stale or unusable queue counts. |
+| `GET /storage.json` | The local `storage.json` snapshot written by `mm storage record`, re-serialized, for `mm collect`. HTTP 503 for missing, invalid, foreign or stale (300 s) snapshots. See [STORAGE.md](STORAGE.md), Fleet storage export. |
 | `GET /-/healthy` | HTTP 200 `ok` while the HTTP process can respond, independent of supervisor health. |
 
 HEAD has the same status and headers, with no body. Other paths (including query strings) are 404. Write methods
@@ -79,8 +80,13 @@ existing explicit kinds, queue launcher and SSH placement configuration (README.
 python3 -I bin/mm collect --profile /path/to/central.toml --data /path/to/central-data
 ```
 
-Collection writes only `fleet.json` plus the existing state directory creation; it does not dispatch work or alter
-slots/settings. Exit 1 means one or more peers are unavailable; their new cache entries become UNKNOWN. Schedule
+For storage export, run `mm storage record` on the peer (below) and add `storage_url =
+"http://127.0.0.1:19877/storage.json"` (optional `storage_stale_after_s`, default 300) to the same entry. Without
+`storage_url` no storage is fetched, so peers on older versions need no change.
+
+Collection writes only `fleet.json`, then one `fleet-storage/<id>.json` per peer with `storage_url`, plus the existing
+state directory creation; it does not dispatch work or alter slots/settings. Exit 1 means one or more peer statuses or configured storage snapshots are unavailable; their new cache entries
+become UNKNOWN (storage: `snapshot: null`). Schedule
 only one collector per profile/data directory. A slow collection must complete before the next starts. Match
 `stale_after_s` to the supervisor tick, collection duration and scrape interval; each peer request has a wall timeout
 and at most four run concurrently. Disconnections eventually produce freshness 0, never a healthy cached machine
@@ -156,20 +162,24 @@ stdout/stderr files do not rotate automatically.
 Linux: copy reviewed units to `~/.config/systemd/user/`. Run `systemd-analyze --user verify` on the service and timer
 copies and `promtool check config` on the copied YAML. After owner approval, use `systemctl --user daemon-reload`
 and enable/start `mm-monitoring.service`, `mm-collect.timer` and `mm-prometheus.service` on the central machine.
-Peers need only `mm-monitoring.service`. The timer waits 15 seconds after each collection finishes, so runs cannot
+Peers need only `mm-monitoring.service`. Every host that exports storage (central and peers) also enables
+`mm-storage.timer`: it runs `mm storage record` 60 seconds after the previous run finished (no overlap; exit 1, partial
+storage, still counts as success). The collect timer waits 15 seconds after each collection finishes, so runs cannot
 overlap. Collection exit 1 is accepted by the service because unavailable peers are recorded in the cache. Check
 `systemctl --user status` and the user journal for those exact units. User services depend on the user manager;
 login-independent operation requires an owner/admin decision about lingering. These instructions do not enable it.
 
 macOS: copy reviewed plists to `~/Library/LaunchAgents/`, validate each with `plutil -lint`, then, after owner
 approval, bootstrap the monitoring/collect/Prometheus agents into `gui/$(id -u)` using `launchctl bootstrap`.
-Peers need only the monitoring agent. `StartInterval` triggers collection every 15 seconds and launchd does not
+Peers need only the monitoring agent, plus `org.machine-manager.storage` (every 60 seconds) on each host that exports
+storage. `StartInterval` triggers collection every 15 seconds and launchd does not
 start another copy while that job is running; missed intervals are not a backlog. Check `launchctl print` for the
-three exact `org.machine-manager.*` labels and their logs. GUI LaunchAgents depend on the logged-in session.
+exact `org.machine-manager.*` labels you bootstrapped and their logs. GUI LaunchAgents depend on the logged-in session.
 These labels do not replace or restart the installed supervisor or watchdog.
 
 Stop/remove only the new units/agents when rolling back monitoring: Linux disable/stop `mm-collect.timer`,
-`mm-monitoring.service` and `mm-prometheus.service`; Mac boot out the exact three new agents. Remove their reviewed
+`mm-storage.timer`, `mm-monitoring.service` and `mm-prometheus.service`; Mac boot out the exact new agents. Delete
+`storage.json` and `fleet-storage/` only by owner choice; nothing else reads them. Remove their reviewed
 copies and reload the user manager as applicable. Close only your monitoring tunnels. Keep the existing profile,
 settings, queue, supervisor, watchdog and data files in place. Retain or remove the separate TSDB only by owner choice.
 
