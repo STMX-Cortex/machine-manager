@@ -8,15 +8,17 @@ import http.client
 import http.server
 import io as stdio
 import json
+import math
 import os
 from pathlib import Path
+import plistlib
 import stat
 import threading
 import time
 import unittest
 from unittest import mock
 
-from mmtest import TempData, mmcore
+from mmtest import CODE, TempData, mmcore
 import mmfleet
 import mmschema
 import mmserve
@@ -158,7 +160,7 @@ class Validator(unittest.TestCase):
         doc = fleet.build(LOCAL, cap, io())
         self.assertTrue(fleet.valid(doc))
         self.assertNotIn("hunter2", fleet.dumps(doc))
-        self.assertTrue(fleet._clean_text(doc, []), "a masked snapshot is stable under the peer check")
+        self.assertTrue(fleet._clean_text(doc), "a masked snapshot is stable under the peer check")
 
 
 class Record(TempData):
@@ -329,8 +331,7 @@ class Collect(TempData):
     def fleet_profile(self, *configs):
         profile = self.profile()
         profile["machines"] = list(configs) if configs else [
-            machine_config("peer-a", storage_url="https://example.invalid/storage.json?token=abcdefgh12345678"),
-            machine_config("peer-b")]
+            machine_config("peer-a", storage_url="https://example.invalid/storage.json"), machine_config("peer-b")]
         return profile
 
     def cache(self, ident="peer-a"):
@@ -349,6 +350,11 @@ class Collect(TempData):
             with self.subTest(bad=bad), self.assertRaises(mmcore.MMError) as caught:
                 mmfleet.configs(self.fleet_profile(machine_config("peer-a", **bad)))
             self.assertNotIn("password", str(caught.exception))
+        for url in ("https://example.invalid/storage.json?token=abc123", "https://example.invalid/storage.json?"):
+            with self.subTest(url=url), self.assertRaises(mmcore.MMError) as caught:
+                mmfleet.configs(self.fleet_profile(machine_config("peer-a", storage_url=url)))
+            self.assertIn("storage URL must not contain a query string", str(caught.exception))
+            self.assertNotIn("abc123", str(caught.exception))
 
     def test_good_peer_snapshot_is_cached_and_peers_without_url_are_untouched(self):
         other = Path(self.data, "fleet-storage", "peer-b.json")
@@ -363,21 +369,26 @@ class Collect(TempData):
         self.assertEqual(stat.S_IMODE(Path(self.data, "fleet-storage", "peer-a.json").stat().st_mode), 0o600)
         self.assertEqual(other.read_text(), "owner data")
         self.assertEqual(sorted(p.name for p in other.parent.iterdir()), ["peer-a.json", "peer-b.json"])
+        marker = Path(self.data, fleet.ATTEMPT)
+        self.assertEqual(json.loads(marker.read_text()), {"kind": "fleet_storage_attempt", "schema_version": 1,
+                                                          "machine_id": LOCAL, "time": NOW})
+        self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o600)
 
     def test_bad_responses_write_null_and_never_revive_the_old_good_file(self):
         profile, good = self.fleet_profile(), snap("peer-a", NOW)
-        secret = copy.deepcopy(good)
-        secret["capacity"]["filesystems"][0]["mounts"] = ["/abcdefgh12345678"]
+        masked = copy.deepcopy(good)
+        masked["capacity"]["filesystems"][0]["mounts"] = ["/srv/TOKEN=hunter2hunter2hunter2"]
+        self.assertTrue(fleet.valid(masked))
         big = fleet.dumps(snap("peer-a", NOW, filesystems=many_filesystems())).encode()
 
         def fail(cfg):
-            raise mmfleet.FleetError("HTTP 404 https://example.invalid/storage.json?token=abcdefgh12345678")
+            raise mmfleet.FleetError("HTTP 404 https://example.invalid/storage.json")
         responses = [("wrong machine", fleet.dumps(snap("peer-b", NOW)).encode()),
                      ("stale", fleet.dumps(snap("peer-a", NOW - 300)).encode()),
                      ("future", fleet.dumps(snap("peer-a", NOW + 6)).encode()),
                      ("invalid", fleet.dumps(dict(good, extra=1)).encode()),
                      ("duplicate", b'{"kind":1,"kind":2}'), ("nan", b'{"time":NaN}'),
-                     ("url secret", fleet.dumps(secret).encode()), ("oversize", big), ("404", fail)]
+                     ("masked text", fleet.dumps(masked).encode()), ("oversize", big), ("404", fail)]
         for name, response in responses:
             fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(good).encode())
             self.assertIsNotNone(self.cache()["snapshot"])
@@ -386,31 +397,72 @@ class Collect(TempData):
                 self.assertEqual(fleet.collect(profile, now=NOW, fetcher=fetcher), [("peer-a", False)])
                 rec = self.cache()
                 self.assertEqual((rec["snapshot"], rec["error"], rec["collected_at"]), (None, fleet.PEER_ERROR, NOW))
-                self.assertNotIn("abcdefgh", json.dumps(rec))
+                self.assertNotIn("hunter2", json.dumps(rec))
                 self.assertEqual(fleet.exported_snapshots(profile, NOW)[0], ("peer-a", None, False))
 
-    def test_fetch_uses_storage_url_and_snapshot_limit_without_raising_status_limit(self):
-        seen = []
-        with mock.patch.object(mmfleet, "fetch", side_effect=lambda *a: seen.append(a) or b"{}"):
-            fleet.collect(self.fleet_profile(), now=NOW)
-        self.assertEqual([(a[0]["id"],) + a[1:] for a in seen], [("peer-a", "storage_url", fleet.SNAPSHOT_BYTES)])
-        for key, limit in (("start_argv", 10), ("status_url", 0), ("status_url", mmfleet.FETCH_MAX + 1), ("status_url", 1.0)):
-            with self.assertRaises(mmfleet.FleetError):
-                mmfleet.fetch(machine_config(), key, limit)
-        self.assertEqual(fleet.SNAPSHOT_BYTES, mmfleet.FETCH_MAX)
+    def test_attempt_marker_failure_fetches_nothing_and_exits_1(self):
+        original = mmcore.write_atomic
 
-    def test_real_worker_byte_limits_over_loopback_http(self):
-        body = b"x" * ((1 << 20) + 10)
+        def write(target, text, mode=None):
+            if os.path.basename(target) == fleet.ATTEMPT:
+                raise OSError("/private/path")
+            return original(target, text, mode)
+        fetcher = mock.Mock(return_value=fleet.dumps(snap("peer-a", NOW)).encode())
+        with mock.patch.object(mmcore, "write_atomic", side_effect=write):
+            self.assertEqual(fleet.collect(self.fleet_profile(), now=NOW, fetcher=fetcher), [("peer-a", False)])
+            fetcher.assert_not_called()
+            rc, out = self.run_collect(self.fleet_profile(), lambda cfg: fleet.dumps(snap("peer-a", time.time())).encode())
+        self.assertEqual(rc, 1)
+        self.assertIn("storage=UNKNOWN", out)
+        self.assertNotIn("private", out)
+        self.assertFalse(Path(self.data, "fleet-storage").exists())
 
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory permissions")
+    def test_failed_replace_and_unlink_leave_the_old_entry_not_fresh(self):
+        profile, good = self.fleet_profile(), snap("peer-a", NOW)
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(good).encode())
+        self.assertEqual(fleet.exported_snapshots(profile, NOW + 1)[0], ("peer-a", good, True))
+        folder = Path(self.data, "fleet-storage")
+        folder.chmod(0o500)  # neither a new temp file, a rename nor an unlink can succeed
+        self.addCleanup(folder.chmod, 0o700)
+        self.assertEqual(fleet.collect(profile, now=NOW + 10, fetcher=lambda cfg: fleet.dumps(good).encode()),
+                         [("peer-a", False)])
+        self.assertEqual(self.cache()["collected_at"], NOW, "the old entry is still there")
+        self.assertEqual(fleet.exported_snapshots(profile, NOW + 11)[0], ("peer-a", good, False))
+
+    def test_linked_or_non_directory_cache_is_neither_read_nor_written(self):
+        profile, good = self.fleet_profile(), snap("peer-a", NOW)
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(good).encode())
+        folder, elsewhere = Path(self.data, "fleet-storage"), Path(self.root, "elsewhere")
+        folder.rename(elsewhere)
+        folder.symlink_to(elsewhere, target_is_directory=True)
+        before = {p.name: p.read_bytes() for p in elsewhere.iterdir()}
+        self.assertEqual(fleet.exported_snapshots(profile, NOW + 1)[0], ("peer-a", None, False))
+        fetcher = mock.Mock(return_value=fleet.dumps(good).encode())
+        self.assertEqual(fleet.collect(profile, now=NOW + 2, fetcher=fetcher), [("peer-a", False)])
+        fetcher.assert_not_called()
+        self.assertEqual({p.name: p.read_bytes() for p in elsewhere.iterdir()}, before)
+        self.assertTrue(folder.is_symlink())
+        folder.unlink()
+        folder.write_text("not a directory")
+        self.assertEqual(fleet.exported_snapshots(profile, NOW + 3)[0], ("peer-a", None, False))
+        self.assertEqual(fleet.collect(profile, now=NOW + 3, fetcher=fetcher), [("peer-a", False)])
+        self.assertEqual(folder.read_text(), "not a directory")
+
+    @contextlib.contextmanager
+    def http_fixture(self, bodies):
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                self.send_response(200)
+                body = bodies.get(self.path)
+                self.send_response(200 if body is not None else 404)
+                body = body if body is not None else b"missing"
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
 
             def log_message(self, *args):
                 pass
+
         class Quiet(http.server.HTTPServer):
             def handle_error(self, request, client_address):
                 pass  # the worker hangs up on purpose when a body exceeds its limit
@@ -421,27 +473,50 @@ class Collect(TempData):
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": .01})
         thread.start()
         try:
-            url = "http://127.0.0.1:%d/x" % server.server_port
-            cfg = machine_config(status_url=url, storage_url=url, timeout_s=10)
-            with self.assertRaises(mmfleet.FleetError):
-                mmfleet.fetch(cfg)  # status keeps its 1 MiB limit
-            self.assertEqual(mmfleet.fetch(cfg, "storage_url", fleet.SNAPSHOT_BYTES), body)
-            with self.assertRaises(mmfleet.FleetError):
-                mmfleet.fetch(cfg, "storage_url", len(body) - 1)
+            yield "http://127.0.0.1:%d" % server.server_port
         finally:
             server.shutdown()
             server.server_close()
             thread.join(5)
 
+    def test_worker_validates_and_canonicalizes_while_status_keeps_its_limit(self):
+        now = time.time()
+        doc = snap("peer-a", now)
+        bodies = {"/status": b"x" * ((1 << 20) + 10), "/good": json.dumps(doc, indent=2).encode(),
+                  "/stale": fleet.dumps(snap("peer-a", now - 400)).encode()}
+        with self.http_fixture(bodies) as base:
+            with self.assertRaises(mmfleet.FleetError):
+                mmfleet.fetch(machine_config(status_url=base + "/status", timeout_s=10))  # status: 1 MiB, unchanged
+            cfg = mmfleet.configs(self.fleet_profile(machine_config("peer-a", storage_url=base + "/good", timeout_s=10)))[0]
+            self.assertEqual(fleet.fetch(cfg, now), fleet.dumps(doc).encode(), "canonical output, not the raw body")
+            for path in ("/stale", "/missing"):
+                cfg["storage_url"] = base + path
+                with self.subTest(path=path), self.assertRaises(mmfleet.FleetError):
+                    fleet.fetch(cfg, now)
+
+    def test_wide_json_is_rejected_in_the_worker_not_parsed_by_the_collector(self):
+        wide = b"[" + b"0," * 999999 + b"0]"  # 2 MB, inside the byte bound
+        self.assertLess(len(wide), fleet.SNAPSHOT_BYTES)
+        with self.http_fixture({"/wide": wide}) as base:
+            profile = self.fleet_profile(machine_config("peer-a", storage_url=base + "/wide", timeout_s=10))
+            loads, seen = json.loads, []
+
+            def spy(raw, *args, **kwargs):
+                seen.append(len(raw))
+                return loads(raw, *args, **kwargs)
+            with mock.patch.object(mmfleet, "_strict_json", wraps=mmfleet._strict_json) as strict, \
+                    mock.patch("json.loads", side_effect=spy):
+                self.assertEqual(fleet.collect(profile), [("peer-a", False)])
+            strict.assert_not_called()
+            self.assertFalse([n for n in seen if n >= len(wide)], "the collector never decodes the raw response")
+        self.assertIsNone(self.cache()["snapshot"])
+
     def run_collect(self, profile, storage_response, *flags):
         cli, out = load_cli(), stdio.StringIO()
-
-        def fetch(cfg, key="status_url", limit=mmfleet.MAX_BYTES):
-            return blob(status(cfg["id"], time=time.time())) if key == "status_url" else storage_response(cfg)
-        with mock.patch.object(mmfleet, "fetch", side_effect=fetch), mock.patch("mmcore.load_profile",
-                                                                                 return_value=profile):
-            with contextlib.redirect_stdout(out):
-                rc = cli.main(["collect", *flags])
+        with mock.patch.object(mmfleet, "fetch", side_effect=lambda cfg: blob(status(cfg["id"], time=time.time()))), \
+                mock.patch.object(fleet, "fetch", side_effect=lambda cfg, now: storage_response(cfg)), \
+                mock.patch("mmcore.load_profile", return_value=profile), contextlib.redirect_stdout(out):
+            rc = cli.main(["collect", *flags])
         return rc, out.getvalue()
 
     def test_cli_plain_lines_json_output_and_fleet_json_are_unchanged(self):
@@ -463,6 +538,51 @@ class Collect(TempData):
         rc, out = self.run_collect(self.fleet_profile(machine_config("peer-b")), lambda cfg: b"bad")
         self.assertEqual(rc, 0, "no storage_url: no storage fetch, no storage word")
         self.assertNotIn("storage=", out)
+
+
+class Files(TempData):
+    def test_mode_write_ignores_fifo_and_hard_link_at_the_old_temp_name(self):
+        target = Path(self.data, "storage.json")
+        planted = Path(self.data, ".storage.json.%d.tmp" % os.getpid())
+        victim = Path(self.root, "victim")
+        victim.write_text("keep")
+        for plant in (lambda: os.mkfifo(planted), lambda: os.link(victim, planted)):
+            plant()
+            done = threading.Thread(target=mmcore.write_atomic, args=(str(target), "new\n"), kwargs={"mode": 0o600},
+                                    daemon=True)
+            done.start()
+            done.join(5)
+            self.assertFalse(done.is_alive(), "never blocks on a planted FIFO")
+            self.assertEqual(target.read_text(), "new\n")
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+            self.assertTrue(stat.S_ISFIFO(planted.lstat().st_mode) or planted.read_text() == "keep")
+            self.assertEqual(victim.read_text(), "keep")
+            self.assertEqual(sorted(p.name for p in Path(self.data).glob(".storage.json*")), [planted.name])
+            planted.unlink()
+            target.unlink()
+
+    def test_mode_write_removes_its_temp_file_on_failure_and_default_path_is_unchanged(self):
+        target = Path(self.data, "storage.json")
+        with mock.patch("os.replace", side_effect=OSError("disk")), self.assertRaises(OSError):
+            mmcore.write_atomic(str(target), "x", mode=0o600)
+        self.assertEqual(list(Path(self.data).glob(".storage.json*")), [])
+        self.assertFalse(target.exists())
+        mmcore.write_atomic(str(target), "plain")
+        self.assertEqual(target.read_text(), "plain")
+
+    def test_service_deadlines_cover_status_and_storage_phases(self):
+        def unit(name):
+            return dict(line.split("=", 1) for line in Path(CODE, "monitoring", "systemd", name).read_text().splitlines()
+                        if "=" in line and not line.startswith("#"))
+        rounds = math.ceil(mmfleet.MAX_PEERS / 4)
+        self.assertGreater(int(unit("mm-collect.service")["TimeoutStartSec"]), 2 * rounds * 30 + 60)
+        storage = unit("mm-storage.service")
+        self.assertEqual(storage["SuccessExitStatus"], "1")
+        self.assertIn("storage record", storage["ExecStart"])
+        self.assertEqual(unit("mm-storage.timer")["OnUnitInactiveSec"], "60")
+        plist = plistlib.loads(Path(CODE, "monitoring", "launchd", "org.machine-manager.storage.plist").read_bytes())
+        self.assertEqual((plist["StartInterval"], plist["Umask"], plist["ProgramArguments"][3:5]),
+                         (60, 0o077, ["storage", "record"]))
 
 
 class Exported(TempData):
@@ -516,11 +636,29 @@ class Exported(TempData):
         self.assertEqual(fleet.exported_snapshots(profile, NOW)[0][2], True)
         for rec in (dict(good, extra=1), dict(good, id="peer-c"), dict(good, machine_id="central"),
                     dict(good, kind="fleet"), dict(good, collected_at=None), dict(good, snapshot=snap("peer-c", NOW)),
-                    dict(good, snapshot=dict(good["snapshot"], time=NOW + 1))):
+                    dict(good, snapshot=dict(good["snapshot"], time=NOW + 1)), dict(good, error=fleet.PEER_ERROR),
+                    dict(good, error="other text"), dict(good, error=""), dict(good, snapshot=None, error=None),
+                    {k: v for k, v in good.items() if k != "error"}):
             path.write_text(json.dumps(rec))
             self.assertEqual(fleet.exported_snapshots(profile, NOW)[0], ("peer-a", None, False))
         path.write_text(json.dumps(good) + " " * (fleet.CACHE_BYTES + 1))
         self.assertEqual(fleet.exported_snapshots(profile, NOW)[0], ("peer-a", None, False), "byte bound")
+
+    def test_peers_need_a_valid_attempt_marker_no_older_than_the_entry(self):
+        profile = self.profile_with()
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(snap(cfg["id"], NOW)).encode())
+        self.assertEqual([x[2] for x in fleet.exported_snapshots(profile, NOW)], [True, True])
+        marker = Path(self.data, fleet.ATTEMPT)
+        good = json.loads(marker.read_text())
+        for doc in (dict(good, machine_id="other"), dict(good, extra=1), dict(good, kind="fleet"),
+                    dict(good, schema_version=2), dict(good, time=None)):
+            marker.write_text(json.dumps(doc))
+            self.assertEqual(fleet.exported_snapshots(profile, NOW), [("peer-a", None, False), ("peer-c", None, False)])
+        marker.unlink()
+        self.assertEqual(fleet.exported_snapshots(profile, NOW), [("peer-a", None, False), ("peer-c", None, False)])
+        marker.write_text(json.dumps(dict(good, time=NOW + 1)))  # a later attempt whose entries were never written
+        self.assertEqual(fleet.exported_snapshots(profile, NOW + 2), [("peer-a", snap("peer-a", NOW), False),
+                                                                      ("peer-c", snap("peer-c", NOW), False)])
 
     def test_reader_is_read_only(self):
         profile = self.profile_with()

@@ -90,6 +90,9 @@ def configs(profile):
             except FleetError:
                 raise mmcore.MMError("E_PROFILE", "invalid machine storage URL",
                                      "use HTTP(S), without URL credentials or fragment") from None
+            if "?" in cfg["storage_url"]:  # no query tokens; the private transport supplies access control
+                raise mmcore.MMError("E_PROFILE", "storage URL must not contain a query string",
+                                     "remove the ?query; use a private tunnel or proxy for access control")
         cfg.setdefault("storage_stale_after_s", 300)
         for key, low, high in (("timeout_s", 0.1, 30), ("stale_after_s", 1, 3600), ("job_minutes", 0.01, 1440),
                                ("storage_stale_after_s", 1, 3600)):
@@ -224,18 +227,15 @@ def _http(url, timeout, limit=MAX_BYTES):
         return raw
 
 
-def fetch(cfg, key="status_url", limit=MAX_BYTES):
-    """One worker process imposes a wall timeout, including DNS, TLS and slow/dripping response bodies.
-    The URL is sent over stdin rather than exposed in process arguments or error text.
-    key/limit select another configured read URL (storage_url) and its byte limit; status reads keep MAX_BYTES."""
+def worker(script, request, timeout, limit):
+    """Run `script --fetch` in its own process under one wall timeout, including DNS, TLS, slow/dripping bodies
+    and any parsing/validation the worker does. The request (with its URL) goes over stdin, never into process
+    arguments or error text. Returns at most limit bytes of stdout from a zero exit."""
     import subprocess
-    if key not in ("status_url", "storage_url") or type(limit) is not int or not 1 <= limit <= FETCH_MAX:
-        raise FleetError("invalid fetch request")
-    child = subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "--fetch"], stdin=subprocess.PIPE,
+    child = subprocess.Popen([sys.executable, "-I", script, "--fetch"], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
-        out, _ = child.communicate(json.dumps({"url": cfg[key], "timeout": cfg["timeout_s"], "limit": limit}).encode(),
-                                   timeout=cfg["timeout_s"])
+        out, _ = child.communicate(json.dumps(request).encode(), timeout=timeout)
     except subprocess.TimeoutExpired:
         child.kill()
         child.communicate()
@@ -243,6 +243,12 @@ def fetch(cfg, key="status_url", limit=MAX_BYTES):
     if child.returncode != 0 or len(out) > limit:
         raise FleetError("status request failed")
     return out
+
+
+def fetch(cfg):
+    """The status read: raw response bytes (at most MAX_BYTES) from the transport worker."""
+    return worker(os.path.abspath(__file__), {"url": cfg["status_url"], "timeout": cfg["timeout_s"]},
+                  cfg["timeout_s"], MAX_BYTES)
 
 
 def collect(profile, s, now=None, fetcher=None):
@@ -358,6 +364,6 @@ if __name__ == "__main__":
         sys.exit(2)
     try:
         args = json.loads(sys.stdin.buffer.read(MAX_URL * 2))
-        sys.stdout.buffer.write(_http(args["url"], args["timeout"], args.get("limit", MAX_BYTES)))
+        sys.stdout.buffer.write(_http(args["url"], args["timeout"]))
     except Exception:
         sys.exit(1)  # URLs (including query tokens) and transport exceptions never reach logs or output.

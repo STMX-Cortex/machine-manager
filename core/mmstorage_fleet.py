@@ -4,13 +4,19 @@
 See STORAGE.md, Fleet storage export. Only `mm storage record` writes the local snapshot and only `mm collect`
 fetches peers; serve/export read files only. The supervisor never imports this module. A failed or invalid read
 never revives an earlier good snapshot; stale snapshots are returned as not fresh.
+Run as `mmstorage_fleet.py --fetch`, it is the peer fetch worker: HTTP read, parse and full validation in one
+process under the collector's wall timeout, printing only the canonical snapshot.
 """
 import json
 import math
 import os
+import secrets
 import stat
+import sys
 import time
-import urllib.parse
+
+if __name__ == "__main__":
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import mmcore
 import mmfleet
@@ -26,7 +32,9 @@ PEER_DIR = "fleet-storage"
 PEER_ERROR = "storage unavailable or invalid"
 KEYS = frozenset(("kind", "schema_version", "machine_id", "time", "capacity", "io"))
 PEER_KEYS = frozenset(("kind", "schema_version", "machine_id", "id", "collected_at", "snapshot", "error"))
-SECRET_MIN = 8  # shorter URL query values are not treated as endpoint secrets
+ATTEMPT = "fleet-storage-attempt.json"  # data dir, outside PEER_DIR: the start time of the latest storage collection
+ATTEMPT_KEYS = frozenset(("kind", "schema_version", "machine_id", "time"))
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
 def _number(value):
@@ -62,10 +70,11 @@ def fresh(doc, now, limit=STORAGE_FRESH_S):
     return _number(doc.get("time")) and -FUTURE_SKEW_S <= now - doc["time"] < limit
 
 
-def read(path, limit):
-    """Strict bounded JSON from a regular file: no links, FIFOs, duplicate keys, nonfinite numbers or depth > 32."""
+def read(path, limit, dir_fd=None):
+    """Strict bounded JSON from a regular file: no links, FIFOs, duplicate keys, nonfinite numbers or depth > 32.
+    dir_fd: path is a name relative to that open directory."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=dir_fd)
         with os.fdopen(fd, "rb") as f:
             if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
                 return None
@@ -135,15 +144,8 @@ def local(profile, now):
     return doc
 
 
-def _secrets(url):
-    parsed = urllib.parse.urlsplit(url)
-    values = [url, parsed.query] + [v for _, v in urllib.parse.parse_qsl(parsed.query)] + \
-        [part.partition("=")[2] for part in parsed.query.split("&")]
-    return [v for v in values if len(v) >= SECRET_MIN]
-
-
-def _clean_text(node, secrets):
-    """True when no string (or key) would change under masking/cleaning or holds this endpoint's URL secrets."""
+def _clean_text(node):
+    """True when no string (or key) would change under masking/cleaning (the same rule build() applies)."""
     stack = [node]
     while stack:
         node = stack.pop()
@@ -152,44 +154,100 @@ def _clean_text(node, secrets):
             stack.extend(node.values())
         elif isinstance(node, list):
             stack.extend(node)
-        elif isinstance(node, str):
-            if mmcore.clean(mmcore.mmtext.mask_keep_quotes(node)) != node or any(s in node for s in secrets):
-                return False
+        elif isinstance(node, str) and mmcore.clean(mmcore.mmtext.mask_keep_quotes(node)) != node:
+            return False
     return True
 
 
 def peer_snapshot(doc, cfg, now):
     """A peer snapshot accepted for the cache, else None: valid, of this peer, source time not in the future and not
-    older than storage_stale_after_s, and no text that masking would change or that repeats storage_url secrets.
-    Peer text is rejected rather than rewritten, so a rewrite can never break sorted/unique relations."""
+    older than storage_stale_after_s, and no text that masking would change (rejected, never rewritten, so a
+    rewrite cannot break sorted/unique relations)."""
     if not valid(doc) or doc["machine_id"] != cfg["id"]:
         return None
     if doc["time"] > now + FUTURE_SKEW_S or now - doc["time"] >= cfg["storage_stale_after_s"]:
         return None
-    return doc if _clean_text(doc, _secrets(cfg["storage_url"])) else None
+    return doc if _clean_text(doc) else None
 
 
-def peer_path(ident):
-    return mmcore.path(PEER_DIR, ident + ".json")
+def worker_output(raw, cfg, now):
+    """Worker side: raw HTTP body -> canonical dumps() bytes of the validated snapshot, or FleetError."""
+    snapshot = peer_snapshot(mmfleet._strict_json(raw, SNAPSHOT_BYTES), cfg, now)
+    out = dumps(snapshot).encode("ascii") if snapshot is not None else b""
+    if snapshot is None or len(out) > SNAPSHOT_BYTES:
+        raise mmfleet.FleetError("storage snapshot invalid")
+    return out
+
+
+def fetch(cfg, now):
+    """Fetch, parse and validate in the worker process, under the wall timeout timeout_s. Returns its canonical output;
+    the caller strict-parses and validates it again. URL and errors never reach arguments or messages."""
+    request = {"url": cfg["storage_url"], "timeout": cfg["timeout_s"], "id": cfg["id"],
+               "stale_after_s": cfg["storage_stale_after_s"], "now": now}
+    return mmfleet.worker(os.path.abspath(__file__), request, cfg["timeout_s"], SNAPSHOT_BYTES)
+
+
+def _cache_dir(create=False):
+    """The open cache directory, never through a link or a non-directory; None when unavailable."""
+    path = mmcore.path(PEER_DIR)
+    try:
+        if create:
+            try:
+                os.mkdir(path, 0o700)
+            except FileExistsError:
+                pass
+        return os.open(path, DIR_FLAGS)
+    except OSError:
+        return None
+
+
+def _write_at(dir_fd, name, text):
+    """Atomic write of name inside the open directory: new random temp (O_EXCL), mode 0600, fsync, rename."""
+    tmp = ".%s.%s.tmp" % (name, secrets.token_hex(8))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fd = None
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.unlink(tmp, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
 
 
 def collect(profile, now=None, fetcher=None):
     """After fleet.json: fetch /storage.json for peers with storage_url and write one cache file each.
-    Returns [(peer id, ok)] in profile order. A failure writes snapshot null, never keeps an older good file."""
+
+    First the attempt marker (data dir) records this collection's start; entries older than it are never fresh, even
+    when a later replace and unlink both fail. Returns [(peer id, ok)] in profile order. A failure writes snapshot
+    null. Without the marker or a real cache directory nothing is fetched and every storage peer is unavailable.
+    """
     import concurrent.futures
     cfgs = [cfg for cfg in mmfleet.configs(profile) if "storage_url" in cfg]
     if not cfgs:
         return []
-    fetcher = fetcher or (lambda cfg: mmfleet.fetch(cfg, "storage_url", SNAPSHOT_BYTES))
     clock = time.time if now is None else lambda: now
+    fetcher = fetcher or (lambda cfg: fetch(cfg, clock()))
     central = mmcore.machine_id(profile)
     try:
-        os.makedirs(mmcore.path(PEER_DIR), mode=0o700, exist_ok=True)
-    except OSError:
+        marker = {"kind": "fleet_storage_attempt", "schema_version": 1, "machine_id": central, "time": clock()}
+        mmcore.write_atomic(mmcore.path(ATTEMPT), json.dumps(marker, allow_nan=False, sort_keys=True), mode=0o600)
+    except (OSError, ValueError):
+        return [(cfg["id"], False) for cfg in cfgs]
+    dir_fd = _cache_dir(create=True)
+    if dir_fd is None:
         return [(cfg["id"], False) for cfg in cfgs]
 
     def one(cfg):
-        snapshot = None
+        name = cfg["id"] + ".json"
         try:
             snapshot = peer_snapshot(mmfleet._strict_json(fetcher(cfg), SNAPSHOT_BYTES), cfg, clock())
         except Exception:
@@ -201,31 +259,45 @@ def collect(profile, now=None, fetcher=None):
             rec.update(snapshot=None, error=PEER_ERROR)
             text = json.dumps(rec, allow_nan=False, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         try:
-            mmcore.write_atomic(peer_path(cfg["id"]), text, mode=0o600)
+            _write_at(dir_fd, name, text)
         except OSError:
             try:
-                os.unlink(peer_path(cfg["id"]))  # never leave an older good snapshot in place of this failure
+                os.unlink(name, dir_fd=dir_fd)  # the attempt marker already keeps an older entry from being fresh
             except OSError:
                 pass
             return cfg["id"], False
         return cfg["id"], rec["snapshot"] is not None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(4, len(cfgs)))) as executor:
-        return list(executor.map(one, cfgs))
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(4, len(cfgs)))) as executor:
+            return list(executor.map(one, cfgs))
+    finally:
+        os.close(dir_fd)
 
 
-def _peer(cfg, central, now):
-    doc = read(peer_path(cfg["id"]), CACHE_BYTES)
+def _attempt_time(central):
+    doc = read(mmcore.path(ATTEMPT), 4096)
+    if not isinstance(doc, dict) or set(doc) != ATTEMPT_KEYS or doc["kind"] != "fleet_storage_attempt" \
+            or type(doc["schema_version"]) is not int or doc["schema_version"] != 1 \
+            or doc["machine_id"] != central or not _number(doc["time"]):
+        return None
+    return doc["time"]
+
+
+def _peer(cfg, central, now, dir_fd, attempt):
+    doc = read(cfg["id"] + ".json", CACHE_BYTES, dir_fd=dir_fd)
     if not isinstance(doc, dict) or set(doc) != PEER_KEYS or doc["kind"] != "fleet_storage" \
             or type(doc["schema_version"]) is not int or doc["schema_version"] != 1 \
             or doc["machine_id"] != central or doc["id"] != cfg["id"] or not _number(doc["collected_at"]):
         return None, False
     snapshot = doc["snapshot"]
-    if not valid(snapshot) or snapshot["machine_id"] != cfg["id"] \
-            or not _clean_text(snapshot, _secrets(cfg["storage_url"])):
+    if snapshot is None or doc["error"] is not None:  # error is null exactly when a snapshot is present
+        return None, False
+    if not valid(snapshot) or snapshot["machine_id"] != cfg["id"] or not _clean_text(snapshot):
         return None, False
     limit = cfg["storage_stale_after_s"]
-    is_fresh = -FUTURE_SKEW_S <= now - doc["collected_at"] < limit and fresh(snapshot, now, limit)
+    is_fresh = doc["collected_at"] >= attempt and -FUTURE_SKEW_S <= now - doc["collected_at"] < limit \
+        and fresh(snapshot, now, limit)
     return snapshot, is_fresh
 
 
@@ -233,6 +305,7 @@ def exported_snapshots(profile, now):
     """[(machine_id, snapshot or None, fresh)] for the exporter. Read-only: no network, collection or writes.
 
     The local machine comes first, only when storage.json exists; then each peer with storage_url, in profile order.
+    Peers need a valid attempt marker and a real cache directory (not a link); otherwise each is (id, None, False).
     """
     ident, out = mmcore.machine_id(profile), []
     path = mmcore.path(FILE)
@@ -247,7 +320,27 @@ def exported_snapshots(profile, now):
             out.append((ident, doc, fresh(doc, now)))
         else:
             out.append((ident, None, False))
-    for cfg in mmfleet.configs(profile):
-        if "storage_url" in cfg:
-            out.append((cfg["id"],) + _peer(cfg, ident, now))
+    cfgs = [cfg for cfg in mmfleet.configs(profile) if "storage_url" in cfg]
+    if not cfgs:
+        return out
+    attempt = _attempt_time(ident)
+    dir_fd = _cache_dir() if attempt is not None else None
+    try:
+        for cfg in cfgs:
+            out.append((cfg["id"],) + (_peer(cfg, ident, now, dir_fd, attempt) if dir_fd is not None else (None, False)))
+    finally:
+        if dir_fd is not None:
+            os.close(dir_fd)
     return out
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] != ["--fetch"]:
+        sys.exit(2)
+    try:
+        args = json.loads(sys.stdin.buffer.read(mmfleet.MAX_URL * 2))
+        cfg = {"id": args["id"], "storage_stale_after_s": args["stale_after_s"]}
+        sys.stdout.buffer.write(worker_output(mmfleet._http(args["url"], args["timeout"], SNAPSHOT_BYTES), cfg,
+                                              args["now"]))
+    except Exception:
+        sys.exit(1)  # URLs and transport/validation exceptions never reach logs or output.
