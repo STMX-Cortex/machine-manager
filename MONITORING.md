@@ -81,15 +81,18 @@ python3 -I bin/mm collect --profile /path/to/central.toml --data /path/to/centra
 ```
 
 For storage export, run `mm storage record` on the peer (below) and add `storage_url =
-"http://127.0.0.1:19877/storage.json"` (optional `storage_stale_after_s`, default 300) to the same entry. Without
+"http://127.0.0.1:19877/storage.json"` (optional `storage_stale_after_s`, default 300) to the same entry. A
+`storage_url` with a query string is refused: the tunnel or proxy supplies access control, not a URL token. Without
 `storage_url` no storage is fetched, so peers on older versions need no change.
 
-Collection writes only `fleet.json`, then one `fleet-storage/<id>.json` per peer with `storage_url`, plus the existing
-state directory creation; it does not dispatch work or alter slots/settings. Exit 1 means one or more peer statuses or configured storage snapshots are unavailable; their new cache entries
-become UNKNOWN (storage: `snapshot: null`). Schedule
+Collection writes only `fleet.json`, then `fleet-storage-attempt.json` and one `fleet-storage/<id>.json` per peer with
+`storage_url`, plus the existing state directory creation; it does not dispatch work or alter slots/settings. Exit 1
+means one or more peer statuses or configured storage snapshots are unavailable; their new cache entries become
+UNKNOWN (storage: `snapshot: null`). Schedule
 only one collector per profile/data directory. A slow collection must complete before the next starts. Match
 `stale_after_s` to the supervisor tick, collection duration and scrape interval; each peer request has a wall timeout
-and at most four run concurrently. Disconnections eventually produce freshness 0, never a healthy cached machine
+and at most four run concurrently. Status and then storage each take up to 8 rounds of `timeout_s` for 32 peers,
+so `mm-collect.service` allows 600 s. Disconnections eventually produce freshness 0, never a healthy cached machine
 forever. A central outage does not stop local safety decisions.
 
 ## Start Prometheus and verify collection
@@ -179,7 +182,7 @@ These labels do not replace or restart the installed supervisor or watchdog.
 
 Stop/remove only the new units/agents when rolling back monitoring: Linux disable/stop `mm-collect.timer`,
 `mm-storage.timer`, `mm-monitoring.service` and `mm-prometheus.service`; Mac boot out the exact new agents. Delete
-`storage.json` and `fleet-storage/` only by owner choice; nothing else reads them. Remove their reviewed
+`storage.json`, `fleet-storage/` and `fleet-storage-attempt.json` only by owner choice; nothing else reads them. Remove their reviewed
 copies and reload the user manager as applicable. Close only your monitoring tunnels. Keep the existing profile,
 settings, queue, supervisor, watchdog and data files in place. Retain or remove the separate TSDB only by owner choice.
 

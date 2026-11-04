@@ -528,11 +528,21 @@ re-serialized (compact ASCII JSON), when it is valid, of this profile's machine 
 `storage snapshot unavailable`. Same loopback/Host/connection/limit rules as the other endpoints; serving never
 collects, samples or writes. Peer caches are never served.
 
-**Collect.** A `[[machines]]` entry may add `storage_url` (same rules as `status_url`) and `storage_stale_after_s`
-(1..3600, default 300). `mm collect` first collects statuses and writes `fleet.json` exactly as before. Then, for
-peers with `storage_url` only, it fetches through the same isolated worker (wall timeout `timeout_s`, no redirects,
-8 MiB limit; status reads keep their 1 MiB limit), validates, and atomically writes `fleet-storage/<id>.json`
-(mode 0600):
+**Collect.** A `[[machines]]` entry may add `storage_url` (same rules as `status_url`, and **no query string**: access
+control is the private transport, never a URL token) and `storage_stale_after_s` (1..3600, default 300). `mm collect`
+first collects statuses and writes `fleet.json` exactly as before. Then, for peers with `storage_url` only:
+
+1. It atomically writes the attempt marker `fleet-storage-attempt.json` in the data directory (mode 0600):
+   `{"kind": "fleet_storage_attempt", "schema_version": 1, "machine_id": "CENTRAL", "time": T}`. If that fails,
+   nothing is fetched and every storage peer is unavailable.
+2. It creates `fleet-storage/` (0700) when missing and opens it without following links. A link or non-directory
+   there is never read or written; every storage peer is then unavailable.
+3. Each fetch runs in the peer worker process (`core/mmstorage_fleet.py --fetch`): HTTP read (no redirects, 8 MiB
+   limit), strict JSON parse and full validation all inside the wall timeout `timeout_s`, so a huge or wide response
+   costs only the worker. The worker prints only the canonical validated snapshot; the collector strict-parses and
+   validates that bounded output again. Status reads keep their own 1 MiB worker, unchanged.
+4. It writes `fleet-storage/<id>.json` (new random temp file, mode 0600, fsync, rename, all relative to the open
+   directory):
 
 ```json
 {"kind": "fleet_storage", "schema_version": 1, "machine_id": "CENTRAL", "id": "PEER", "collected_at": T,
@@ -540,22 +550,26 @@ peers with `storage_url` only, it fetches through the same isolated worker (wall
 ```
 
 A snapshot is accepted only when valid, its `machine_id` is the peer id, its source time is at most 5 s in the future
-and younger than `storage_stale_after_s`, and no text would change under masking or contains the storage URL, its
-query or a query value of 8+ characters (rejected, not rewritten, so ordering relations stay intact). Any failure
-writes `snapshot: null`; an older good file is replaced, never revived. Plain machine lines gain `storage=OK|UNKNOWN`
-for peers with `storage_url`; exit 1 when any status or configured storage is unavailable. `--json` output and
-`fleet.json` are unchanged. Peers without `storage_url` are not fetched, so peers on older versions keep working.
+and younger than `storage_stale_after_s`, and no text would change under masking (rejected, not rewritten, so ordering
+relations stay intact). Any failure writes `snapshot: null`; if even that write fails, the old entry is removed. If
+removal also fails, the old entry is older than the attempt marker and so never fresh. Plain machine lines gain
+`storage=OK|UNKNOWN` for peers with `storage_url`; exit 1 when any status or configured storage is unavailable.
+`--json` output and `fleet.json` are unchanged. Peers without `storage_url` are not fetched, so peers on older versions
+keep working.
 
-**Freshness.** Local: fresh while -5 <= now - time < 300 s (`STORAGE_FRESH_S`). Peer: collection age **and** source
-age both in [-5, `storage_stale_after_s`). `mmstorage_fleet.exported_snapshots(profile, now)` gives the exporter
-`(machine_id, snapshot or None, fresh)`: the local machine first, only when `storage.json` exists (invalid or
-foreign: None), then each peer with `storage_url` in profile order (missing/invalid cache: None). Valid but stale
-snapshots are returned with fresh false; consumers export no measurements for them. It reads files only.
+**Freshness.** Local: fresh while -5 <= now - time < 300 s (`STORAGE_FRESH_S`). Peer: the attempt marker is valid,
+`collected_at` >= its time, and collection age **and** source age are both in [-5, `storage_stale_after_s`).
+`mmstorage_fleet.exported_snapshots(profile, now)` gives the exporter `(machine_id, snapshot or None, fresh)`: the
+local machine first, only when `storage.json` exists (invalid or foreign: None), then each peer with `storage_url` in
+profile order. A missing/invalid cache entry (including `error` not null exactly when a snapshot is present), a missing
+or invalid marker, or a linked/non-directory `fleet-storage` gives None. Valid but stale snapshots are returned with
+fresh false; consumers export no measurements for them. It reads files only.
 
 **Limits.** One serialized snapshot is at most 8 MiB (`SNAPSHOT_BYTES`). If a record would exceed it, the larger
 sub-record (then the other) becomes the UNKNOWN/`truncated` envelope with its source time and empty arrays. Readers
-bound bytes (peer cache: 8 MiB + 4096), depth 32, and reject duplicate keys, nonfinite numbers, links and non-regular
-files. Serving re-checks the 8 MiB bound.
+bound bytes (peer cache: 8 MiB + 4096; marker: 4096), depth 32, and reject duplicate keys, nonfinite numbers, links
+and non-regular files. Serving re-checks the 8 MiB bound. One collection takes at most about 2 x 8 x `timeout_s`
+(status then storage, 32 peers, 4 at a time); the collect unit allows 600 s.
 
 **Unchanged.** The supervisor, `status.json`, `fleet.json`, `/status.json`, existing metrics (including legacy
 main-filesystem `storage_size_bytes`/`storage_available_bytes`), guards, placement, settings and profile defaults.
