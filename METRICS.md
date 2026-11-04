@@ -95,10 +95,12 @@ Each snapshot has at most 128 filesystems and 128 devices, so at most 6 x 128 + 
 per machine; 33 machines stay below 50 000. Labels are masked, cleaned, capped at 120 characters and escaped like
 the others.
 
-**Read cost.** Each scrape reads `storage.json` and the peer caches again, but a long-running `mm serve` reuses a
-checked document while its file identity (device, inode, size, times) is unchanged; writers replace files atomically,
-so each collection is checked once. Peers not reached within 2 s of reading (`READ_DEADLINE_S`) are reported as
-unavailable for that scrape (freshness 0), never as stale data, and later scrapes reach them from the reuse.
+**Read cost.** Each scrape reads `storage.json` and the peer caches again. A long-running `mm serve` reuses a checked
+document while its file identity (device, inode, size, times) is unchanged; writers replace files atomically, so a
+collection is normally checked once (concurrent scrapes can repeat it). Reuse is bounded to 64 documents and 64 MiB of
+file bytes; an I/O failure is never remembered. The 2 s read limit (`READ_DEADLINE_S`) is soft: no new peer check
+starts after it, but one already running finishes. Peers not reached are unavailable for that scrape (freshness 0),
+never stale data, and the next scrape starts with the first of them, so every peer is reached and then reused.
 
 **Byte budget.** Dense inventories with long labels can reach about 18-21 MiB for 33 machines, more than the 16 MiB
 `mm serve` response cap and Prometheus `body_size_limit`; an oversized body would fail the whole scrape (`up=0`) and

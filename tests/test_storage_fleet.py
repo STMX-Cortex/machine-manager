@@ -8,6 +8,7 @@ import errno
 import http.client
 import http.server
 import io as stdio
+import itertools
 import json
 import math
 import os
@@ -638,6 +639,11 @@ class Files(TempData):
 
 
 class Exported(TempData):
+    def setUp(self):
+        super().setUp()
+        fleet._CHECKED.clear()
+        fleet._NEXT[0] = 0
+
     def profile_with(self, **over):
         profile = self.profile()
         profile["machines"] = [machine_config("peer-a", storage_url="https://example.invalid/storage.json", **over),
@@ -740,6 +746,44 @@ class Exported(TempData):
             got = fleet.exported_snapshots(profile, NOW)
         self.assertEqual(got[0][0::2], (LOCAL, True))
         self.assertEqual(got[1:], [("peer-a", None, False), ("peer-c", None, False)])
+
+    def test_a_deadline_never_starves_the_same_peers(self):
+        profile = self.profile_with()
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(snap(cfg["id"], NOW)).encode())
+        clock = itertools.count(0, 1.5)  # the deadline passes after one peer check in each scrape
+        with mock.patch.object(fleet.time, "monotonic", lambda: next(clock)):
+            first = fleet.exported_snapshots(profile, NOW)
+            second = fleet.exported_snapshots(profile, NOW)
+        self.assertEqual([x[2] for x in first], [True, False])  # profile order is kept in the output
+        self.assertEqual([x[2] for x in second], [False, True], "the next scrape starts with the peer not reached")
+        self.assertEqual([x[2] for x in fleet.exported_snapshots(profile, NOW)], [True, True])
+
+    def test_io_failure_is_not_remembered_and_never_breaks_the_scrape(self):
+        profile = self.profile_with()
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(snap(cfg["id"], NOW)).encode())
+        self.write_local(fleet.dumps(snap(t=NOW)))
+        real = os.fstat
+        with mock.patch.object(fleet.os, "fstat", side_effect=OSError("fixture")):
+            self.assertEqual([x[1:] for x in fleet.exported_snapshots(profile, NOW)], [(None, False)] * 3)
+        self.assertIs(os.fstat, real)
+        self.assertEqual([x[2] for x in fleet.exported_snapshots(profile, NOW)], [True, True, True])
+        raw = Path(self.data, "storage.json")
+        with mock.patch.object(fleet.os, "fdopen", side_effect=OSError("fixture")):
+            self.assertEqual(fleet.exported_snapshots(profile, NOW)[0], (LOCAL, None, False))
+        self.assertTrue(fleet.exported_snapshots(profile, NOW)[0][2], "read again after the fault cleared")
+        self.assertTrue(raw.exists())
+
+    def test_reuse_is_bounded(self):
+        with mock.patch.object(fleet, "CHECK_CACHE_ENTRIES", 2):
+            for n in range(5):
+                fleet._remember(("k", n), (n,), 10, {"n": n})
+        self.assertEqual(list(fleet._CHECKED), [("k", 3), ("k", 4)])
+        fleet._CHECKED.clear()
+        with mock.patch.object(fleet, "CHECK_CACHE_BYTES", 25):
+            for n in range(3):
+                fleet._remember(("k", n), (n,), 10, None)
+            fleet._remember(("big",), (0,), 26, None)
+        self.assertEqual(list(fleet._CHECKED), [("k", 1), ("k", 2)])
 
     def test_reader_is_read_only(self):
         profile = self.profile_with()

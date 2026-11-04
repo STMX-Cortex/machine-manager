@@ -84,21 +84,39 @@ def read(path, limit, dir_fd=None):
         return None
 
 
-_CHECKED = {}  # per process (mm serve): name -> (file identity, checked document or None)
-CHECK_CACHE_BYTES = 1 << 20  # larger files are read and checked again each time (bounded by READ_DEADLINE_S)
-READ_DEADLINE_S = 2.0  # exported_snapshots: peers not reached by then are (id, None, False) for that scrape
+_CHECKED = {}  # per process (mm serve): key -> (file identity, file bytes, checked document or None)
+CHECK_CACHE_BYTES = 64 << 20  # total file bytes of reused documents; the oldest entries leave first
+CHECK_CACHE_ENTRIES = 64
+READ_DEADLINE_S = 2.0  # soft: no new peer check starts after it; a check already running finishes
+_NEXT = [0]  # the peer where the next scrape starts reading, so a deadline never starves the same peers
+
+
+def _remember(key, ident, size, doc):
+    _CHECKED.pop(key, None)
+    if size > CHECK_CACHE_BYTES:
+        return
+    while _CHECKED and (len(_CHECKED) >= CHECK_CACHE_ENTRIES
+                        or sum(v[1] for v in list(_CHECKED.values())) + size > CHECK_CACHE_BYTES):
+        _CHECKED.pop(next(iter(_CHECKED)), None)
+    _CHECKED[key] = (ident, size, doc)
 
 
 def _read_checked(key, path, limit, check, dir_fd=None):
     """read() plus an expensive check, reused while the file identity (device, inode, size, times) is unchanged.
-    Writers replace files atomically, so a new collection is a new identity. Returns the document or None."""
+    Writers replace files atomically, so a new collection is a new identity. Returns the document or None.
+    Nothing is remembered after an I/O failure, so a later scrape reads the file again."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=dir_fd)
     except OSError:
         _CHECKED.pop(key, None)
         return None
     try:
-        with os.fdopen(fd, "rb") as f:
+        try:
+            f = os.fdopen(fd, "rb")
+        except OSError:
+            os.close(fd)
+            raise
+        with f:
             st = os.fstat(f.fileno())
             if not stat.S_ISREG(st.st_mode):
                 _CHECKED.pop(key, None)
@@ -106,16 +124,17 @@ def _read_checked(key, path, limit, check, dir_fd=None):
             ident = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
             hit = _CHECKED.get(key)
             if hit is not None and hit[0] == ident:
-                return hit[1]
+                return hit[2]
             raw = f.read(limit + 1)
+    except OSError:
+        _CHECKED.pop(key, None)
+        return None
+    try:
         doc = mmfleet._strict_json(raw, limit)
         doc = doc if check(doc) else None
-    except (OSError, ValueError, RecursionError, KeyError, TypeError):
+    except (ValueError, RecursionError, KeyError, TypeError):
         doc = None
-    if st.st_size <= CHECK_CACHE_BYTES:
-        _CHECKED[key] = (ident, doc)
-    else:
-        _CHECKED.pop(key, None)
+    _remember(key, ident, st.st_size, doc)
     return doc
 
 
@@ -364,7 +383,8 @@ def exported_snapshots(profile, now):
 
     The local machine comes first, only when storage.json exists; then each peer with storage_url, in profile order.
     Peers need a valid attempt marker and a real cache directory (not a link); otherwise each is (id, None, False).
-    Checked documents are reused while their file identity is unchanged; peers after READ_DEADLINE_S are unknown.
+    Checked documents are reused while their file identity is unchanged; no peer check starts after
+    READ_DEADLINE_S, and the next call starts with the first peer not reached. Output keeps profile order.
     """
     ident, out, started = mmcore.machine_id(profile), [], time.monotonic()
     path = mmcore.path(FILE)
@@ -385,17 +405,22 @@ def exported_snapshots(profile, now):
         return out
     attempt = _attempt_time(ident)
     dir_fd = _cache_dir() if attempt is not None else None
+    start, results = _NEXT[0] % len(cfgs), {}
     try:
-        for cfg in cfgs:
-            # A scrape never waits on unbounded storage work: peers not reached by the deadline are unknown this
-            # time; checked results are reused on the next scrape, so later scrapes reach them.
-            late = time.monotonic() - started > READ_DEADLINE_S
-            out.append((cfg["id"],) + (_peer(cfg, ident, now, dir_fd, attempt) if dir_fd is not None and not late
-                                       else (None, False)))
+        for n in range(len(cfgs)):
+            # A scrape never starts storage work after the deadline: peers not reached are unknown this time, and
+            # the next scrape starts with the first of them, so every peer is reached and then reused.
+            i = (start + n) % len(cfgs)
+            if dir_fd is not None and time.monotonic() - started > READ_DEADLINE_S:
+                _NEXT[0] = i
+                break
+            results[i] = _peer(cfgs[i], ident, now, dir_fd, attempt) if dir_fd is not None else (None, False)
+        else:
+            _NEXT[0] = 0
     finally:
         if dir_fd is not None:
             os.close(dir_fd)
-    return out
+    return out + [(cfg["id"],) + results.get(i, (None, False)) for i, cfg in enumerate(cfgs)]
 
 
 if __name__ == "__main__":

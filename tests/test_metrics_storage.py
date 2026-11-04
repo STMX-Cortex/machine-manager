@@ -458,7 +458,7 @@ class StorageResponseBudget(unittest.TestCase):
         total = len(text.encode("utf-8"))
         legacy_bytes = total - storage_bytes(text)  # legacy lines are unchanged by storage (golden test)
         self.assertGreater(legacy_bytes, target // 2)
-        self.assertLessEqual(total, target + state_bytes(text))
+        self.assertLessEqual(total, target)  # state lines are inside the budget too
         self.assertLessEqual(storage_bytes(text) - state_bytes(text), target - legacy_bytes)
         complete = self.complete(text, storage)
         self.assertEqual(complete, sorted(complete, reverse=True))
