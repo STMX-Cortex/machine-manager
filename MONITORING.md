@@ -196,9 +196,10 @@ python3 -I tests/check_prometheus.py --prometheus /path/to/prometheus --promtool
 ```
 
 The optional last command runs real Prometheus against disposable fixture servers, with an isolated TSDB and no
-service installation. It verifies scraping, peer collection, queries, staleness and endpoint failure, then stops its
-own processes. The normal Python suite covers HTTP paths/methods/Host, bounds, file isolation, status projection,
-fleet compatibility, IPv6 when available, and SIGTERM shutdown. Socket-restricted environments report those skips.
+service installation. It verifies scraping, peer collection (including a real `mm storage record` and peer storage),
+queries, staleness and endpoint failure, then stops its own processes. The normal Python suite covers HTTP
+paths/methods/Host, bounds, file isolation, status projection, fleet compatibility, IPv6 when available, and SIGTERM
+shutdown. Socket-restricted environments report those skips.
 
 Still required on the owner's machines: full suite/vectors at the exact candidate commit, real private-network
 hosting/tunnel access, actual systemd and launchd startup/restart/stop across login/reboot as intended, target-host

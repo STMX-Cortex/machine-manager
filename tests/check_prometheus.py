@@ -67,6 +67,11 @@ def main():
             profile.write_text('name = "%s"\nmachine_id = "%s"\n%s' % (ident, ident, peers))
             source = snapshot(ident)
             (data / "status.json").write_text(json.dumps(source))
+            # A real, read-only storage observation of this host for the fleet storage path (exit 1 = partial).
+            recorded = subprocess.run(MM + ["storage", "record", "--interval", "0.2", "--profile", str(profile),
+                                            "--data", str(data)], env=env, capture_output=True, text=True, timeout=30)
+            if recorded.returncode not in (0, 1) or not (data / "storage.json").is_file():
+                raise RuntimeError("fixture storage record failed")
             process = subprocess.Popen(MM + ["serve", "--port", str(host_port), "--profile", str(profile),
                                              "--data", str(data)], env=env,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -100,8 +105,9 @@ def main():
         try:
             host("fixture-peer", remote_port)
             peers = ('[[machines]]\nid = "fixture-peer"\nstatus_url = "http://127.0.0.1:%d/status.json"\n'
+                     'storage_url = "http://127.0.0.1:%d/storage.json"\n'
                      'timeout_s = 2\nstale_after_s = 60\nstart_argv = ["/usr/bin/false"]\n'
-                     '[machines.kinds]\nother = 1\n') % remote_port
+                     '[machines.kinds]\nother = 1\n') % (remote_port, remote_port)
             profile, data, local = host("fixture-central", central_port, peers)
             resource = {"resource": "pool", "id": "fixture-pool", "parent": "team", "location": "cloud",
                         "state": "GREEN", "read_time": time.time(), "stale_after_s": 300,
@@ -132,6 +138,11 @@ def main():
                  "peer filesystem reading is queryable")
             wait(lambda: value('machine_manager_resource_capacity_left{id="fixture-pool"}', 10),
                  "local pool capacity is queryable")
+            for ident in ("fixture-central", "fixture-peer"):
+                wait(lambda: value('machine_manager_storage_snapshot_fresh{machine_id="%s"}' % ident, 1),
+                     "%s storage snapshot is fresh" % ident)
+                wait(lambda: bool(query('machine_manager_storage_filesystem_size_bytes{machine_id="%s"}' % ident)),
+                     "%s per-filesystem capacity is queryable" % ident)
             wait(lambda: bool(query('(machine_manager_resource_capacity_left{job="machine-manager"} <= '
                  'machine_manager_resource_capacity_reserve{job="machine-manager"}) and on(job, instance, '
                  'machine_id, resource, id, parent, location) '
