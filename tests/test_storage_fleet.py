@@ -723,5 +723,42 @@ class Exported(TempData):
         self.assertEqual(sorted(str(p) for p in Path(self.root).rglob("*")), before)
 
 
+
+
+class Export(TempData):
+    """mm metrics end to end: storage.json and peer caches reach the exporter only by opt-in."""
+    def profile_with_peer(self):
+        profile = self.profile()
+        profile["machines"] = [machine_config("peer-a", storage_url="https://example.invalid/storage.json"),
+                               machine_config("peer-b")]
+        return profile
+
+    def test_export_reads_local_and_peer_storage_and_nothing_without_opt_in(self):
+        import mmprometheus
+        from mmtest import base_settings
+        profile = self.profile_with_peer()
+        plain, _ = mmprometheus.export(self.profile(), base_settings(), NOW)
+        self.assertNotIn("machine_manager_storage_", plain)
+        Path(self.data, "storage.json").write_text(fleet.dumps(snap(t=NOW)))
+        fleet.collect(profile, now=NOW, fetcher=lambda cfg: fleet.dumps(snap("peer-a", NOW)).encode())
+        text, _ = mmprometheus.export(profile, base_settings(), NOW + 10)
+        for ident in (LOCAL, "peer-a"):
+            self.assertIn('machine_manager_storage_snapshot_fresh{machine_id="%s"} 1' % ident, text)
+            self.assertRegex(text, r'machine_manager_storage_filesystem_size_bytes\{[^}]*machine_id="%s"' % ident)
+        self.assertNotRegex(text, r'machine_manager_storage_\w+\{[^}]*machine_id="peer-b"')
+        stale, _ = mmprometheus.export(profile, base_settings(), NOW + 10 + fleet.STORAGE_FRESH_S)
+        self.assertIn('machine_manager_storage_snapshot_fresh{machine_id="%s"} 0' % LOCAL, stale)
+        self.assertNotIn("machine_manager_storage_filesystem_size_bytes", stale)
+
+    def test_unreadable_storage_never_hides_legacy_metrics(self):
+        import mmprometheus
+        from mmtest import base_settings
+        profile = self.profile_with_peer()
+        without, _ = mmprometheus.export(self.profile(), base_settings(), NOW)
+        with mock.patch.object(fleet, "exported_snapshots", side_effect=OSError("fixture")):
+            text, _ = mmprometheus.export(self.profile(), base_settings(), NOW)
+        self.assertEqual(text, without)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -241,4 +241,9 @@ def export(profile, settings, now):
     status = read_snapshot(mmcore.path("status.json"), STATUS_BYTES)
     resources = read_snapshot(mmcore.path("resources.json"), RESOURCE_BYTES)
     peers = mmfleet.cached_statuses(profile, now)
-    return render(mmcore.machine_id(profile), status, resources, peers, now, settings)
+    import mmstorage_fleet  # opt-in storage export: local storage.json and peer caches, read-only
+    try:
+        storage = mmstorage_fleet.exported_snapshots(profile, now)
+    except (OSError, ValueError, RecursionError):
+        storage = ()  # an unreadable storage cache never hides the machine and resource metrics
+    return render(mmcore.machine_id(profile), status, resources, peers, now, settings, storage=storage)
