@@ -190,7 +190,8 @@ not be read; `--json` gives the collected record. No local queue, slot count, se
 `mm resources` and `mm place` read only this cache for peers and perform no collection. Both the collection time
 and the remote supervisor's source time must be fresh; collecting an old `status.json` does not refresh the machine.
 A candidate must report GREEN or STEADY, action mode, known available memory and valid queue counts. Safe, off,
-observe and dry modes are not remote placement candidates. Supported kinds and shard limits are explicit per
+observe and dry modes are not remote placement candidates. A peer without a readable queue (null slots, such as an
+observe-only machine) is still collected and monitored, but never placed. Supported kinds and shard limits are explicit per
 machine. Queue wait is estimated from its busy/waiting counts and `job_minutes`; local placement wins equal waits.
 A fast eligible remote can take work before a pool; a pool is preferred to a remote with a long queue. Machine and
 pool ids must be unique, including the local machine id. `--agents`, `--wide` and the configured wide kind keep

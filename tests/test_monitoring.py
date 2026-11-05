@@ -101,16 +101,32 @@ class Hosting(TempData):
 
     def test_invalid_identity_queue_counts_and_files_fail_closed(self):
         with self.host() as server:
-            for over in ({"machine_id": "other"}, {"schema_version": 2}, {"slots": None}, {"waiting": -1},
+            for over in ({"machine_id": "other"}, {"schema_version": 2}, {"slots": -1}, {"slots": True},
+                         {"slots": 1.5}, {"busy": None}, {"waiting": -1}, {"slots": "missing"},
                          {"time": time.time() + 1000}, {"readings": {"free_pct": "bad"}}):
                 with self.subTest(over=over):
-                    self.write_status(**over)
+                    doc = self.write_status(**over)
+                    if over == {"slots": "missing"}:  # an absent field is not an explicit unknown
+                        del doc["slots"]
+                        Path(self.data, "status.json").write_text(json.dumps(doc))
                     self.assertEqual(self.request(server, "/status.json")[0], 503)
             path = Path(self.data, "status.json")
             path.unlink()
             self.assertEqual(self.request(server, "/status.json")[0], 503)
             path.symlink_to(Path(self.data, "settings.toml"))
             self.assertEqual(self.request(server, "/status.json")[0], 503)
+
+    def test_unknown_queue_slots_are_published_as_unknown(self):
+        # An observe-only machine has no readable queue: slots is null, busy/waiting are 0 (status.schema.json).
+        self.write_status(slots=None, busy=0, waiting=0, mode="observe")
+        with self.host() as server:
+            code, _, raw = self.request(server, "/status.json")
+            self.assertEqual(code, 200)
+            public = json.loads(raw)
+            self.assertIsNone(public["slots"])  # never replaced by an invented count
+            cfg = machine_config(self.profile()["machine_id"], status_url="http://localhost/status.json", stale_after_s=60)
+            self.assertIsNone(mmfleet.validate_status(public, cfg, time.time())["slots"])
+            self.assertNotIn(b"machine_manager_queue_slots{", self.request(server)[2])
 
     def test_health_is_independent_of_status_or_settings(self):
         Path(self.data, "settings.toml").write_text("[broken")
