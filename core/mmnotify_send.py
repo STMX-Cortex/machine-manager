@@ -184,7 +184,8 @@ def validate_url(url):
 
 def _bounded(value):
     """At most TEXT_WORK characters, and fewer than mmtext's line cut, so mask() sees whole words: a longer text loses
-    its last, possibly split, word (a cut secret could escape the mask and show once masking shortens the text)."""
+    its last, possibly split, word (a cut secret could escape the mask and show once masking shortens the text). With
+    no whitespace before the cut, the whole unfinished word goes and mmtext.CUT_MARK stands in its place (4e.1)."""
     work = max(1, min(TEXT_WORK, mmtext.TEXT_LINE_MAX - len(mmtext.CUT_MARK)))
     if len(value) <= work:
         return value
@@ -193,8 +194,7 @@ def _bounded(value):
         i = len(head)
         while i and not head[i - 1].isspace():
             i -= 1
-        if i:
-            head = head[:i - 1]
+        head = head[:i - 1] if i else mmtext.CUT_MARK
     return head
 
 
@@ -208,15 +208,15 @@ def _text(value, limit):
 
 
 def _tags(value, secret):
-    """The first TAGS_MAX valid tags. Dropped (contract 4d.2): a tag that mask() would change, that equals a secret
-    value, contains one of 6+ characters, or is a 6+ character part of one."""
+    """The first TAGS_MAX valid tags. Dropped (contract 4d.2, 4e.2): a tag that mask() would change, that contains a
+    complete secret value (any length), or that is a 6+ character part of one."""
     if not isinstance(value, (list, tuple)):
         return []
     secrets, out = _secrets_of(secret), []
     for t in value:
         if not isinstance(t, str) or not TAG.fullmatch(t) or mmcore.mask(t) != t:
             continue
-        if any(t == s or (len(s) >= 6 and s in t) or (len(t) >= 6 and t in s) for s in secrets):
+        if any(s in t or (len(t) >= 6 and t in s) for s in secrets):
             continue
         out.append(t)
         if len(out) == TAGS_MAX:
@@ -421,34 +421,38 @@ def _connect(addresses, deadline):
 
 class _Watchdog:
     """Shuts the connection's socket down at the deadline, so a server that trickles bytes (each read within the
-    socket timeout) cannot hold deliver() past it. stop() cancels and joins the timer before the socket is closed."""
+    socket timeout) cannot hold deliver() past it. It acts only on its own duplicate of the socket (4e.3): the
+    duplicate keeps the connection's socket open, whatever closes the caller's descriptor, until stop() has cancelled
+    and joined the timer and closed it; a reused descriptor number is never touched."""
 
-    def __init__(self, fd, deadline):
-        self.fd, self.fired, self.lock = fd, False, threading.Lock()
-        self.timer = threading.Timer(max(0.0, deadline - time.monotonic()), self.fire)
-        self.timer.daemon = True
-        self.timer.start()
+    def __init__(self, sock, deadline):
+        self.own, self.fired, self.lock = sock.dup(), False, threading.Lock()
+        try:
+            self.timer = threading.Timer(max(0.0, deadline - time.monotonic()), self.fire)
+            self.timer.daemon = True
+            self.timer.start()
+        except BaseException:
+            self.own.close()
+            raise
 
     def fire(self):
         import socket
         with self.lock:
-            if self.fd is None:
+            if self.own is None:
                 return
             self.fired = True
             try:
-                s = socket.socket(fileno=self.fd)  # the same descriptor, also after the TLS wrap
-                try:
-                    s.shutdown(socket.SHUT_RDWR)
-                finally:
-                    s.detach()
+                self.own.shutdown(socket.SHUT_RDWR)  # the connection itself, also under the TLS wrap
             except OSError:
                 pass
 
     def stop(self):
-        with self.lock:
-            self.fd = None
         self.timer.cancel()
         self.timer.join()
+        with self.lock:
+            own, self.own = self.own, None
+        if own is not None:
+            own.close()
 
 
 def _tunnel(sock, host, port, auth):
@@ -478,7 +482,11 @@ def _send(url, headers, body, deadline):
     port = parts.port or (443 if tls else 80)
     proxy, addresses = _route(host, port, tls, deadline)
     sock = _connect(addresses, deadline)
-    dog = _Watchdog(sock.fileno(), deadline)
+    try:
+        dog = _Watchdog(sock, deadline)
+    except BaseException:
+        sock.close()
+        raise
     try:
         try:
             if proxy:

@@ -37,6 +37,20 @@ A21 4d.6 The body is read through http.client.HTTPResponse (read, read1, readint
     buffered reader reads ahead up to io.DEFAULT_BUFFER_SIZE (128 KiB here) on its own.
 A22 4d.7 The secret file is opened with os.open, open() or io.open; the test swaps the file inside that call just
     before the real open, and skips if no such call happens.
+A24 4e.1 A word cut short is dropped or replaced by a marker whose text the test does not fix; so the test asserts
+    only that no run of the cut word (8+ characters) survives in the message and no 6-character piece of a secret
+    survives in title or message. The word rule is asserted for the text only: "a text cut" may not cover the title,
+    whose cut word the secret sweep still checks. Cut points are
+    unknown inside the module, so the test moves each secret across 100, 1000 and mmtext's line cut (4e.1 sweep).
+A25 4e.4 The slowed functions: socket.socket.connect (and connect_ex) for 127.0.0.1:<fake port>, socket.getaddrinfo
+    for "localhost". Each must be called; the no-delay control proves the same path delivers once, on time.
+A26 4e.3 is tested from outside only: after deliver returns (Connection: close, a server hang-up, a 4xx, a TLS
+    failure), sockets the test opens at once (likely reusing the freed descriptor numbers) must still work after
+    deliver's timeout has passed. A watchdog acting while deliver runs cannot be seen from outside. The test skips
+    when no descriptor number was reused (then 4e.3 was not exercised).
+A27 Byte counts (4d.6 with reads that raise): "api" is what HTTPResponse's read calls return to the module, plus
+    IncompleteRead.partial when one raises; "wire" is what HTTPResponse takes from its buffered file after the
+    headers, raising reads included. wire may exceed 65537 only by chunk framing (size lines, CRLF): at most 256.
 A23 4d.7 The TLS context is made at call time by ssl.create_default_context / ssl._create_default_https_context, or
     honours SSL_CERT_FILE; a CA-signed certificate for IP 127.0.0.1 must deliver ok (control), else the test skips."""
 import builtins
@@ -47,10 +61,13 @@ import importlib
 import io
 import json
 import os
+import random
 import re
 import shutil
 import socket
+import socketserver
 import ssl
+import string
 import subprocess
 import sys
 import tempfile
@@ -439,16 +456,27 @@ class RenderNtfy(Base):
         self.assertIn(url, ("http://127.0.0.1:2586/ntfy", "http://127.0.0.1:2586/ntfy/"))
 
     def test_title_text_sender_bounds(self):  # A8
-        _, _, doc = self.render(m=msg(title="T" * 300, text="x" * 5000, sender="s" * 100))
+        # spaced words: 4e.1 cuts at a word boundary, so part of each field survives (A8)
+        _, _, doc = self.render(m=msg(title="T " * 150, text="x " * 2500, sender="s " * 50))
         m = re.match(r"^\[([^\]]*)\] (.*)$", doc["title"], re.S)
         self.assertTrue(m, doc["title"])
         self.assertTrue(0 < len(m.group(1)) <= 40, len(m.group(1)))
-        self.assertTrue(set(m.group(1)) <= {"s"} or "s" * 20 in m.group(1))
+        self.assertGreater(m.group(1).count("s"), 0)
         self.assertLessEqual(m.group(2).count("T"), 100)
         self.assertGreater(m.group(2).count("T"), 0)
         self.assertLessEqual(len(doc["title"]), 100 + 40 + 3)
         self.assertLessEqual(len(doc["message"]), 1000)
         self.assertGreater(doc["message"].count("x"), 0)
+
+    def test_single_overlong_word_is_dropped_or_replaced(self):  # 4e.1, A24
+        for service, cfg, sec in (("ntfy", ntfy_cfg(), {"token": NTFY_TOKEN}),
+                                  ("pushover", pushover_cfg(), {"app_token": PO_APP, "user_key": PO_USER})):
+            with self.subTest(service=service):
+                _, _, body = self.ns.render(cfg, sec, msg(title="T" * 300, text="x" * 5000))
+                fields = json.loads(body) if service == "ntfy" else {k: v[0] for k, v in form(body).items()}
+                self.assertLessEqual(len(fields["message"]), 1000)
+                self.assertNotIn("x" * 8, fields["message"], "a word cut short is dropped, not kept in part")
+                self.assertTrue(fields["title"].startswith("[agent-x]"), fields["title"])
 
     def test_exact_bounds_pass_unchanged(self):
         _, _, doc = self.render(m=msg(title="T" * 100, text="x" * 1000, sender="s" * 40))
@@ -552,7 +580,7 @@ class RenderPushover(Base):
                     self.assertEqual(ctype.split(";")[0].strip().lower(), "application/x-www-form-urlencoded")
 
     def test_bounds_and_cleaning(self):  # A8, A9
-        _, _, f, _ = self.render(m=msg(title="T" * 300 + "\x1b\r\n", text="x" * 5000 + "\x00", sender="s" * 100))
+        _, _, f, _ = self.render(m=msg(title="T " * 150 + "\x1b\r\n", text="x " * 2500 + "\x00", sender="s " * 50))
         m = re.match(r"^\[([^\]]*)\] (.*)$", f["title"], re.S)
         self.assertTrue(m, f["title"])
         self.assertTrue(0 < len(m.group(1)) <= 40)
@@ -594,6 +622,50 @@ class RenderHardening(Base):
                 _, _, body = self.ns.render(ntfy_cfg(), secret, msg(tags=["ci", bad, "build"]))
                 self.assertEqual(json.loads(body).get("tags", []), ["ci", "build"])
                 self.assertNotIn(bad, body.decode("utf-8"))
+
+    def test_secret_cut_short_never_survives(self):  # 4e.1, A24
+        rng = random.Random(4)
+        tail = "".join(rng.choice(string.ascii_uppercase + string.digits) for _ in range(36))
+        shapes = {"ghp": ":" + "gh" + "p_" + tail, "github_pat": "/" + "github" + "_pat_" + tail + "_" + tail[:22],
+                  "sk": ":" + "s" + "k-" + tail, "akia": "=" + "AK" + "IA" + tail[:16], "xoxb": ":" + "xo" + "xb-" + tail}
+        lower = "".join(rng.choice(string.ascii_lowercase) for _ in range(5000))
+        fillers = {  # what comes before the secret, with no white space before a cut (but "words")
+            "lower": lower, "words": " ".join(lower[i:i + 7] for i in range(0, 5000, 7)),
+            "alnum": "".join(rng.choice(string.ascii_letters + string.digits) for _ in range(5000)),  # a random word
+            "printable": "".join(rng.choice(string.ascii_letters + string.digits + string.punctuation)
+                                 for _ in range(5000))}
+        line_cut = mmtext.TEXT_LINE_MAX
+        cuts = {"title": (90, 100, 110, line_cut - len(mmtext.CUT_MARK), line_cut),
+                "text": (1000, line_cut - len(mmtext.CUT_MARK), line_cut)}
+        services = (("ntfy", ntfy_cfg(), {"token": NTFY_TOKEN}),
+                    ("pushover", pushover_cfg(), {"app_token": PO_APP, "user_key": PO_USER}))
+
+        def check(service, cfg, sec, field, text, **where):
+            with self.subTest(service=service, field=field, **where):
+                _, _, body = self.ns.render(cfg, sec, msg(**{field: text}))
+                fields = json.loads(body) if service == "ntfy" else {k: v[0] for k, v in form(body).items()}
+                shown = fields["title"] + "\n" + fields["message"]
+                self.assertEqual(sorted(x for x in pieces if x in shown), [])
+        for name, shape in shapes.items():
+            pieces = parts(shape[1:])
+            for service, cfg, sec in services if name == "ghp" else services[:1]:
+                for field, points in cuts.items():
+                    for point in points:  # the secret moved across each likely cut point
+                        for start in range(point - len(shape), point + 2, 3):
+                            for style, filler in fillers.items():
+                                check(service, cfg, sec, field, filler[:start - 1] + shape, shape=name, cut=point,
+                                      start=start, style=style)
+                    for start in range(3940, 4110):  # 3940+ characters before the shape: every start, two fillers
+                        for style in ("alnum", "printable"):
+                            check(service, cfg, sec, field, fillers[style][:start - 1] + shape, shape=name,
+                                  start=start, style=style)
+
+    def test_short_secret_inside_a_tag_is_dropped(self):  # 4e.2
+        for tok in ("x", "xq", "xqz", "xqz7", "xqz7k"):
+            for tag in (tok, "pre-%s-post" % tok, tok + "post", "pre" + tok):
+                with self.subTest(token=tok, tag=tag):
+                    _, _, body = self.ns.render(ntfy_cfg(), {"token": tok}, msg(tags=["ci", tag, "build"]))
+                    self.assertEqual(json.loads(body).get("tags", []), ["ci", "build"])
 
     SAMPLES = {"Secret123abcXYZ": "deploy Bearer\tSecret123abcXYZ done",
                "FlagSecret99x": "run --token\tFlagSecret99x now",
@@ -837,8 +909,13 @@ class Deliver(Base):
 
     @contextlib.contextmanager
     def counted_reads(self):
-        """The body bytes http.client.HTTPResponse hands to the module (A21): outermost calls only."""
-        count, local = [0], threading.local()
+        """Body bytes the module reads (A21, A27): n["api"] is what HTTPResponse's read calls return to the module
+        (outermost calls; IncompleteRead.partial when a read raises), n["wire"] is what HTTPResponse takes from its
+        buffered file after the headers, raising reads included."""
+        n, local = {"api": 0, "wire": 0}, threading.local()
+
+        def size(got):
+            return got if isinstance(got, int) else len(got or b"")
 
         def wrap(orig):
             def counted(resp, *a, **k):
@@ -846,17 +923,59 @@ class Deliver(Base):
                 local.depth = depth + 1
                 try:
                     got = orig(resp, *a, **k)
+                except http.client.IncompleteRead as e:
+                    if depth == 0:
+                        n["api"] += len(e.partial or b"")
+                    raise
                 finally:
                     local.depth = depth
                 if depth == 0:
-                    count[0] += got if isinstance(got, int) else len(got or b"")
+                    n["api"] += size(got)
                 return got
             return counted
+
+        class Wire:
+            def __init__(self, fp):
+                self._fp = fp
+
+            def __getattr__(self, name):
+                return getattr(self._fp, name)
+
+            def _take(self, name, *a):
+                got = getattr(self._fp, name)(*a)
+                n["wire"] += size(got)
+                return got
+
+            def read(self, *a):
+                return self._take("read", *a)
+
+            def read1(self, *a):
+                return self._take("read1", *a)
+
+            def readinto(self, b):
+                return self._take("readinto", b)
+
+            def readinto1(self, b):
+                return self._take("readinto1", b)
+
+            def readline(self, *a):
+                return self._take("readline", *a)
+        begin = http.client.HTTPResponse.begin
+
+        def counting_begin(resp):
+            begin(resp)
+            if resp.fp is not None:
+                resp.fp = Wire(resp.fp)
         with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(http.client.HTTPResponse, "begin", counting_begin))
             for name in ("read", "read1", "readinto", "readinto1", "readline"):
                 stack.enter_context(mock.patch.object(http.client.HTTPResponse, name,
                                                       wrap(getattr(http.client.HTTPResponse, name))))
-            yield count
+            yield n
+
+    def assert_read_bound(self, n, chunked):
+        self.assertLessEqual(n["api"], 65537, "the response read is at most 64 KiB plus one sentinel byte")
+        self.assertLessEqual(n["wire"], 65537 + (256 if chunked else 0), "bytes taken below the read calls")
 
     def test_oversize_body_read_is_at_most_65537_bytes(self):  # 4d.6, A13, A21
         chunk = b"z" * 65536
@@ -882,7 +1001,7 @@ class Deliver(Base):
                 t0 = time.monotonic()
                 r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, timeout_s=3)
                 took = time.monotonic() - t0
-                self.assertLessEqual(n[0], 65537, "the response read is at most 64 KiB plus one sentinel byte")
+                self.assert_read_bound(n, chunked)
                 self.assertLess(took, 4.5)
                 self.assertEqual((r["ok"], r["status"]), (ok, status))
 
@@ -975,31 +1094,146 @@ class Deliver(Base):
             self.assertNotIn(TAG_TOKEN, body)
             self.assertEqual(json.loads(body).get("tags", []), ["ci"])
 
-    def test_no_late_send_after_a_timeout(self):  # 4d.4, A20
-        for name in ("socket.getaddrinfo", "socket.create_connection"):
-            with self.subTest(slow=name), self.fake(reply(200)) as f:
-                gate, called = threading.Event(), []
+    @contextlib.contextmanager
+    def delayed(self, kind, port, delay):
+        """kind "connect": socket.socket.connect (and connect_ex) to 127.0.0.1:port waits `delay` seconds; kind
+        "resolve": socket.getaddrinfo for "localhost" waits. Yields the list of slowed calls (4e.4, A25)."""
+        calls, gate = [], threading.Event()
+        if kind == "connect":
+            def slowed(real):
+                def method(sock, address, *a, **k):
+                    if isinstance(address, tuple) and tuple(address[:2]) == ("127.0.0.1", port):
+                        calls.append(address)
+                        gate.wait(delay)
+                    return real(sock, address, *a, **k)
+                return method
+            patches = [mock.patch.object(socket.socket, name, slowed(getattr(socket.socket, name)))
+                       for name in ("connect", "connect_ex")]
+        else:
+            real = socket.getaddrinfo
 
-                def slow(*a, _real=getattr(socket, name.split(".")[1]), **k):
-                    called.append(1)
-                    gate.wait(1.6)
-                    return _real(*a, **k)
+            def resolve(host, *a, **k):
+                if host in ("localhost", b"localhost"):
+                    calls.append(host)
+                    gate.wait(delay)
+                return real(host, *a, **k)
+            patches = [mock.patch("socket.getaddrinfo", resolve)]
+        try:
+            with contextlib.ExitStack() as stack:
+                for patch in patches:
+                    stack.enter_context(patch)
+                yield calls
+        finally:
+            gate.set()
+
+    LATE = (("connect", "127.0.0.1"), ("resolve", "localhost"))
+
+    def test_no_late_send_after_a_timeout(self):  # 4d.4, 4e.4, A25
+        for kind, host in self.LATE:
+            with self.subTest(delay=kind, host=host), self.fake(reply(200)) as f:
                 t0 = time.monotonic()
-                try:
-                    with mock.patch(name, slow):
-                        r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, msg(text=BODY_MARK), timeout_s=1)
-                        took = time.monotonic() - t0
-                        time.sleep(max(0.0, 2.4 - (time.monotonic() - t0)))  # a late send would land by now
-                finally:
-                    gate.set()
-                self.assertLess(took, 2.5)
-                if not called:  # this path does not use the slowed function (for example a direct socket connect)
-                    self.assertTrue(r["ok"], r)  # then nothing was slow: one timely delivery, and nothing later
-                    self.assertEqual(len([x for x in f.requests if x["method"] == "POST"]), 1)
-                    continue
+                with self.delayed(kind, f.port, 1.6) as calls:
+                    r = self.deliver(ntfy_cfg("http://%s:%d" % (host, f.port)), {"token": NTFY_TOKEN},
+                                     msg(text=BODY_MARK), timeout_s=1)
+                    took = time.monotonic() - t0
+                    time.sleep(max(0.0, 2.4 - (time.monotonic() - t0)))  # the delay has ended: a late send lands now
+                self.assertTrue(calls, "the injected delay ran")
                 self.assertEqual((r["ok"], r["error"]), (False, "E_NOTIFY_NET"))
+                self.assertLess(took, 2.5)
                 self.assertEqual([x["path"] for x in f.requests if x["method"] == "POST"], [],
                                  "no request reaches the server after deliver returned E_NOTIFY_NET")
+
+    def test_no_late_send_control_without_delay(self):  # 4e.4: the same path, no delay: one POST, on time
+        for kind, host in self.LATE:
+            with self.subTest(delay=kind, host=host), self.fake(reply(200)) as f:
+                t0 = time.monotonic()
+                with self.delayed(kind, f.port, 0) as calls:
+                    r = self.deliver(ntfy_cfg("http://%s:%d" % (host, f.port)), {"token": NTFY_TOKEN}, timeout_s=1)
+                took = time.monotonic() - t0
+                time.sleep(0.3)
+                self.assertTrue(calls, "the patched function is on the module's path")
+                self.assertEqual((r["ok"], r["status"]), (True, 200))
+                self.assertLess(took, 1.5)
+                self.assertEqual(len([x for x in f.requests if x["method"] == "POST"]), 1)
+
+    def test_watchdog_never_shuts_down_another_socket(self):  # 4e.3, A26
+        class Echo(socketserver.BaseRequestHandler):
+            def handle(self):
+                with contextlib.suppress(OSError):
+                    while True:
+                        data = self.request.recv(64)
+                        if not data:
+                            return
+                        self.request.sendall(data)
+
+        class EchoServer(socketserver.ThreadingTCPServer):
+            daemon_threads = True
+        try:
+            echo = EchoServer(("127.0.0.1", 0), Echo)
+        except PermissionError:
+            self.skipTest("loopback sockets unavailable in command sandbox")
+        threading.Thread(target=echo.serve_forever, kwargs={"poll_interval": .01}, daemon=True).start()
+        self.addCleanup(echo.server_close)
+        self.addCleanup(echo.shutdown)
+        used, real_connect = set(), socket.socket.connect
+
+        def recording(sock, address, *a, **k):
+            if not (isinstance(address, tuple) and address[1] == echo.server_address[1]):
+                used.add(sock.fileno())
+            return real_connect(sock, address, *a, **k)
+        mine = []
+        try:
+            def hang_up(h, rec, release):
+                h.close_connection = True  # no answer: the server closes the connection
+            cases = [("connection close", reply(200, b"ok", headers=[("Connection", "close")]), "http"),
+                     ("server hang-up", hang_up, "http"), ("refused 400", reply(400), "http"),
+                     ("TLS failure", reply(200), "https")]
+            for name, respond, scheme in cases:
+                with self.fake(respond) as f, mock.patch.object(socket.socket, "connect", recording):
+                    self.deliver(ntfy_cfg("%s://127.0.0.1:%d" % (scheme, f.port)), {"token": NTFY_TOKEN}, timeout_s=1)
+                for _ in range(4):  # at once: the lowest free descriptor numbers, among them deliver's own
+                    s = socket.create_connection(echo.server_address, timeout=2)
+                    mine.append((name, s))
+            time.sleep(1.5)  # past every deliver's timeout_s
+            for name, s in mine:
+                with self.subTest(after=name, fd=s.fileno()):
+                    s.sendall(b"ping")
+                    self.assertEqual(s.recv(4), b"ping", "a socket deliver does not own was shut down")
+            if not used & {s.fileno() for _, s in mine}:
+                self.skipTest("no descriptor number of deliver's was reused; 4e.3 not exercised (A26)")
+        finally:
+            for _, s in mine:
+                s.close()
+
+    def test_reads_that_raise_are_counted_and_bounded(self):  # 4d.6, A27
+        chunk = b"c" * 16384
+
+        def chunked(after):
+            def respond(h, rec, release):
+                h.send_response(200)
+                h.send_header("Transfer-Encoding", "chunked")
+                h.end_headers()
+                h.wfile.write(after)
+            return respond
+
+        def truncated(h, rec, release):
+            h.send_response(200)
+            h.send_header("Content-Length", str(1 << 20))
+            h.end_headers()
+            h.wfile.write(b"t" * (200 << 10))  # then the connection closes: 1 MiB promised
+        frames = b"".join(b"4000\r\n" + chunk + b"\r\n" for _ in range(10))
+        cases = [("bad size line after 160 KiB", chunked(frames + b"zz\r\n"), True),
+                 ("bad size line at 64 KiB", chunked(b"10000\r\n" + b"c" * 65536 + b"\r\nzz\r\n"), True),
+                 ("chunk cut short after 160 KiB", chunked(frames + b"4000\r\n" + b"c" * 100), True),
+                 ("first chunk cut short", chunked(b"100000\r\n" + b"c" * (200 << 10)), True),
+                 ("content-length cut short", truncated, False)]
+        for name, respond, is_chunked in cases:
+            with self.subTest(case=name), self.fake(respond) as f, self.counted_reads() as n:
+                t0 = time.monotonic()
+                r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, timeout_s=3)
+                self.assertLess(time.monotonic() - t0, 4.5)
+                self.assertIn(r["status"], (200, None))
+                self.assert_read_bound(n, is_chunked)
 
     def test_every_3xx_is_an_http_error_and_no_location_is_followed(self):  # 4d.5
         with self.fake(reply(200)) as other:
