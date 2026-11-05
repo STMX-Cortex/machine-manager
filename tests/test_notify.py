@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """`mm notify` Part A (phone notifications): the [notify] profile section, `mm check`, the secret file rules as the CLI
-shows them, grants, send, run, test, status, the outbox and sent.jsonl. Written from the contract (sections 1, 4, 4b, 4c, 4f),
-not from the code: every test drives `python3 -I bin/mm --profile P --data D notify ...` in a subprocess with a temporary
-HOME, profile and data folder, against a local fake ntfy / Pushover server on 127.0.0.1 (port 0) that records each
-request. No test reaches the internet.
+shows them, grants, send, run, test, status, the outbox and sent.jsonl. Written from the contract (sections 1, 4, 4b,
+4c, 4f), not from the code: every test drives `python3 -I bin/mm --profile P --data D notify ...` in a subprocess
+with a temporary HOME, profile and data folder, against a local fake ntfy / Pushover server on 127.0.0.1 (port 0)
+that records each request. No test reaches the internet.
 
 Time: the contract fixes wall-clock windows (backoff 30 s, duplicates 600 s, a rolling hour). The tests do not wait for
 them; they run bin/mm under a small wrapper that moves time.time() forward by an offset (assumption A3).
@@ -35,9 +35,9 @@ A14 A sent.jsonl record holds at least the contract's fields; any extra field ne
 A15 The ntfy JSON publish goes to the server base URL (path "/"); the Pushover form goes to the configured URL's path.
 A16 (4c, 4f) A run that meets a state-file error delivers nothing it cannot account for: with state.json unreadable
     (a folder in its place: E_NOTIFY_STATE, exit 2) the run sends nothing, so after the file is restored each alert
-    arrives exactly once. With the notify folder read-only (unless the run sets it back to 0700 itself and so meets no error) or sent.jsonl
-    replaced by a folder, a duplicate after the restore is tolerated, a loss is not. A failing run prints an error
-    line, never a traceback (stderr empty); a state-file write error exits 1 or 2.
+    arrives exactly once. With the notify folder read-only (unless the run sets it back to 0700 itself and so meets
+    no error) or sent.jsonl replaced by a folder, a duplicate after the restore is tolerated, a loss is not. A failing
+    run prints an error line, never a traceback (stderr empty); a state-file write error exits 1 or 2.
 A17 (4c) After a SIGKILL in the middle of a delivery, the request the fake server already received counts as
     delivered (the service got it); every other alert must arrive in later runs within 17 minutes (an outbox item
     left by the killed run may wait for its backoff, but is not dropped before 1 hour).
