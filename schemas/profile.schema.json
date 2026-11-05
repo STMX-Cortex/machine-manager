@@ -910,6 +910,81 @@
     },
     "additionalProperties": false
    }
+  },
+  "notify": {
+   "type": "object",
+   "description": "Optional phone notifications (NOTIFY.md); off unless enabled = true. Checked again by mmnotify.config.",
+   "properties": {
+    "enabled": {
+     "type": "boolean"
+    },
+    "service": {
+     "enum": [
+      "ntfy",
+      "pushover"
+     ]
+    },
+    "url": {
+     "type": "string",
+     "minLength": 1,
+     "pattern": "^https?://[^?#@\\s]{1,504}$",
+     "description": "ntfy: the server base URL (required). pushover: optional, default https://api.pushover.net/1/messages.json. http only to a loopback host."
+    },
+    "topic": {
+     "type": "string",
+     "pattern": "^[A-Za-z0-9_-]{1,64}$",
+     "description": "ntfy only, required."
+    },
+    "secret_file": {
+     "type": "string",
+     "minLength": 1,
+     "description": "JSON secret file (mode 0600). pushover: required; ntfy: optional."
+    },
+    "alert_levels": {
+     "type": "array",
+     "items": {
+      "enum": [
+       "INFO",
+       "ATTENTION",
+       "ACTION"
+      ]
+     }
+    },
+    "ring_levels": {
+     "type": "array",
+     "items": {
+      "enum": [
+       "INFO",
+       "ATTENTION",
+       "ACTION"
+      ]
+     }
+    },
+    "send_cleared": {
+     "type": "boolean"
+    },
+    "alerts_per_hour": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 600
+    },
+    "timeout_s": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 30
+    },
+    "ring_retry_s": {
+     "type": "integer",
+     "minimum": 30,
+     "maximum": 3600
+    },
+    "ring_expire_s": {
+     "type": "integer",
+     "minimum": 60,
+     "maximum": 10800
+    }
+   },
+   "additionalProperties": false
   }
  },
  "additionalProperties": false

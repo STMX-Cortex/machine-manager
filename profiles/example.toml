@@ -126,3 +126,10 @@ expected_jobs = [
   { name = "memory guard", match = "memguard\\.py run" },
   { name = "load sampler", match = "/opt/example/queue/sample_load\\.sh" },
 ]
+
+# [notify]                           # optional phone notifications (NOTIFY.md); off unless enabled = true
+# enabled = true
+# service = "ntfy"                   # or "pushover" (then secret_file is required)
+# url = "https://ntfy.example.net"   # https, or http to a loopback host
+# topic = "mm-alerts"
+# secret_file = "~/.config/machine-manager/notify-secret.json"
