@@ -21,6 +21,7 @@ GROUPS = {
     "storage_linux": ["test_storage_linux"],
     "storage": ["test_storage"],
     "tailscale": ["test_tailscale"],
+    "notify_send": ["test_notify_send"],  # mm notify Part B: secret file, URL rules, render, deliver against local fakes
     "dashboards": ["test_dashboards"],
     "monitoring": ["test_monitoring"],
     "metrics": ["test_metrics"],
