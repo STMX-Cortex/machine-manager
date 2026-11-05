@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """`mm notify` Part A (phone notifications): the [notify] profile section, `mm check`, the secret file rules as the CLI
-shows them, grants, send, run, test, status, the outbox and sent.jsonl. Written from the contract (sections 1, 4, 4b),
+shows them, grants, send, run, test, status, the outbox and sent.jsonl. Written from the contract (sections 1, 4, 4b, 4c, 4f),
 not from the code: every test drives `python3 -I bin/mm --profile P --data D notify ...` in a subprocess with a temporary
 HOME, profile and data folder, against a local fake ntfy / Pushover server on 127.0.0.1 (port 0) that records each
 request. No test reaches the internet.
@@ -33,9 +33,9 @@ A12 The outbox is tested through `mm notify status queued=N` and the fake server
 A13 The suppression notice's words "N alerts suppressed" are in its title or its message.
 A14 A sent.jsonl record holds at least the contract's fields; any extra field never holds the text or a secret.
 A15 The ntfy JSON publish goes to the server base URL (path "/"); the Pushover form goes to the configured URL's path.
-A16 (4c) A run that meets a state-file error delivers nothing it cannot account for: with cursor.json unreadable (a
-    folder in its place) the run sends nothing, so after the file is restored each alert arrives exactly once. With
-    the notify folder read-only (unless the run sets it back to 0700 itself and so meets no error) or sent.jsonl
+A16 (4c, 4f) A run that meets a state-file error delivers nothing it cannot account for: with state.json unreadable
+    (a folder in its place: E_NOTIFY_STATE, exit 2) the run sends nothing, so after the file is restored each alert
+    arrives exactly once. With the notify folder read-only (unless the run sets it back to 0700 itself and so meets no error) or sent.jsonl
     replaced by a folder, a duplicate after the restore is tolerated, a loss is not. A failing run prints an error
     line, never a traceback (stderr empty); a state-file write error exits 1 or 2.
 A17 (4c) After a SIGKILL in the middle of a delivery, the request the fake server already received counts as
@@ -51,6 +51,24 @@ A21 (4c.6) The outbox holds at most 100 items; when a new failed delivery would 
     the first dropped item is the one first attempted earliest (here an agent message, retried once before the other
     99 items were queued, so it may no longer be first in the list).
 A22 Backoff runs from the time of the failed try; the 1-hour drop runs from the first attempt.
+A23 (4f) The damaged-state tests change the document the code itself wrote, without assuming its schema: every
+    whole number becomes a string (the cursor first), every string a number, every list gets a member {"junk": true},
+    and a top-level schema_version (when there is one) becomes 999. Each change makes the document invalid. `mm notify
+    run` and `mm notify send` both need the state; `mm notify status` is not required to fail.
+A24 (4f.2) The E_NOTIFY_STATE line names state.json; nothing is written at all (state.json and sent.jsonl unchanged).
+A25 (4f.3) While one run waits on its delivery, a second run prints `notify=busy` (exit 0, no request) and an agent's
+    `mm notify send` still delivers within a few seconds (the state lock is never held during network I/O).
+A26 (4f.4) A run started while a test holds state/alerts.lock (flock LOCK_EX) either waits for it or ends with one
+    error line; it never sends before the lock is free.
+A27 (4f.4e) An error after delivery is made by replacing state.json with a folder while the fake server holds the
+    request, then restoring the bytes it held at that moment (the state after step (c)).
+A28 (4f.1) An item's hour event is the time of its latest counted outcome, so a retry delivered at +2800 s still
+    counts at +3700 s and stops counting after +6400 s; with alerts_per_hour = 1 the first message after that is the
+    suppression notice.
+A30 (4f.2) 4f fixes the start point only for a missing state.json, so every test runs its first `mm notify run`
+    before any agent send.
+A29 (4f.4b) When the oldest item is due in the overflow run, it is delivered and another (not selected) item is
+    dropped; sent.jsonl ids are stable for one item across its records.
 Not covered here (Part B or impractical in a CLI test): a secret file owned by another uid, the systemd/launchd
 templates, NOTIFY.md."""
 import hashlib
@@ -1136,6 +1154,8 @@ class Records(NotifyBase):
         self.write_secret()
         self.write_profile(self.notify_cfg(alerts_per_hour=1))
         text_marker = "TextMarker" + alnum(8)
+        self.write_alerts(self.alert(1, "BASE", "ACTION"))
+        self.cli("notify", "run")  # the first run before any send (A30)
         key_file = self.grant("agent-one", "--per-hour", "10")
         key = open(key_file).read().strip()
         self.assert_delivered(self.send(key_file, "ok", "normal", text_marker))       # delivered
@@ -1147,8 +1167,6 @@ class Records(NotifyBase):
         small = self.grant("agent-two", "--per-hour", "1")
         self.assert_delivered(self.send(small, "b1", "normal", text_marker))          # delivered
         self.assertEqual(self.send(small, "b2", "normal", text_marker).returncode, 1)  # limited
-        self.write_alerts(self.alert(1, "BASE", "ACTION"))
-        self.cli("notify", "run")
         self.write_alerts(self.alert(2, "A_ONE", "ACTION", text_marker), self.alert(3, "A_TWO", "ACTION", text_marker))
         self.cli("notify", "run")                                                   # delivered + suppressed
         for args in (("notify", "status"), ("--json", "notify", "status"), ("notify", "grants"),
@@ -1282,21 +1300,21 @@ class Durability(NotifyBase):
 
     # ---- 4c.1: no lost alert
 
-    def test_unreadable_cursor_sends_nothing_then_each_alert_once(self):
+    def test_unreadable_state_sends_nothing_then_each_alert_once(self):
         self.baseline()
-        cursor = os.path.join(self.notify_dir(), "cursor.json")
-        with open(cursor, "rb") as f:
+        state = os.path.join(self.notify_dir(), "state.json")  # 4f.1: the one state file
+        with open(state, "rb") as f:
             saved = f.read()
         self.write_alerts(self.alert(2, "W_2", "ACTION"), self.alert(3, "W_3", "ATTENTION"))
-        os.unlink(cursor)
-        os.mkdir(cursor)  # a folder in its place: neither read nor written
+        os.unlink(state)
+        os.mkdir(state)  # a folder in its place: it exists, but it is no valid document (4f.2)
         r = self.cli("notify", "run")
-        self.assertIn(r.returncode, (1, 2), r.stdout)
-        self.assertEqual(self.fake.posts(), [], "A16: a run that cannot read its cursor sends nothing")
-        os.rmdir(cursor)
-        with open(cursor, "wb") as f:
+        self.assert_error(r, "E_NOTIFY_STATE", 2)
+        self.assertEqual(self.fake.posts(), [], "A16: a run that cannot read its state sends nothing")
+        os.rmdir(state)
+        with open(state, "wb") as f:
             f.write(saved)
-        os.chmod(cursor, 0o600)
+        os.chmod(state, 0o600)
         self.cli("notify", "run")
         self.cli("notify", "run")
         self.assertEqual(sorted(self.titles()), ["[mm] W_2", "[mm] W_3"], "each alert exactly once, nothing old")
@@ -1406,12 +1424,12 @@ class Durability(NotifyBase):
 
     def test_rotating_sent_jsonl_resets_no_limit(self):
         self.write_profile(self.notify_cfg(alerts_per_hour=2))
+        self.baseline()
         a = self.grant("agent-a", "--per-hour", "2")
         b = self.grant("agent-b", "--per-hour", "1")
         self.assert_delivered(self.send(a, "a1"))
         self.assert_delivered(self.send(a, "a2"))
         self.assert_delivered(self.send(b, "b1"))
-        self.baseline()
         self.write_alerts(self.alert(2, "M_2", "ACTION"), self.alert(3, "M_3", "ACTION"))
         self.cli("notify", "run")
         self.assertEqual(len(self.fake.posts()), 5)
@@ -1472,10 +1490,10 @@ class Durability(NotifyBase):
 
     def test_outbox_overflow_drops_oldest_first_attempt(self):
         self.write_profile(self.notify_cfg(alerts_per_hour=600))
+        self.baseline()
         self.fake.default = 500
         key_file = self.grant("agent-one")
         self.assert_queued(self.send(key_file, "OLDEST"))  # first attempt at t0
-        self.baseline()
         self.write_alerts(*[self.alert(i, "Q_%03d" % i, "ACTION") for i in range(2, 101)])  # 99 alerts
         offset = 35  # OLDEST is due: it is retried (and fails) before the alerts' first attempts
         while self.status(offset=offset).get("cursor") != "100":
@@ -1519,6 +1537,319 @@ class Durability(NotifyBase):
         n = len(self.fake.posts())
         self.cli("notify", "run", offset=4000)
         self.assertEqual(len(self.fake.posts()), n)
+
+
+# =============================================================================================== 4f. state and concurrency
+
+
+class StateDesign(NotifyBase):
+    """Contract section 4f: one state.json, strict validation, leftovers ignored, sent.jsonl audit-only, run.lock,
+    the AlertStore lock, append-order resets, errors after delivery, hour events per item, overflow eviction."""
+
+    titles, baseline, assert_no_loss = Durability.titles, Durability.baseline, Durability.assert_no_loss
+
+    def state_file(self):
+        return os.path.join(self.notify_dir(), "state.json")
+
+    def read_bytes(self, p):
+        try:
+            with open(p, "rb") as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
+
+    def popen_run(self, offset=0):
+        cmd = [sys.executable, "-I", MM_PATH, "--profile", self.prof, "--data", self.data, "notify", "run"]
+        if offset:
+            cmd = [sys.executable, "-I", self.shift_py, str(offset)] + cmd[2:]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: p.poll() is None and (p.kill(), p.wait(10)))
+        return p
+
+    def wait_posts(self, n, p=None, limit=10):
+        deadline = time.monotonic() + limit
+        while len(self.fake.posts()) < n and time.monotonic() < deadline and (p is None or p.poll() is None):
+            time.sleep(0.02)
+        self.assertGreaterEqual(len(self.fake.posts()), n, "the fake server got request %d" % n)
+
+    # ---- 4f.2: damaged state
+
+    @staticmethod
+    def damaged_variants(doc, cursor):
+        """(label, document) pairs, each with one change that makes the document invalid (A23)."""
+        out, ints, strs, lists = [], [], [], []
+
+        def walk(node, path):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    walk(v, path + (k,))
+            elif isinstance(node, list):
+                lists.append(path)
+                for i, v in enumerate(node):
+                    walk(v, path + (i,))
+            elif isinstance(node, bool):
+                pass
+            elif isinstance(node, int):
+                ints.append(path)
+            elif isinstance(node, str):
+                strs.append(path)
+
+        def changed(path, fn):
+            d = json.loads(json.dumps(doc))
+            node = d
+            for k in path[:-1]:
+                node = node[k]
+            node[path[-1]] = fn(node[path[-1]])
+            return d
+
+        walk(doc, ())
+        ints.sort(key=lambda path: (doc_get(doc, path) != cursor, len(path)))  # the cursor first
+        for path in ints[:4]:
+            out.append(("int as string %s" % (path,), changed(path, str)))
+        for path in strs[:3]:
+            out.append(("string as number %s" % (path,), changed(path, lambda v: 7)))
+        for path in lists[:3]:
+            if path:
+                out.append(("bad entry in %s" % (path,), changed(path, lambda v: v + [{"junk": True}])))
+        if isinstance(doc.get("schema_version"), int):
+            out.append(("schema_version 999", dict(doc, schema_version=999)))
+        return out
+
+    def test_damaged_state_is_E_NOTIFY_STATE_before_any_write_or_delivery(self):
+        self.baseline(2)
+        key_file = self.grant("agent-one", "--per-hour", "20")
+        self.assert_delivered(self.send(key_file, "kept in the duplicate memory"))
+        self.fake.responses = [500]
+        self.write_alerts(self.alert(3, "D_3", "ACTION"))
+        self.cli("notify", "run")  # a queued item, an hour event, a cursor
+        self.write_alerts(self.alert(4, "D_4", "ACTION"))  # pending: a run would send it
+        state, sent = self.state_file(), os.path.join(self.notify_dir(), "sent.jsonl")
+        good = self.read_bytes(state)
+        self.assertIsNotNone(good, "4f.1: notify/state.json exists after a run")
+        self.assertEqual(stat.S_IMODE(os.stat(state).st_mode), 0o600)
+        doc = json.loads(good)
+        self.assertIsInstance(doc, dict)
+        raws = [("bad JSON", b"{"), ("truncated", good[:len(good) // 2]), ("not an object", b"[]"),
+                ("empty", b""), ("trailing garbage", good + b"x")]
+        raws += [(label, json.dumps(d).encode()) for label, d in self.damaged_variants(doc, 3)]
+        posts = len(self.fake.posts())
+        for label, raw in raws:
+            with self.subTest(label=label):
+                with open(state, "wb") as f:
+                    f.write(raw)
+                os.chmod(state, 0o600)
+                before_sent = self.read_bytes(sent)
+                for args in (("notify", "run"), ("notify", "send", "--key-file", key_file, "--level", "normal",
+                                                 "--title", "while damaged")):
+                    r = self.cli(*args)
+                    self.assert_error(r, "E_NOTIFY_STATE", 2)
+                    self.assertIn("state.json", r.stdout)
+                    self.assertEqual(self.read_bytes(state), raw, "state.json unchanged byte for byte")
+                    self.assertEqual(self.read_bytes(sent), before_sent, "no audit line either")
+                self.assertEqual(len(self.fake.posts()), posts, "no request")
+        with open(state, "wb") as f:
+            f.write(good)
+        self.cli("notify", "run")
+        self.assertEqual(self.titles().count("[mm] D_4"), 1, "the good state works again")
+
+    def test_leftover_4c_files_are_ignored(self):
+        os.makedirs(self.notify_dir(), mode=0o700, exist_ok=True)
+        self.write_alerts(*[self.alert(i, "HIST_%d" % i, "ACTION") for i in (1, 2, 3)])
+        leftovers = {"cursor.json": json.dumps({"cursor": 0, "seq": 0}),
+                     "outbox.json": json.dumps([{"id": "left", "source": "agent", "sender": "agent-one",
+                                                 "title": "LEFTOVER", "text": "", "level": "normal", "tries": 1,
+                                                 "first": 0, "due": 0}]),
+                     "hour.json": "{",
+                     "recent.json": "not json"}
+        for name, text in leftovers.items():
+            with open(os.path.join(self.notify_dir(), name), "w") as f:
+                f.write(text)
+            os.chmod(os.path.join(self.notify_dir(), name), 0o600)
+        r = self.cli("notify", "run")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(self.fake.posts(), [], "missing state.json: a first run from the newest alert, empty queue")
+        st = self.status()
+        self.assertEqual((st.get("cursor"), st.get("queued")), ("3", "0"))
+        key_file = self.grant("agent-one", "--per-hour", "1")
+        self.assert_delivered(self.send(key_file, "fresh"))
+        self.write_alerts(self.alert(4, "NEW_4", "ACTION"))
+        self.cli("notify", "run", offset=100)
+        self.assertEqual(self.titles(), ["[agent-one] fresh", "[mm] NEW_4"])
+
+    def test_sent_log_deleted_or_rotated_changes_no_limit(self):
+        self.write_profile(self.notify_cfg(alerts_per_hour=1))
+        self.baseline()
+        sent = os.path.join(self.notify_dir(), "sent.jsonl")
+        key_file = self.grant("agent-one", "--per-hour", "2")
+        self.assert_delivered(self.send(key_file, "one", "normal", "x"))
+        self.assert_delivered(self.send(key_file, "two", "normal", "x"))
+        os.unlink(sent)
+        r = self.send(key_file, "three")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("E_NOTIFY_LIMIT", r.stdout)
+        other = self.grant("agent-two", "--per-hour", "5")
+        self.assert_delivered(self.send(other, "same", "normal", "body"))
+        os.unlink(sent)
+        self.assertIn("E_NOTIFY_DUPLICATE", self.send(other, "same", "normal", "body").stdout)
+        self.write_alerts(self.alert(2, "H_2", "ACTION"))
+        self.cli("notify", "run")
+        for seq in (3, 4):  # rotated twice: the audit log is gone from both names
+            if os.path.exists(sent):
+                os.replace(sent, sent + ".1")
+            self.write_alerts(self.alert(seq, "H_%d" % seq, "ACTION"))
+            self.cli("notify", "run", offset=seq * 10)
+        self.assertEqual([t for t in self.titles() if t.startswith("[mm]")], ["[mm] H_2"])
+
+    # ---- 4f.3: run.lock
+
+    def test_overlapping_runs_second_is_busy(self):
+        self.baseline()
+        self.write_alerts(self.alert(2, "O_2", "ACTION"), self.alert(3, "O_3", "ACTION"))
+        self.fake.responses = ["hold"]
+        p = self.popen_run()
+        self.wait_posts(1, p)
+        r = self.cli("notify", "run")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(kv(r.stdout).get("notify"), "busy", r.stdout)
+        self.assertEqual(len(self.fake.posts()), 1, "a busy run sends nothing")
+        key_file = self.grant("agent-one")
+        t0 = time.monotonic()
+        self.assert_delivered(self.send(key_file, "while a run waits"))  # A25
+        self.assertLess(time.monotonic() - t0, 5)
+        self.fake.release.set()
+        out, err = p.communicate(timeout=30)
+        self.assertNotIn("Traceback", err)
+        self.cli("notify", "run")
+        self.cli("notify", "run", offset=100)
+        got = self.titles()
+        self.assertEqual((got.count("[mm] O_2"), got.count("[mm] O_3")), (1, 1), got)
+
+    # ---- 4f.4a: the AlertStore lock and the read order
+
+    def test_run_reads_alerts_under_the_alertstore_lock(self):
+        import fcntl
+        self.write_alerts(*[self.alert(i, "L_%d" % i, "ACTION") for i in (1, 2, 3)])
+        self.cli("notify", "run")  # cursor 3
+        self.write_alerts(*[self.alert(i, "L_%d" % i, "ACTION") for i in (4, 5, 6)])
+        cur, dot1 = os.path.join(self.data, "alerts.jsonl"), os.path.join(self.data, "alerts.jsonl.1")
+        with open(cur) as f:
+            lines = f.read().splitlines(keepends=True)
+        lock = os.path.join(self.data, "state", "alerts.lock")
+        with open(lock, "a+") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                # half way through a rewrite: .1 still holds 1-3, the current file only 7 (4-6 are in neither yet)
+                with open(dot1, "w") as f:
+                    f.writelines(lines[:3])
+                with open(cur, "w") as f:
+                    f.write(json.dumps(self.alert(7, "L_7", "ACTION"), sort_keys=True) + "\n")
+                p = self.popen_run()
+                time.sleep(1.0)
+                self.assertEqual(self.fake.posts(), [], "A26: nothing is sent before the lock is free")
+                # the finished pair: .1 holds 4-6, the current file holds 7
+                with open(dot1, "w") as f:
+                    f.writelines(lines[3:6])
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+        out, err = p.communicate(timeout=30)
+        self.assertNotIn("Traceback", err)
+        if p.returncode != 0:
+            self.assertRegex(out.strip().splitlines()[-1], ERROR)
+        self.cli("notify", "run")
+        got = self.titles()
+        self.assertEqual(sorted(got), ["[mm] L_%d" % i for i in (4, 5, 6, 7)], "each once, nothing old")
+
+    def test_repeated_record_across_rotation_is_no_reset(self):
+        self.cli("notify", "run")  # no alerts yet: a first run with an empty queue
+        recs = [self.alert(i, "P_%d" % i, "ACTION") for i in (1, 2, 3, 4)]
+        with open(os.path.join(self.data, "alerts.jsonl.1"), "w") as f:
+            f.writelines(json.dumps(r, sort_keys=True) + "\n" for r in recs[:3])
+        self.write_alerts(recs[2], recs[3])  # the same record 3 again, then 4
+        self.cli("notify", "run")
+        self.cli("notify", "run")
+        self.assertEqual(sorted(self.titles()), ["[mm] P_%d" % i for i in (1, 2, 3, 4)])
+        self.assertEqual(self.status().get("cursor"), "4")
+
+    # ---- 4f.4: an error after delivery
+
+    def test_error_after_delivery_at_most_duplicates(self):
+        self.baseline()
+        self.write_alerts(*[self.alert(i, "E_%d" % i, "ACTION") for i in (2, 3, 4)])
+        self.fake.responses = ["hold"]
+        p = self.popen_run()
+        self.wait_posts(1, p)
+        state = self.state_file()
+        held = self.read_bytes(state)  # A27: written in step (c), before delivery
+        self.assertIsNotNone(held)
+        os.unlink(state)
+        os.mkdir(state)
+        self.fake.release.set()
+        out, err = p.communicate(timeout=30)
+        self.assertIn(p.returncode, (1, 2), out)
+        self.assertNotIn("Traceback", err)
+        os.rmdir(state)
+        with open(state, "wb") as f:
+            f.write(held)
+        os.chmod(state, 0o600)
+        self.assert_no_loss("E_%d", (2, 3, 4))
+
+    # ---- 4f.1: hour events per item
+
+    def test_retry_delivered_late_counts_until_an_hour_after_delivery(self):
+        self.write_profile(self.notify_cfg(alerts_per_hour=1))
+        self.baseline()
+        self.fake.default = 500
+        self.write_alerts(self.alert(2, "LATE", "ACTION"))
+        self.cli("notify", "run")  # first attempt at 0
+        for offset in (40, 110, 240, 490, 980, 1890):  # the backoff ladder of A22
+            self.cli("notify", "run", offset=offset)
+        self.fake.default = 200
+        self.cli("notify", "run", offset=2800)  # delivered late in its hour
+        self.assertEqual(self.titles()[-1], "[mm] LATE")
+        self.assertEqual(self.status(offset=2800).get("queued"), "0")
+        n = len(self.fake.posts())
+        self.write_alerts(self.alert(3, "AFTER", "ACTION"))
+        self.cli("notify", "run", offset=3700)  # over 1 hour after the first attempt, under 1 hour after delivery
+        self.assertEqual(len(self.fake.posts()), n, "LATE still counts: AFTER is suppressed")
+        self.write_alerts(self.alert(4, "MUCH_LATER", "ACTION"))
+        self.cli("notify", "run", offset=6500)
+        later = self.fake.ntfy()[n:]
+        self.assertEqual(len(later), 1, later)
+        self.assertIn("alerts suppressed", later[0]["title"] + " " + later[0]["message"])  # A28
+
+    # ---- 4f.4b: overflow and the due oldest item
+
+    def test_overflow_never_drops_an_item_selected_for_delivery(self):
+        self.write_profile(self.notify_cfg(alerts_per_hour=600))
+        self.baseline()
+        self.fake.default = 500
+        key_file = self.grant("agent-one")
+        self.assert_queued(self.send(key_file, "OLDEST"))  # first attempt at 0: due at 30
+        self.write_alerts(*[self.alert(i, "V_%03d" % i, "ACTION") for i in range(2, 101)])  # 99 alerts
+        offset = 10  # every alert tried once (20 per run), at 10-15: due at 40 or later
+        while len(self.fake.posts()) < 100:
+            self.assertLess(offset, 18, "the runs do not try the alerts")
+            self.cli("notify", "run", offset=offset)
+            offset += 1
+        self.assertEqual(self.status(offset=offset).get("queued"), "100")
+        self.fake.default = 200
+        self.write_alerts(self.alert(101, "V_101", "ACTION"))
+        self.cli("notify", "run", offset=31)  # OLDEST and V_101 are due; 101 items: one other item goes
+        recs = self.sent()
+        dropped = {x["id"] for x in recs if x["status"] == "dropped"}
+        delivered = {x["id"] for x in recs if x["status"] == "delivered"}
+        self.assertTrue(dropped, "101 items: one is dropped")
+        self.assertEqual(dropped & delivered, set(), "no item both dropped and delivered")
+        self.assertIn("[agent-one] OLDEST", self.titles()[-2:])
+        self.assertIn("[mm] V_101", self.titles()[-2:])
+        self.assertTrue(all(x["source"] == "mm" for x in recs if x["status"] == "dropped"))
+        self.assertLessEqual(int(self.status(offset=31).get("queued")), 100)
+
+
+def doc_get(doc, path):
+    for k in path:
+        doc = doc[k]
+    return doc
 
 
 if __name__ == "__main__":
