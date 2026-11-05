@@ -24,10 +24,27 @@ A12 A 3xx result carries the 3xx status; deliver makes exactly one request for a
 A13 A 2xx answer with a body over 64 KiB is still ok (the read is capped, not an error).
 A14 deliver sends render's request: the fake sees the same JSON body or form fields.
 A15 A URL that holds CR, LF or TAB is refused by check_url.
-A16 Proxy variables are removed for the deliver tests (a proxy would make 127.0.0.1 fakes unreachable)."""
+A16 Proxy variables are removed for the deliver tests (a proxy would make 127.0.0.1 fakes unreachable), except in
+    the 4d.7 proxy-trap test, which sets them to a trap.
+Section 4d (hardening) assumptions:
+A17 4d.1 "part" is checked as every 6-character substring of each configured secret (stricter than prefixes; both
+    designs the contract allows, a fixed word or secrets replaced before the cut, meet it when the full value is sent).
+A18 4d.2 Dropping a tag keeps the other valid tags in order; at most 4 tags are given, so the max-4 cut is not involved.
+A19 4d.3 Each sample is first checked against mmtext: mask() alone hides its secret, mask(clean()) does not.
+A20 4d.4 Name resolution and connecting go through socket.getaddrinfo / socket.create_connection (patched to be slow).
+A21 4d.6 The body is read through http.client.HTTPResponse (read, read1, readinto, readinto1, readline); the test
+    counts the bytes those calls return to the module (outermost calls only). Socket counts are not used: io's
+    buffered reader reads ahead up to io.DEFAULT_BUFFER_SIZE (128 KiB here) on its own.
+A22 4d.7 The secret file is opened with os.open, open() or io.open; the test swaps the file inside that call just
+    before the real open, and skips if no such call happens.
+A23 4d.7 The TLS context is made at call time by ssl.create_default_context / ssl._create_default_https_context, or
+    honours SSL_CERT_FILE; a CA-signed certificate for IP 127.0.0.1 must deliver ok (control), else the test skips."""
+import builtins
 import contextlib
+import http.client
 import http.server
 import importlib
+import io
 import json
 import os
 import re
@@ -39,7 +56,6 @@ import sys
 import tempfile
 import threading
 import time
-import tracemalloc
 import unicodedata
 import unittest
 import urllib.parse
@@ -47,6 +63,7 @@ from unittest import mock
 
 import mmtest
 from mmtest import mmcore
+import mmtext
 
 CORE = os.path.join(mmtest.CODE, "core")
 BAD_CATEGORIES = ("Cc", "Cf", "Zl", "Zp")
@@ -56,6 +73,9 @@ PO_USER = "UserMarkerKj2Hg4Fd6Sa8Lm0Np"
 MARKER = "Zq9FileContentMarker"
 BODY_MARK = "BodyMarkerZq7"
 TITLE_MARK = "TitleMarkerWv4"
+REASON_TOKEN = "tk_q7ZxW9vB2nM4kP8lR3tY6hJ1"
+TAG_TOKEN = "tk_aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW"  # 32 characters: also a valid tag
+ALL_SECRETS = (NTFY_TOKEN, PO_APP, PO_USER, REASON_TOKEN, TAG_TOKEN)
 PUSHOVER_DEFAULT = "https://api.pushover.net/1/messages.json"
 TAG_RE = re.compile(r"[A-Za-z0-9_-]{1,32}")
 PROXY_VARS = ("http_proxy", "https_proxy", "all_proxy", "ftp_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
@@ -110,6 +130,11 @@ def header(headers, name):
 
 def has_bad(text):
     return any(unicodedata.category(c) in BAD_CATEGORIES for c in text)
+
+
+def parts(secret, n=6):
+    """Every n-character part of a secret (A17)."""
+    return {secret[i:i + n] for i in range(len(secret) - n + 1)}
 
 
 def form(body):
@@ -283,6 +308,60 @@ class ReadSecret(Base):
         for i, doc in enumerate([{"app_token": PO_APP}, {"user_key": PO_USER}, {}]):
             with self.subTest(missing=sorted(doc)):
                 self.refused(self.write(json.dumps(doc), name="m%d.json" % i), "pushover", marker=None)
+
+
+    def swapped_during_open(self, replace):
+        """read_secret on a good file that `replace(path)` swaps inside the module's own open call, just before the
+        real open (4d.7, A22). Returns the MMError (or fails when the swapped file was read)."""
+        path = self.write(json.dumps({"token": "abc"}))
+        target, done = os.path.abspath(path), []
+        real = {"os": os.open, "builtins": builtins.open, "io": io.open}
+
+        def hit(p):
+            try:
+                return not done and os.path.abspath(os.fsdecode(os.fspath(p))) == target
+            except TypeError:
+                return False
+
+        def wrapper(kind):
+            def opener(p, *a, **k):
+                if hit(p):
+                    done.append(kind)
+                    replace(path)
+                return real[kind](p, *a, **k)
+            return opener
+        got = err = None
+        with mock.patch("os.open", wrapper("os")), mock.patch("builtins.open", wrapper("builtins")), \
+                mock.patch("io.open", wrapper("io")):
+            try:
+                got = self.ns.read_secret(path, "ntfy")
+            except mmcore.MMError as e:
+                err = e
+        if not done:
+            self.skipTest("the secret file was not opened by os.open, open() or io.open (A22)")
+        self.assertIsNone(got, "a file swapped between the check and the open was read")
+        self.assertEqual(err.code, "E_NOTIFY_SECRET")
+        self.assertNotIn(MARKER, str(err))
+        return err
+
+    def test_regular_file_swapped_at_open_is_refused(self):  # 4d.7
+        def replace(path):
+            other = path + ".new"
+            with open(other, "w") as f:
+                f.write(json.dumps({"token": MARKER}))
+            os.chmod(other, 0o600)
+            os.replace(other, path)
+        self.swapped_during_open(replace)
+
+    def test_symlink_swapped_at_open_is_refused(self):  # 4d.7
+        def replace(path):
+            good = os.path.join(self.root, "elsewhere.json")
+            with open(good, "w") as f:
+                f.write(json.dumps({"token": MARKER}))
+            os.chmod(good, 0o600)
+            os.symlink(good, path + ".lnk")
+            os.replace(path + ".lnk", path)
+        self.swapped_during_open(replace)
 
 
 # --------------------------------------------------------------------------------------------- check_url
@@ -495,6 +574,54 @@ class RenderPushover(Base):
         self.assertIn("a&priority=2&user=x", f["title"])
 
 
+class RenderHardening(Base):
+    """Section 4d.2 and 4d.3: tags that would publish a secret, and masking before control characters go."""
+
+    def test_secret_and_mask_changing_tags_are_dropped(self):  # 4d.2, A18
+        rand32 = "a1B2c3D4e5F6g7H8i9J0kLmNoPqRsTuV"
+        known = ["gh" + "p_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn", "AK" + "IA" + "Z7Y6X5W4V3U2T1S0",
+                 "s" + "k-" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn"]  # built at run time: test_public forbids these shapes in source
+        cases = [("equals the token", {"token": TAG_TOKEN}, TAG_TOKEN),
+                 ("contains the token", {"token": "Qx7Lm2Np9"}, "pre-Qx7Lm2Np9-x"),
+                 ("random 32", {"token": NTFY_TOKEN}, rand32)] + [("known prefix", {"token": NTFY_TOKEN}, k)
+                                                                  for k in known]
+        self.assertEqual(len(TAG_TOKEN), 32)
+        for name, secret, bad in cases:
+            with self.subTest(case=name, tag=bad[:6]):
+                self.assertTrue(TAG_RE.fullmatch(bad), bad)
+                if secret["token"] not in bad:
+                    self.assertNotEqual(mmcore.mask(bad), bad, "precondition: mask() changes this tag")
+                _, _, body = self.ns.render(ntfy_cfg(), secret, msg(tags=["ci", bad, "build"]))
+                self.assertEqual(json.loads(body).get("tags", []), ["ci", "build"])
+                self.assertNotIn(bad, body.decode("utf-8"))
+
+    SAMPLES = {"Secret123abcXYZ": "deploy Bearer\tSecret123abcXYZ done",
+               "FlagSecret99x": "run --token\tFlagSecret99x now",
+               "Pass2Secret55z": "login --password\tPass2Secret55z",
+               "PwSecret77y": "PASSWORD\t=\tPwSecret77y"}
+
+    def test_samples_need_mask_before_clean(self):  # A19: each sample tells the two orders apart
+        for secret, sample in self.SAMPLES.items():
+            with self.subTest(sample=sample):
+                self.assertNotIn(secret, mmcore.mask(sample))
+                self.assertIn(secret, mmcore.mask(mmtext.clean(sample)))
+
+    def test_mask_runs_before_control_characters_are_replaced(self):  # 4d.3
+        services = (("ntfy", ntfy_cfg(), {"token": NTFY_TOKEN}),
+                    ("pushover", pushover_cfg(), {"app_token": PO_APP, "user_key": PO_USER}))
+        for service, cfg, sec in services:
+            for secret, sample in self.SAMPLES.items():
+                for field in ("title", "text"):
+                    with self.subTest(service=service, field=field, sample=sample):
+                        _, _, body = self.ns.render(cfg, sec, msg(**{field: sample}))
+                        raw = body.decode("utf-8")
+                        shown = json.dumps(json.loads(raw), ensure_ascii=False) if service == "ntfy" else \
+                            urllib.parse.unquote_plus(raw)
+                        self.assertNotIn(secret, raw)
+                        self.assertNotIn(secret, shown)
+                        self.assertFalse(has_bad(shown.replace("\n", "")), "control characters are still replaced")
+
+
 # --------------------------------------------------------------------------------------------- deliver
 
 def reply(status, body=b"ok", headers=()):
@@ -580,8 +707,9 @@ class Deliver(Base):
         self.assertIsInstance(r["detail"], str)
         self.assertLessEqual(len(r["detail"]), 120)
         self.assertFalse(has_bad(r["detail"]), repr(r["detail"]))
-        for secret in (NTFY_TOKEN, NTFY_TOKEN[:16], PO_APP, PO_APP[:16], PO_USER, PO_USER[:16]):
-            self.assertNotIn(secret, r["detail"])
+        for secret in ALL_SECRETS:  # 4d.1: no 6+ character part of a configured secret (A17)
+            leaked = sorted(p for p in parts(secret) if p in r["detail"])
+            self.assertEqual(leaked, [], r["detail"])
         for mark in (BODY_MARK, TITLE_MARK):
             self.assertNotIn(mark, r["detail"])
         return r
@@ -707,33 +835,56 @@ class Deliver(Base):
                          {"app_token": PO_APP, "user_key": PO_USER}, timeout_s=2)
         self.assertEqual((r["ok"], r["error"]), (False, "E_NOTIFY_NET"))
 
-    def test_oversize_body_is_capped(self):  # A13
+    @contextlib.contextmanager
+    def counted_reads(self):
+        """The body bytes http.client.HTTPResponse hands to the module (A21): outermost calls only."""
+        count, local = [0], threading.local()
+
+        def wrap(orig):
+            def counted(resp, *a, **k):
+                depth = getattr(local, "depth", 0)
+                local.depth = depth + 1
+                try:
+                    got = orig(resp, *a, **k)
+                finally:
+                    local.depth = depth
+                if depth == 0:
+                    count[0] += got if isinstance(got, int) else len(got or b"")
+                return got
+            return counted
+        with contextlib.ExitStack() as stack:
+            for name in ("read", "read1", "readinto", "readinto1", "readline"):
+                stack.enter_context(mock.patch.object(http.client.HTTPResponse, name,
+                                                      wrap(getattr(http.client.HTTPResponse, name))))
+            yield count
+
+    def test_oversize_body_read_is_at_most_65537_bytes(self):  # 4d.6, A13, A21
         chunk = b"z" * 65536
 
-        def endless(length):
+        def big(status, length=None, chunked=False):
             def respond(h, rec, release):
-                h.send_response(200)
+                h.send_response(status)
                 if length:
                     h.send_header("Content-Length", str(length))
+                if chunked:
+                    h.send_header("Transfer-Encoding", "chunked")
                 h.end_headers()
                 sent = 0
                 while sent < (length or 256 << 20) and not release.is_set():
-                    h.wfile.write(chunk)
+                    h.wfile.write(b"10000\r\n" + chunk + b"\r\n" if chunked else chunk)
                     sent += len(chunk)
             return respond
-        for length in (16 << 20, None):
-            with self.subTest(content_length=length), self.fake(endless(length)) as f:
-                tracemalloc.start()
-                try:
-                    t0 = time.monotonic()
-                    r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, timeout_s=3)
-                    took = time.monotonic() - t0
-                    peak = tracemalloc.get_traced_memory()[1]
-                finally:
-                    tracemalloc.stop()
+        cases = [("200 content-length", 200, 16 << 20, False, True), ("200 close-delimited", 200, None, False, True),
+                 ("200 chunked", 200, None, True, True), ("400 content-length", 400, 16 << 20, False, False),
+                 ("500 close-delimited", 500, None, False, False)]
+        for name, status, length, chunked, ok in cases:
+            with self.subTest(case=name), self.fake(big(status, length, chunked)) as f, self.counted_reads() as n:
+                t0 = time.monotonic()
+                r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, timeout_s=3)
+                took = time.monotonic() - t0
+                self.assertLessEqual(n[0], 65537, "the response read is at most 64 KiB plus one sentinel byte")
                 self.assertLess(took, 4.5)
-                self.assertLess(peak, 16 << 20, "the response read is capped (64 KiB)")
-                self.assertEqual((r["ok"], r["status"]), (True, 200))
+                self.assertEqual((r["ok"], r["status"]), (ok, status))
 
     def test_detail_never_holds_secrets_or_the_request(self):
         def echo(status):
@@ -789,6 +940,150 @@ class Deliver(Base):
             r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN})
             self.assertTrue(r["ok"])
         self.assertFalse(trap.called)
+
+
+    # ----------------------------------------------------------------------------------- section 4d
+
+    def test_reason_phrase_never_leaks_a_secret(self):  # 4d.1, A17
+        def reason(status, text):
+            def respond(h, rec, release):
+                h.send_response(status, text)
+                h.send_header("Content-Length", "2")
+                h.end_headers()
+                h.wfile.write(b"no")
+            return respond
+        tok = REASON_TOKEN
+        placements = {"password= then 950 x": "password=" + "x" * 950 + " " + tok, "at the start": tok + " not allowed",
+                      "after words": "denied for " + tok, "across a 120 cut": "x" * 100 + tok,
+                      "after a tab": "Bearer\t" + tok, "twice": tok + " and " + tok}
+        for status, error in ((400, "E_NOTIFY_REFUSED"), (401, "E_NOTIFY_REFUSED"), (500, "E_NOTIFY_HTTP")):
+            for name, text in placements.items():
+                with self.subTest(status=status, placement=name), self.fake(reason(status, text)) as f:
+                    r = self.deliver(ntfy_cfg(f.url), {"token": tok})
+                    self.assertEqual((r["ok"], r["status"], r["error"]), (False, status, error))
+        for name, text in {"both keys": "app %s user %s" % (PO_APP, PO_USER), "across a 120 cut": "x" * 100 + PO_USER,
+                           "password=": "password=" + "x" * 950 + " " + PO_APP}.items():
+            with self.subTest(service="pushover", placement=name), self.fake(reason(400, text)) as f:
+                r = self.deliver(pushover_cfg(f.url), {"app_token": PO_APP, "user_key": PO_USER})
+                self.assertEqual((r["ok"], r["status"], r["error"]), (False, 400, "E_NOTIFY_REFUSED"))
+
+    def test_secret_tag_is_never_published(self):  # 4d.2
+        with self.fake(reply(200)) as f:
+            r = self.deliver(ntfy_cfg(f.url), {"token": TAG_TOKEN}, msg(tags=["ci", TAG_TOKEN]))
+            self.assertTrue(r["ok"])
+            body = f.requests[0]["body"].decode("utf-8")
+            self.assertNotIn(TAG_TOKEN, body)
+            self.assertEqual(json.loads(body).get("tags", []), ["ci"])
+
+    def test_no_late_send_after_a_timeout(self):  # 4d.4, A20
+        for name in ("socket.getaddrinfo", "socket.create_connection"):
+            with self.subTest(slow=name), self.fake(reply(200)) as f:
+                gate = threading.Event()
+
+                def slow(*a, _real=getattr(socket, name.split(".")[1]), **k):
+                    gate.wait(1.6)
+                    return _real(*a, **k)
+                t0 = time.monotonic()
+                try:
+                    with mock.patch(name, slow):
+                        r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, msg(text=BODY_MARK), timeout_s=1)
+                        took = time.monotonic() - t0
+                        time.sleep(max(0.0, 2.4 - (time.monotonic() - t0)))  # a late send would land by now
+                finally:
+                    gate.set()
+                self.assertEqual((r["ok"], r["error"]), (False, "E_NOTIFY_NET"))
+                self.assertLess(took, 2.5)
+                self.assertEqual([x["path"] for x in f.requests if x["method"] == "POST"], [],
+                                 "no request reaches the server after deliver returned E_NOTIFY_NET")
+
+    def test_every_3xx_is_an_http_error_and_no_location_is_followed(self):  # 4d.5
+        with self.fake(reply(200)) as other:
+            locations = {"other server": other.url + "/x", "same server": "/again", "malformed": "http://[bad",
+                         "absent": None, "empty": ""}
+            for status in (300, 301, 302, 303, 304, 305, 307, 308):
+                for name, loc in locations.items():
+                    with self.subTest(status=status, location=name):
+                        headers = [] if loc is None else [("Location", loc)]
+                        with self.fake(reply(status, b"", headers=headers)) as first:
+                            r = self.deliver(ntfy_cfg(first.url), {"token": NTFY_TOKEN})
+                            self.assertEqual((r["ok"], r["status"], r["error"]), (False, status, "E_NOTIFY_HTTP"))
+                            self.assertEqual(len(first.requests), 1)
+            for name in ("malformed", "absent"):
+                with self.subTest(service="pushover", location=name):
+                    headers = [("Location", "http://[bad")] if name == "malformed" else []
+                    with self.fake(reply(302, b"", headers=headers)) as first:
+                        r = self.deliver(pushover_cfg(first.url), {"app_token": PO_APP, "user_key": PO_USER})
+                        self.assertEqual((r["ok"], r["status"], r["error"]), (False, 302, "E_NOTIFY_HTTP"))
+                        self.assertEqual(len(first.requests), 1)
+            self.assertEqual(other.requests, [])
+
+    def test_loopback_http_never_uses_an_environment_proxy(self):  # 4d.7
+        with self.fake(reply(200, b"trapped")) as trap, self.fake(reply(200)) as f:
+            for k in ("no_proxy", "NO_PROXY"):
+                os.environ.pop(k, None)
+            for k in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+                os.environ[k] = trap.url
+            cases = [("ntfy 127.0.0.1", ntfy_cfg(f.url), {"token": NTFY_TOKEN}),
+                     ("ntfy localhost", ntfy_cfg("http://localhost:%d" % f.port), {"token": NTFY_TOKEN}),
+                     ("pushover 127.0.0.1", pushover_cfg(f.url + "/1/messages.json"),
+                      {"app_token": PO_APP, "user_key": PO_USER})]
+            for name, cfg, sec in cases:
+                with self.subTest(case=name):
+                    r = self.deliver(cfg, sec)
+                    self.assertEqual((r["ok"], r["status"]), (True, 200))
+            self.assertEqual(trap.requests, [], "a loopback delivery went to the proxy")
+            self.assertEqual(len([x for x in f.requests if x["method"] == "POST"]), len(cases))
+
+    def ca_and_certs(self):
+        """A test CA and two server certificates it signs: IP 127.0.0.1 (the control) and DNS other.example."""
+        openssl = shutil.which("openssl")
+        if not openssl:
+            self.skipTest("needs the openssl command to make a test CA")
+        d = os.path.join(self.root, "pki")
+        os.mkdir(d, 0o700)
+
+        def run(*args):
+            p = subprocess.run([openssl, *args], capture_output=True, timeout=30, cwd=d)
+            if p.returncode:
+                self.skipTest("openssl could not make the test CA: %s" % p.stderr[-200:])
+        run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.pem", "-days", "1",
+            "-subj", "/CN=notify test CA", "-addext", "basicConstraints=critical,CA:TRUE",
+            "-addext", "keyUsage=critical,keyCertSign,cRLSign")
+        for name, cn, san in (("ip", "127.0.0.1", "IP:127.0.0.1"), ("other", "other.example", "DNS:other.example")):
+            with open(os.path.join(d, name + ".ext"), "w") as f:
+                f.write("subjectAltName=%s\nbasicConstraints=critical,CA:FALSE\n"
+                        "keyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n"
+                        "subjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n" % san)
+            run("req", "-newkey", "rsa:2048", "-nodes", "-keyout", name + ".key", "-out", name + ".csr",
+                "-subj", "/CN=" + cn)
+            run("x509", "-req", "-in", name + ".csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-CAcreateserial",
+                "-out", name + ".pem", "-days", "1", "-extfile", name + ".ext")
+        return {k: os.path.join(d, k) for k in ("ca.pem", "ip.pem", "ip.key", "other.pem", "other.key")}
+
+    def test_trusted_certificate_for_another_host_name_is_refused(self):  # 4d.7, A23
+        pki = self.ca_and_certs()
+        os.environ["SSL_CERT_FILE"] = pki["ca.pem"]
+        original = ssl.create_default_context
+
+        def trusting(*a, **k):
+            ctx = original(*a, **k)
+            ctx.load_verify_locations(cafile=pki["ca.pem"])
+            return ctx
+
+        def server_ctx(name):
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(pki[name + ".pem"], pki[name + ".key"])
+            return ctx
+        with mock.patch("ssl.create_default_context", trusting), \
+                mock.patch("ssl._create_default_https_context", trusting):
+            with self.fake(reply(200), tls_ctx=server_ctx("ip")) as f:
+                r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, timeout_s=3)
+                if not r["ok"]:
+                    self.skipTest("the module's TLS context did not take the test CA (A23): %s" % r["detail"])
+            with self.fake(reply(200), tls_ctx=server_ctx("other")) as f:
+                r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, timeout_s=3)
+                self.assertEqual((r["ok"], r["status"], r["error"]), (False, None, "E_NOTIFY_NET"))
+                self.assertEqual(f.requests, [], "TLS checks the host name")
 
 
 # --------------------------------------------------------------------------------------------- import
