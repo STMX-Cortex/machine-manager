@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 GROUPS = {
+    "notify": ["test_notify"],  # mm notify Part A: [notify], grants, send, run, outbox, sent.jsonl (fake server)
     "storage_fleet": ["test_storage_fleet"],  # storage.json, /storage.json, fleet-storage/ caches, exporter reader
     "storage_io": ["test_storage_io"],
     "storage_darwin": ["test_storage_darwin"],
