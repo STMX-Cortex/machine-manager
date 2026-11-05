@@ -38,7 +38,9 @@ A21 4d.6 The body is read through http.client.HTTPResponse (read, read1, readint
 A22 4d.7 The secret file is opened with os.open, open() or io.open; the test swaps the file inside that call just
     before the real open, and skips if no such call happens.
 A24 4e.1 A word cut short is dropped or replaced by a marker whose text the test does not fix; so the test asserts
-    only that no run of the cut word (8+ characters) and no 6-character piece of a secret survives. Cut points are
+    only that no run of the cut word (8+ characters) survives in the message and no 6-character piece of a secret
+    survives in title or message. The word rule is asserted for the text only: "a text cut" may not cover the title,
+    whose cut word the secret sweep still checks. Cut points are
     unknown inside the module, so the test moves each secret across 100, 1000 and mmtext's line cut (4e.1 sweep).
 A25 4e.4 The slowed functions: socket.socket.connect (and connect_ex) for 127.0.0.1:<fake port>, socket.getaddrinfo
     for "localhost". Each must be called; the no-delay control proves the same path delivers once, on time.
@@ -474,7 +476,6 @@ class RenderNtfy(Base):
                 fields = json.loads(body) if service == "ntfy" else {k: v[0] for k, v in form(body).items()}
                 self.assertLessEqual(len(fields["message"]), 1000)
                 self.assertNotIn("x" * 8, fields["message"], "a word cut short is dropped, not kept in part")
-                self.assertNotIn("T" * 8, fields["title"])
                 self.assertTrue(fields["title"].startswith("[agent-x]"), fields["title"])
 
     def test_exact_bounds_pass_unchanged(self):
@@ -628,28 +629,36 @@ class RenderHardening(Base):
         shapes = {"ghp": ":" + "gh" + "p_" + tail, "github_pat": "/" + "github" + "_pat_" + tail + "_" + tail[:22],
                   "sk": ":" + "s" + "k-" + tail, "akia": "=" + "AK" + "IA" + tail[:16], "xoxb": ":" + "xo" + "xb-" + tail}
         lower = "".join(rng.choice(string.ascii_lowercase) for _ in range(5000))
-        words = " ".join(lower[i:i + 7] for i in range(0, 5000, 7))  # lowercase words: nothing here is masked
+        fillers = {  # what comes before the secret, with no white space before a cut (but "words")
+            "lower": lower, "words": " ".join(lower[i:i + 7] for i in range(0, 5000, 7)),
+            "alnum": "".join(rng.choice(string.ascii_letters + string.digits) for _ in range(5000)),  # a random word
+            "printable": "".join(rng.choice(string.ascii_letters + string.digits + string.punctuation)
+                                 for _ in range(5000))}
         line_cut = mmtext.TEXT_LINE_MAX
         cuts = {"title": (90, 100, 110, line_cut - len(mmtext.CUT_MARK), line_cut),
                 "text": (1000, line_cut - len(mmtext.CUT_MARK), line_cut)}
         services = (("ntfy", ntfy_cfg(), {"token": NTFY_TOKEN}),
                     ("pushover", pushover_cfg(), {"app_token": PO_APP, "user_key": PO_USER}))
+
+        def check(service, cfg, sec, field, text, **where):
+            with self.subTest(service=service, field=field, **where):
+                _, _, body = self.ns.render(cfg, sec, msg(**{field: text}))
+                fields = json.loads(body) if service == "ntfy" else {k: v[0] for k, v in form(body).items()}
+                shown = fields["title"] + "\n" + fields["message"]
+                self.assertEqual(sorted(x for x in pieces if x in shown), [])
         for name, shape in shapes.items():
-            secret = shape[1:]
-            pieces = parts(secret)
+            pieces = parts(shape[1:])
             for service, cfg, sec in services if name == "ghp" else services[:1]:
                 for field, points in cuts.items():
-                    for point in points:
-                        for start in range(point - len(secret) - 1, point + 2, 3):  # the secret across the cut
-                            for style, filler in (("one word", lower), ("words", words)):
-                                text = filler[:start - 1] + shape  # 3980+ characters before the shape near 4096
-                                with self.subTest(shape=name, service=service, field=field, cut=point, start=start,
-                                                  style=style):
-                                    _, _, body = self.ns.render(cfg, sec, msg(**{field: text}))
-                                    fields = json.loads(body) if service == "ntfy" else \
-                                        {k: v[0] for k, v in form(body).items()}
-                                    shown = fields["title"] + "\n" + fields["message"]
-                                    self.assertEqual(sorted(x for x in pieces if x in shown), [])
+                    for point in points:  # the secret moved across each likely cut point
+                        for start in range(point - len(shape), point + 2, 3):
+                            for style, filler in fillers.items():
+                                check(service, cfg, sec, field, filler[:start - 1] + shape, shape=name, cut=point,
+                                      start=start, style=style)
+                    for start in range(3940, 4110):  # 3940+ characters before the shape: every start, two fillers
+                        for style in ("alnum", "printable"):
+                            check(service, cfg, sec, field, fillers[style][:start - 1] + shape, shape=name,
+                                  start=start, style=style)
 
     def test_short_secret_inside_a_tag_is_dropped(self):  # 4e.2
         for tok in ("x", "xq", "xqz", "xqz7", "xqz7k"):
