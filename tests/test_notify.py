@@ -86,6 +86,11 @@ A35 (4g.5) -1 is inside the time bound (abs < 1e12), so it is tested for the who
     A value is placed in the document the code wrote: cursor, last_delivery, queue[0].first, queue[0].tries and
     hour[0].time.
 A36 (4g.6) Lock files are tested through `mm notify run` (both locks) and `mm notify send` (notify.lock).
+A37 (decision c) The test makes an item "evicted meanwhile" by removing it, under notify/notify.lock, from the queue
+    and from `delivering` of the state the run wrote, while the fake server holds its request (then 500). The run
+    exits 1 (a delivery failed). The item's title in state.json holds the alert name.
+A38 (decision a) 11 or 13 hex characters, non-hex characters, null and a number are bad `delivering` values; ids
+    need not be in the queue (20 unknown ids load). A run that delivers nothing leaves `delivering` empty.
 Not covered here (Part B or impractical in a CLI test): a secret file owned by another uid, the systemd/launchd
 templates, NOTIFY.md."""
 import hashlib
@@ -1878,6 +1883,9 @@ class Round4(NotifyBase):
         with open(self.state_file()) as f:
             return json.load(f)
 
+    def sent_file(self):
+        return os.path.join(self.notify_dir(), "sent.jsonl")
+
     def write_state(self, doc_or_text):
         text = doc_or_text if isinstance(doc_or_text, str) else json.dumps(doc_or_text)
         mmcore.write_atomic(self.state_file(), text, mode=0o600)
@@ -1954,12 +1962,13 @@ class Round4(NotifyBase):
         self.assert_delivered(self.send(key_file, "fills the last place", "normal", "two"))
         self.assertEqual(self.cli("notify", "status").returncode, 0, "no write leaves a state a later command refuses")
         raw = self.seed("recent", mmnotify.RECENT_MAX, recent)
-        posts = len(self.fake.posts())
+        posts, audit = len(self.fake.posts()), self.read_bytes(self.sent_file())
         r = self.send(key_file, "one too many", "normal", "three")
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("E_NOTIFY_LIMIT", r.stdout)
         self.assertEqual(len(self.fake.posts()), posts, "nothing delivered")
         self.assertEqual(self.read_bytes(self.state_file()), raw, "nothing written")
+        self.assertEqual(self.read_bytes(self.sent_file()), audit, "decision (b): not even a sent.jsonl line")
         self.write_alerts(self.alert(2, "STILL_WORKS", "ACTION"))
         r = self.cli("notify", "run")
         self.assertEqual(r.returncode, 0, r.stdout)
@@ -1970,11 +1979,12 @@ class Round4(NotifyBase):
         import mmnotify
         key_file, _, hour = self.capacity_setup()
         raw = self.seed("hour", mmnotify.HOUR_MAX, hour)
-        posts = len(self.fake.posts())
+        posts, audit = len(self.fake.posts()), self.read_bytes(self.sent_file())
         r = self.send(key_file, "over the global hour", "normal", "x")
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("E_NOTIFY_LIMIT", r.stdout)
         self.assertEqual(self.read_bytes(self.state_file()), raw, "nothing written")
+        self.assertEqual(self.read_bytes(self.sent_file()), audit, "decision (b): not even a sent.jsonl line")
         self.write_alerts(self.alert(2, "OVER_HOUR", "ACTION"))
         r = self.cli("notify", "run")
         self.assertEqual(r.returncode, 0, r.stdout)
@@ -2016,6 +2026,101 @@ class Round4(NotifyBase):
             self.cli("notify", "run", offset=100 + k)
         delivered = [x["id"] for x in self.sent() if x["status"] == "delivered"]
         self.assertIn(retry_id, delivered, "the retry is retried later and delivered")
+
+    # ---- decision (a): the `delivering` key
+
+    def delivering_setup(self):
+        """A state with one queued agent item and its id (12 hex)."""
+        self.baseline()
+        key_file = self.grant("agent-one", "--per-hour", "60")
+        self.fake.responses = [500]
+        self.assert_queued(self.send(key_file, "waits"))
+        doc = self.state()
+        self.assertIn("delivering", doc, "decision (a): every write includes `delivering`")
+        self.assertEqual(doc["delivering"], [], "no run is delivering")
+        return key_file, doc
+
+    def test_state_without_delivering_loads_as_empty(self):
+        key_file, doc = self.delivering_setup()
+        del doc["delivering"]
+        self.write_state(doc)
+        self.assertEqual(self.cli("notify", "status").returncode, 0)
+        self.write_alerts(self.alert(2, "AFTER_OLD_FILE", "ACTION"))
+        r = self.cli("notify", "run")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(self.titles()[-1], "[mm] AFTER_OLD_FILE")
+        self.assertEqual(self.state().get("delivering"), [], "the next write adds it, empty after the run")
+        doc = self.state()
+        del doc["delivering"]
+        self.write_state(doc)
+        self.assert_delivered(self.send(key_file, "send on an old file"))
+        self.assertIn("delivering", self.state())
+
+    def test_bad_delivering_values_are_E_NOTIFY_STATE(self):
+        key_file, doc = self.delivering_setup()
+        qid = doc["queue"][0]["id"]
+        self.assertRegex(qid, r"^[0-9a-f]{12}$")
+        ids = ["%012x" % (0xb00000000000 + i) for i in range(21)]
+        bad = [("not a list", qid), ("a number", 7), ("21 ids", ids), ("duplicates", [qid, qid]),
+               ("not hex", ["zzzzzzzzzzzz"]), ("11 hex", [qid[:11]]), ("13 hex", [qid + "0"]),
+               ("a number inside", [5]), ("null", None)]
+        self.write_alerts(self.alert(2, "PENDING", "ACTION"))
+        for label, value in bad:
+            with self.subTest(label=label):
+                raw = self.write_state(dict(doc, delivering=value))
+                posts = len(self.fake.posts())
+                for args in (("notify", "run"), ("notify", "send", "--key-file", key_file, "--level", "normal",
+                                                 "--title", "while bad")):
+                    self.assert_error(self.cli(*args), "E_NOTIFY_STATE", 2)
+                    self.assertEqual(self.read_bytes(self.state_file()), raw, "nothing written")
+                self.assertEqual(len(self.fake.posts()), posts)
+        for label, value in (("empty", []), ("20 ids", ids[:20]), ("the queued id", [qid])):
+            with self.subTest(good=label):
+                self.write_state(dict(doc, delivering=value))
+                self.assertEqual(self.cli("notify", "status").returncode, 0, label)
+
+    def test_run_clears_a_leftover_delivering_list(self):
+        _, doc = self.delivering_setup()
+        qid = doc["queue"][0]["id"]
+        self.write_state(dict(doc, delivering=[qid]))  # as a killed run leaves it
+        r = self.cli("notify", "run")  # the queued item is not due: nothing to deliver
+        self.assertIn(r.returncode, (0, 1), r.stdout)
+        self.assertEqual(self.state()["delivering"], [], "a run that holds run.lock clears it first")
+        self.assertEqual(self.status().get("queued"), "1")
+
+    # ---- decision (c): a failed item evicted meanwhile is re-queued
+
+    def test_failed_item_gone_meanwhile_is_requeued(self):
+        import fcntl
+        self.baseline()
+        self.write_alerts(self.alert(2, "GONE", "ACTION"))
+        self.fake.responses = ["hold500"]
+        p = self.popen_run()
+        self.wait_posts(1, p)
+        with open(os.path.join(self.notify_dir(), "notify.lock"), "a+") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)  # as another queue writer would
+            try:
+                doc = self.state()
+                [item] = [q for q in doc["queue"] if "GONE" in q.get("title", "")]
+                self.assertIn(item["id"], doc.get("delivering", []), "the first write named its delivery")
+                doc["queue"] = [q for q in doc["queue"] if q["id"] != item["id"]]  # evicted meanwhile (A37)
+                doc["delivering"] = [i for i in doc["delivering"] if i != item["id"]]
+                self.write_state(doc)
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+        self.fake.release.set()
+        out, err = p.communicate(timeout=30)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(p.returncode, 1, out)
+        recs = [x for x in self.sent() if x["id"] == item["id"]]
+        self.assertIn(("failed", "E_NOTIFY_HTTP"), [(x["status"], x["error"]) for x in recs], recs)
+        self.assertIn(("queued", "E_NOTIFY_REQUEUED"), [(x["status"], x["error"]) for x in recs], recs)
+        self.assertEqual(self.status().get("queued"), "1", "re-queued")
+        self.assertEqual(self.state()["delivering"], [])
+        self.fake.default = 200
+        self.cli("notify", "run", offset=100)
+        self.assertEqual(self.titles(), ["[mm] GONE", "[mm] GONE"], "retried later")
+        self.assertIn("delivered", [x["status"] for x in self.sent() if x["id"] == item["id"]])
 
     # ---- 4g.4: the alert snapshot lock without a state folder
 
