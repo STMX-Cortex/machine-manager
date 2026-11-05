@@ -1,0 +1,11 @@
+[Unit]
+Description=Run machine-manager phone notifications without overlapping runs
+
+[Timer]
+OnStartupSec=15
+OnUnitInactiveSec=30
+AccuracySec=5
+Unit=mm-notify.service
+
+[Install]
+WantedBy=timers.target
