@@ -91,6 +91,10 @@ A37 (decision c) The test makes an item "evicted meanwhile" by removing it, unde
     exits 1 (a delivery failed). The item's title in state.json holds the alert name.
 A39 (decision c) "The normal failed line" is the line any retryable run failure writes: status failed or queued,
     error E_NOTIFY_HTTP. The extra line must be status queued, error E_NOTIFY_REQUEUED.
+A40 (round 5) With tries = 2**53 the backoff stays capped at 15 minutes, so the item is retried at +40 s and again
+    at +1000 s; each run finishes in under 10 s (the subprocess is killed at 10 s).
+A41 (round 5) The "newer" items copy the shape of the held item's own queue entry (as the code wrote it), with new
+    12-hex ids, `first` 1 s or more later and `next` 600 s later, so 100 of them fill the queue.
 A38 (decision a) 11 or 13 hex characters, non-hex characters, null and a number are bad `delivering` values; ids
     need not be in the queue (20 unknown ids load). A run that delivers nothing leaves `delivering` empty.
 Not covered here (Part B or impractical in a CLI test): a secret file owned by another uid, the systemd/launchd
@@ -2124,6 +2128,72 @@ class Round4(NotifyBase):
         self.cli("notify", "run", offset=100)
         self.assertEqual(self.titles(), ["[mm] GONE", "[mm] GONE"], "retried later")
         self.assertIn("delivered", [x["status"] for x in self.sent() if x["id"] == item["id"]])
+
+    # ---- round 5: regressions (4g.3 addition, backoff note)
+
+    def test_huge_retry_count_runs_promptly_and_stays_valid(self):
+        self.baseline()
+        key_file = self.grant("agent-one", "--per-hour", "60")
+        self.fake.default = 500
+        self.assert_queued(self.send(key_file, "retried forever"))
+        doc = self.state()
+        self.assertEqual(len(doc["queue"]), 1)
+        doc["queue"][0]["tries"] = 2 ** 53  # the allowed maximum (4g.5)
+        self.write_state(doc)
+        self.assertEqual(self.cli("notify", "status").returncode, 0, "the seeded document is valid")
+        for offset in (40, 1000):  # due at 30; then within the 15-minute cap (A40)
+            posts = len(self.fake.posts())
+            t0 = time.monotonic()
+            try:
+                r = self.cli("notify", "run", offset=offset, timeout=10)
+            except subprocess.TimeoutExpired:
+                self.fail("mm notify run took over 10 s with tries = 2**53")
+            self.assertLess(time.monotonic() - t0, 10)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertEqual(len(self.fake.posts()), posts + 1, ("retried at", offset))
+            self.assertEqual(self.cli("notify", "status", offset=offset).returncode, 0, "state.json still loads")
+            self.assertEqual(self.status(offset=offset).get("queued"), "1")
+            tries = self.state()["queue"][0]["tries"]
+            self.assertIsInstance(tries, int)
+            self.assertLessEqual(tries, 2 ** 53, "tries saturates at 2**53")
+
+    def test_requeued_item_never_evicts_itself(self):
+        import fcntl
+        self.baseline()
+        self.write_alerts(self.alert(2, "HELD", "ACTION"))
+        self.fake.responses = ["hold500"]
+        p = self.popen_run()
+        self.wait_posts(1, p)
+        with open(os.path.join(self.notify_dir(), "notify.lock"), "a+") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                doc = self.state()
+                [item] = [q for q in doc["queue"] if q.get("title") == "HELD"]
+                newer = []
+                for i in range(100):  # A41: copies of the held entry, each first attempted later
+                    e = dict(item, id="%012x" % (0xc00000000000 + i), title="NEWER_%03d" % i,
+                             first=round(item["first"] + 1 + i * 0.01, 3))
+                    if isinstance(e.get("next"), (int, float)):
+                        e["next"] = round(e["next"] + 600, 3)
+                    newer.append(e)
+                doc["queue"] = newer
+                doc["delivering"] = [i for i in doc.get("delivering", []) if i != item["id"]]
+                self.write_state(doc)
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+        self.fake.release.set()
+        out, err = p.communicate(timeout=30)
+        self.assertNotIn("Traceback", err)
+        queue = self.state()["queue"]
+        self.assertIn(item["id"], [q["id"] for q in queue], "the re-queued item is in the queue")
+        self.assertLessEqual(len(queue), 100)
+        recs = self.sent()
+        dropped = [x["id"] for x in recs if x["status"] == "dropped"]
+        self.assertTrue(dropped, "one newer item is dropped")
+        self.assertNotIn(item["id"], dropped, "never the re-queued item itself")
+        self.assertTrue(all(d.startswith("c000000000") for d in dropped), dropped)
+        self.assertIn(("queued", "E_NOTIFY_REQUEUED"),
+                      [(x["status"], x["error"]) for x in recs if x["id"] == item["id"]])
 
     # ---- 4g.4: the alert snapshot lock without a state folder
 
