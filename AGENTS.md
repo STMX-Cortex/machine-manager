@@ -57,5 +57,4 @@ Levels: INFO, ATTENTION, ACTION. Alert names: README.md, Glossary.
 5. Never run `mm drill`, `mm install`, `mm rollback`, `mm stop`, `mm restart` or `mm on` without the owner's word.
    `SAFE_MODE` means automatic actions are off until the owner ends it.
 6. Never put secrets in `--note` or `--reason` text (they are masked, but still).
-7. Use `mm notify send` only for what the owner must see or decide, never for routine progress; never grant yourself a key,
-   and never read another agent's key file or the notify secret file.
+7. `mm notify send` only for what the owner must see or decide, not routine progress; never grant yourself a key or read other keys.
