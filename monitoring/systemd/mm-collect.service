@@ -1,4 +1,4 @@
-# Central machine only. This writes fleet.json; it does not change local control settings.
+# Central machine only. Writes fleet.json and fleet-storage/; it does not change local control settings.
 [Unit]
 Description=Collect configured machine-manager peers
 
@@ -7,6 +7,7 @@ Type=oneshot
 ExecStart=/ABS/PYTHON3 -I /ABS/MACHINE_MANAGER/bin/mm collect --profile /ABS/PROFILE.toml --data /ABS/MM_DATA
 # A partial collection is represented as UNKNOWN peers in the cache.
 SuccessExitStatus=1
-TimeoutStartSec=300
+# Status then storage: up to 32 peers, 4 at a time, timeout_s <= 30 each: 2 x 8 x 30 s = 480 s, plus margin.
+TimeoutStartSec=600
 UMask=0077
 NoNewPrivileges=yes

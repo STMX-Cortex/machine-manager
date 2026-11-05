@@ -1,0 +1,990 @@
+{
+  "uid": "mm-storage",
+  "title": "Machine Manager / Storage",
+  "description": "Per-filesystem capacity and per-device I/O rates from storage snapshots. Unknown and stale readings remain gaps. Never sum filesystems, capacity groups or devices. Monitoring has no control authority.",
+  "tags": [
+    "machine-manager"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Machine Manager Prometheus",
+          "value": "mm-prometheus"
+        },
+        "options": []
+      },
+      {
+        "name": "job",
+        "type": "constant",
+        "query": "machine-manager",
+        "current": {
+          "text": "machine-manager",
+          "value": "machine-manager"
+        },
+        "hide": 2
+      },
+      {
+        "name": "instance",
+        "label": "Producer",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(up{job=\"$job\"}, instance)",
+          "refId": "variable-instance"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "machine",
+        "label": "Machine",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(machine_manager_storage_snapshot_fresh{job=\"$job\",instance=~\"${instance}\"}, machine_id)",
+          "refId": "variable-machine"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Fleet",
+      "type": "link",
+      "url": "/d/mm-fleet",
+      "includeVars": true,
+      "keepTime": true
+    },
+    {
+      "title": "Resources",
+      "type": "link",
+      "url": "/d/mm-resources",
+      "includeVars": true,
+      "keepTime": true
+    },
+    {
+      "title": "Storage",
+      "type": "link",
+      "url": "/d/mm-storage",
+      "includeVars": true,
+      "keepTime": true
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Storage snapshot freshness (1 = fresh)",
+      "type": "timeseries",
+      "description": "Zero means the storage snapshot is missing, invalid or stale; its measurements are then absent. Machines without storage export have no series.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_storage_snapshot_fresh{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Storage snapshot age",
+      "type": "timeseries",
+      "description": "Source observation time, not scrape time. A scrape never refreshes a storage timestamp.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(time() - machine_manager_storage_snapshot_timestamp_seconds{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}, 0)",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Current storage snapshot freshness and age",
+      "type": "table",
+      "description": "Current values per machine. Export complete = 0 means the exporter's storage byte budget omitted this machine's filesystem and device series; empty for stale snapshots.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_storage_snapshot_fresh{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "clamp_min(time() - machine_manager_storage_snapshot_timestamp_seconds{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}, 0)",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "expr": "machine_manager_storage_export_complete{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Age"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "__name__": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "machine_id": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "instance": 4
+            },
+            "renameByName": {
+              "machine_id": "Machine",
+              "Value #A": "Fresh",
+              "Value #B": "Age",
+              "Value #C": "Export complete",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Current storage inventory state",
+      "type": "table",
+      "description": "One active state per machine and source (capacity, io). Stale snapshots report UNKNOWN; PARTIAL means some filesystems or devices are missing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_storage_inventory_state{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"} == 1",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "Value": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "machine_id": 0,
+              "source": 1,
+              "state": 2,
+              "instance": 3
+            },
+            "renameByName": {
+              "machine_id": "Machine",
+              "source": "Source",
+              "state": "State",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Filesystems",
+      "type": "table",
+      "description": "One row per filesystem. Used fraction is used/size and is empty for unknown or zero size. Volumes in one capacity group share space: never add their sizes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_storage_filesystem_size_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "machine_manager_storage_filesystem_available_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "expr": "(machine_manager_storage_filesystem_used_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"} / machine_manager_storage_filesystem_size_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}) and (machine_manager_storage_filesystem_size_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"} > 0)",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        },
+        {
+          "refId": "D",
+          "expr": "machine_manager_storage_filesystem_capacity_known{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        },
+        {
+          "refId": "E",
+          "expr": "machine_manager_storage_filesystem_read_only{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Size"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Available"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used fraction"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "__name__": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "machine_id": 0,
+              "mount": 1,
+              "fs_type": 2,
+              "capacity_group": 3,
+              "Value #A": 4,
+              "Value #B": 5,
+              "Value #C": 6,
+              "Value #D": 7,
+              "Value #E": 8,
+              "filesystem_id": 9,
+              "instance": 10
+            },
+            "renameByName": {
+              "machine_id": "Machine",
+              "mount": "Mount",
+              "fs_type": "Type",
+              "capacity_group": "Capacity group",
+              "Value #A": "Size",
+              "Value #B": "Available",
+              "Value #C": "Used fraction",
+              "Value #D": "Capacity known",
+              "Value #E": "Read-only",
+              "filesystem_id": "Filesystem ID",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Filesystem available",
+      "type": "timeseries",
+      "description": "Bytes available to the collecting account, per filesystem. Gaps mean unknown or stale capacity.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_storage_filesystem_available_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{mount}} {{filesystem_id}}",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Filesystem used fraction",
+      "type": "timeseries",
+      "description": "Used divided by size, per filesystem. Unknown or zero size is a gap, never a fabricated percentage.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 21,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(machine_manager_storage_filesystem_used_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"} / machine_manager_storage_filesystem_size_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}) and (machine_manager_storage_filesystem_size_bytes{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"} > 0)",
+          "legendFormat": "{{instance}} / {{machine_id}} {{mount}} {{filesystem_id}}",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Device read and write bytes per second",
+      "type": "timeseries",
+      "description": "Rates over the collector's sample interval, per device. Unknown rates (first sample, reset, replaced device) are gaps, not zero; devices are never added together.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_storage_device_read_bytes_per_second{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) {{device_id}} read",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "machine_manager_storage_device_write_bytes_per_second{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) {{device_id}} write",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Device read and write operations per second",
+      "type": "timeseries",
+      "description": "Completed operations per second over the collector's sample interval, per device.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_storage_device_read_ops_per_second{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) {{device_id}} read",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "machine_manager_storage_device_write_ops_per_second{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}} {{device}} ({{scope}}) {{device_id}} write",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "iops",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisCenteredZero": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Devices",
+      "type": "table",
+      "description": "Rates known = 0 means no measured rate for this snapshot; the device still exists.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "machine_manager_storage_device_rates_known{job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "alertstate": true
+            },
+            "indexByName": {
+              "machine_id": 0,
+              "device": 1,
+              "scope": 2,
+              "Value": 3,
+              "device_id": 4,
+              "instance": 5
+            },
+            "renameByName": {
+              "machine_id": "Machine",
+              "device": "Device",
+              "scope": "Scope",
+              "Value": "Rates known",
+              "device_id": "Device ID",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Firing storage alerts (selected producers and machines)",
+      "type": "table",
+      "description": "Storage snapshot, filesystem and main-filesystem alerts. Delivery requires an external Alertmanager.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ALERTS{alertname=~\"MachineManager(Storage|Filesystem).*\",alertstate=\"firing\",job=\"$job\",instance=~\"${instance}\",machine_id=~\"${machine}\"}",
+          "legendFormat": "{{instance}} / {{machine_id}}",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "Value": true,
+              "alertstate": true,
+              "fs_type": true,
+              "capacity_group": true
+            },
+            "indexByName": {
+              "alertname": 0,
+              "severity": 1,
+              "machine_id": 2,
+              "mount": 3,
+              "source": 4,
+              "filesystem_id": 5,
+              "instance": 6
+            },
+            "renameByName": {
+              "alertname": "Alert",
+              "severity": "Severity",
+              "machine_id": "Machine",
+              "mount": "Mount",
+              "source": "Source",
+              "filesystem_id": "Filesystem ID",
+              "instance": "Producer"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

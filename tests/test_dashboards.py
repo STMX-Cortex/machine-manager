@@ -7,6 +7,7 @@ import re
 from mmtest import TempData, base_settings
 from test_metrics import machine, resource, document, NOW, MID
 import mmprometheus
+import storage_fixtures
 
 CODE = Path(__file__).resolve().parent.parent
 
@@ -22,10 +23,21 @@ class Dashboards(TempData):
         case = next(t for t in fixtures["tests"] if t["name"] == "zero storage size remains unknown")
         self.assertIn({"expr": expression, "eval_time": "20m", "exp_samples": []}, case["promql_expr_test"])
 
+    def test_zero_filesystem_fixture_uses_the_shipped_storage_query(self):
+        dashboard = json.loads((CODE / "monitoring/grafana/dashboards/storage.json").read_text())
+        expression = next(p for p in dashboard["panels"] if p["id"] == 6)["targets"][0]["expr"]
+        expression = expression.replace("$job", "machine-manager")
+        for variable in ("instance", "machine"):
+            expression = expression.replace("${%s}" % variable, ".*")
+        fixtures = json.loads((CODE / "monitoring/tests/alerts.test.yml").read_text())
+        case = next(t for t in fixtures["tests"] if t["name"] == "zero filesystem size remains unknown")
+        self.assertIn({"expr": expression, "eval_time": "30m", "exp_samples": []}, case["promql_expr_test"])
+
     def test_dashboard_metric_families_are_exported(self):
         source = machine(readings={"free_pct": 50, "cpu_pct": 30, "sys_pct": 5, "comp_mb": 10,
                                    "swap_used_mb": 2, "psi_some_pct": 1, "psi_full_pct": 0})
-        text, _ = mmprometheus.render(MID, source, document(resource()), (), NOW, base_settings())
+        text, _ = mmprometheus.render(MID, source, document(resource()), (), NOW, base_settings(),
+                                      storage=[(MID, storage_fixtures.snapshot(), True)])
         exported = set(re.findall(r"^# TYPE (machine_manager_\w+)", text, re.M))
         for path in sorted((CODE / "monitoring/grafana/dashboards").glob("*.json")):
             dashboard = json.loads(path.read_text())
@@ -50,3 +62,40 @@ class Dashboards(TempData):
                         self.assertNotRegex(expr, r"\bor\s+(vector\s*\(\s*0|0\b)")
                 if panel["type"] == "timeseries":
                     self.assertFalse(panel["fieldConfig"]["defaults"]["custom"]["spanNulls"])
+
+    def test_storage_dashboard_is_linked_and_shows_each_storage_family_without_totals(self):
+        boards = {path.name: json.loads(path.read_text())
+                  for path in (CODE / "monitoring/grafana/dashboards").glob("*.json")}
+        storage = boards.pop("storage.json")
+        self.assertEqual(storage["uid"], "mm-storage")
+        fleet = boards["fleet.json"]
+        self.assertIn("/d/mm-storage", [link["url"] for link in fleet["links"]])
+        self.assertEqual([v["name"] for v in storage["templating"]["list"]],
+                         [v["name"] for v in fleet["templating"]["list"]])
+        self.assertEqual(len({p["id"] for p in storage["panels"]}), len(storage["panels"]))
+        exprs = " ".join(t["expr"] for p in storage["panels"] for t in p["targets"])
+        for name in ("snapshot_fresh", "snapshot_timestamp_seconds", "inventory_state", "filesystem_size_bytes",
+                     "filesystem_available_bytes", "filesystem_used_bytes", "device_read_bytes_per_second",
+                     "device_write_bytes_per_second", "device_read_ops_per_second", "device_write_ops_per_second"):
+            self.assertIn("machine_manager_storage_" + name + "{", exprs)
+        self.assertNotRegex(exprs, r"\b(by|without)\s*\(|\b(avg|min|max|count|topk|bottomk|group)\s*\(")
+
+    def test_merged_tables_drop_metric_names_before_joining_rows(self):
+        def drops_name(step):
+            options = step.get("options", {})
+            if step["id"] == "organize":
+                return options.get("excludeByName", {}).get("__name__") is True
+            return step["id"] == "filterFieldsByName" and "__name__" in options.get("exclude", {}).get("names", [])
+
+        merged = 0
+        for path in sorted((CODE / "monitoring/grafana/dashboards").glob("*.json")):
+            for panel in json.loads(path.read_text())["panels"]:
+                steps = panel.get("transformations", [])
+                for index, step in enumerate(steps):
+                    if step["id"] == "merge":
+                        merged += 1
+                        with self.subTest(dashboard=path.name, panel=panel["title"]):
+                            self.assertEqual(panel["type"], "table")
+                            self.assertTrue(any(drops_name(s) for s in steps[:index]),
+                                            "different __name__ values would split merged rows")
+        self.assertGreaterEqual(merged, 2)

@@ -1,0 +1,12 @@
+# Every host that exports storage (central and peers). This writes only storage.json; see STORAGE.md.
+[Unit]
+Description=Record the machine-manager storage snapshot
+
+[Service]
+Type=oneshot
+ExecStart=/ABS/PYTHON3 -I /ABS/MACHINE_MANAGER/bin/mm storage record --profile /ABS/PROFILE.toml --data /ABS/MM_DATA
+# Partial or unknown storage is still written, and exported as such.
+SuccessExitStatus=1
+TimeoutStartSec=120
+UMask=0077
+NoNewPrivileges=yes

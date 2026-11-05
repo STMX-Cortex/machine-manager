@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 GROUPS = {
+    "storage_fleet": ["test_storage_fleet"],  # storage.json, /storage.json, fleet-storage/ caches, exporter reader
     "storage_io": ["test_storage_io"],
     "storage_darwin": ["test_storage_darwin"],
     "storage_linux": ["test_storage_linux"],
@@ -23,6 +24,7 @@ GROUPS = {
     "dashboards": ["test_dashboards"],
     "monitoring": ["test_monitoring"],
     "metrics": ["test_metrics"],
+    "metrics_storage": ["test_metrics_storage"],  # fleet storage families: unknown/stale omission, no sums
     "generic_pools": ["test_generic_pools"],
     "fleet": ["test_fleet"],
     "linux": ["test_linux"],

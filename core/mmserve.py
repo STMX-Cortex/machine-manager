@@ -12,6 +12,7 @@ import time
 import mmcore
 import mmfleet
 import mmprometheus
+import mmstorage_fleet
 
 PORT = 9877
 CONNECTIONS = 4
@@ -142,7 +143,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply(403, b"loopback Host required\n")
             return
         # BaseHTTPRequestHandler normalizes leading //; require the original request target too.
-        if self.path not in ("/metrics", "/status.json", "/-/healthy") or self.requestline.split()[1] != self.path:
+        if self.path not in ("/metrics", "/status.json", "/storage.json", "/-/healthy") \
+                or self.requestline.split()[1] != self.path:
             self.reply(404, b"not found\n")
             return
         if self.path == "/-/healthy":
@@ -153,6 +155,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self.path == "/metrics":
                 text, _ = mmprometheus.export(self.server.profile, s, now)
                 self.reply(200, text.encode("utf-8"), CONTENT_TYPE)
+            elif self.path == "/storage.json":
+                # The local snapshot only (valid, this machine, fresh), re-serialized; never peer caches or raw files.
+                doc = mmstorage_fleet.local(self.server.profile, now)
+                body = mmstorage_fleet.dumps(doc).encode("ascii") if doc is not None else b""
+                if doc is None or len(body) > mmstorage_fleet.SNAPSHOT_BYTES:
+                    self.reply(503, b"storage snapshot unavailable\n")
+                else:
+                    self.reply(200, body, "application/json")
             else:
                 status = public_status(self.server.profile, s, now)
                 if status is None:

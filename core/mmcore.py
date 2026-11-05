@@ -12,6 +12,7 @@ import re
 import os
 import shlex
 import socket
+import tempfile
 import time
 
 import mmdecide
@@ -211,10 +212,35 @@ def now_local(t=None):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() if t is None else t))
 
 
-def write_atomic(target, text):
-    """Write text to target by a temporary file in the same folder and a rename."""
+def _write_atomic_mode(folder, target, text, mode):
+    """A new random temporary name (O_EXCL: never an existing link or FIFO), exact mode, fsync, rename.
+    The temporary file is removed on any failure."""
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix="." + os.path.basename(target) + ".", suffix=".tmp")
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "w") as f:
+            fd = None
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def write_atomic(target, text, mode=None):
+    """Write text to target by a temporary file in the same folder and a rename.
+    mode: exact permission bits for the new file, through a new random temporary file (_write_atomic_mode)."""
     folder = os.path.dirname(target) or "."
     os.makedirs(folder, exist_ok=True)
+    if mode is not None:
+        return _write_atomic_mode(folder, target, text, mode)
     tmp = os.path.join(folder, ".%s.%d.tmp" % (os.path.basename(target), os.getpid()))
     with open(tmp, "w") as f:
         f.write(text)
