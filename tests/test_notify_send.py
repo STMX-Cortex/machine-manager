@@ -300,8 +300,8 @@ class CheckUrl(Base):
     def test_refused(self):
         for url in ("http://ntfy.example.net", "http://10.0.0.1", "http://192.168.1.10:8080", "http://0.0.0.0",
                     "http://localhost.example.net", "http://127.0.0.1.example.net", "http://[2001:db8::1]",
-                    "https://user:pw@ntfy.example.net", "https://user@ntfy.example.net",
-                    "http://127.0.0.1@evil.example.net", "https://:pw@ntfy.example.net",
+                    "https://user:pw@example.com", "https://user@example.com",
+                    "http://127.0.0.1@example.com", "https://:pw@example.com", "http://localhost:80@example.com",
                     "https://ntfy.example.net/?a=1", "https://ntfy.example.net/path?x", "https://ntfy.example.net/#f",
                     "https://ntfy.example.net#frag",
                     "https://", "https:///path", "http://:8080", "ntfy.example.net", "//ntfy.example.net",
