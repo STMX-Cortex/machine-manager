@@ -389,8 +389,14 @@ class Off(NotifyBase):
         for verb in self.VERBS:
             cmd = [sys.executable, "-I", mm or MM_PATH, "--profile", self.prof, "--data", self.data, *verb]
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            out.append((verb, r.returncode, r.stdout, r.stderr))
+            out.append((verb, r.returncode, self._ages(r.stdout), r.stderr))
         return out
+
+    @staticmethod
+    def _ages(text):
+        """Mask whole-second ages (`x_s=N`, `"x_s": N`): two runs a second apart differ there and nowhere else."""
+        text = re.sub(r'("\w+_s": )\d+', r"\1N", text)
+        return re.sub(r"\b(\w+_s=)\d+", r"\1N", text)
 
     def test_other_verbs_unchanged_with_and_without_notify(self):
         self._golden_data()
