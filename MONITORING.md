@@ -167,7 +167,8 @@ copies and `promtool check config` on the copied YAML. After owner approval, use
 and enable/start `mm-monitoring.service`, `mm-collect.timer` and `mm-prometheus.service` on the central machine.
 Peers need only `mm-monitoring.service`. Every host that exports storage (central and peers) also enables
 `mm-storage.timer`: it runs `mm storage record` 60 seconds after the previous run finished (no overlap; exit 1, partial
-storage, still counts as success). The collect timer waits 15 seconds after each collection finishes, so runs cannot
+storage, still counts as success). With phone notifications ([NOTIFY.md](NOTIFY.md)), enable `mm-notify.timer`: it runs
+`mm notify run` 30 seconds after the previous run finished (exit 1, a delivery to retry, still counts as success). The collect timer waits 15 seconds after each collection finishes, so runs cannot
 overlap. Collection exit 1 is accepted by the service because unavailable peers are recorded in the cache. Check
 `systemctl --user status` and the user journal for those exact units. User services depend on the user manager;
 login-independent operation requires an owner/admin decision about lingering. These instructions do not enable it.
@@ -175,13 +176,13 @@ login-independent operation requires an owner/admin decision about lingering. Th
 macOS: copy reviewed plists to `~/Library/LaunchAgents/`, validate each with `plutil -lint`, then, after owner
 approval, bootstrap the monitoring/collect/Prometheus agents into `gui/$(id -u)` using `launchctl bootstrap`.
 Peers need only the monitoring agent, plus `org.machine-manager.storage` (every 60 seconds) on each host that exports
-storage. `StartInterval` triggers collection every 15 seconds and launchd does not
+storage, and `org.machine-manager.notify` (every 30 seconds) with phone notifications. `StartInterval` triggers collection every 15 seconds and launchd does not
 start another copy while that job is running; missed intervals are not a backlog. Check `launchctl print` for the
 exact `org.machine-manager.*` labels you bootstrapped and their logs. GUI LaunchAgents depend on the logged-in session.
 These labels do not replace or restart the installed supervisor or watchdog.
 
 Stop/remove only the new units/agents when rolling back monitoring: Linux disable/stop `mm-collect.timer`,
-`mm-storage.timer`, `mm-monitoring.service` and `mm-prometheus.service`; Mac boot out the exact new agents. Delete
+`mm-storage.timer`, `mm-notify.timer`, `mm-monitoring.service` and `mm-prometheus.service`; Mac boot out the exact new agents. Delete
 `storage.json`, `fleet-storage/` and `fleet-storage-attempt.json` only by owner choice; nothing else reads them. Remove their reviewed
 copies and reload the user manager as applicable. Close only your monitoring tunnels. Keep the existing profile,
 settings, queue, supervisor, watchdog and data files in place. Retain or remove the separate TSDB only by owner choice.
