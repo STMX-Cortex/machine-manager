@@ -41,18 +41,18 @@ Agents:
   mm storage [io|record] [--include PATH] [--exclude PATH] [--interval SEC]   see STORAGE.md
   mm tailscale --peer PEER --user USER [--port N] [--dry-run]   SSH tunnel; TAILSCALE.md
   mm settings show [KEY|SECTION]   the settings in force, each with its default (read-only)
+  mm notify send --key-file F --level quiet|normal|ring --title T [--text T] [--tag T]   NOTIFY.md
 Owner:
   mm off [--reason TEXT] | mm on      every automatic action off or on; on also ends safe mode
   mm slots pin N --minutes M [--reason TEXT] | mm slots unpin
   mm cleanup                delete candidates for a person, with exact commands (nothing is deleted)
-  mm event timing-failure [--note TEXT]
-  mm watch RUN_ID [--note TEXT]       watch one pool run; an alert when it ends
+  mm event timing-failure [--note TEXT] | mm watch RUN_ID [--note TEXT]   an alert when a run ends
   mm snapshot ID            an evidence bundle for an alert now
   mm drill memory           a controlled memory load test (refuses unless the queue is empty)
+  mm notify grant NAME [--max-level L] [--per-hour N] | revoke NAME | grants | test | status | run
 Setup:
   mm init --profile NAME [--dir DIR] | mm check [--online] | mm install [--settings FILE]
-  mm stop | mm start | mm restart [--clear-safe] | mm rollback
-  mm selftest
+  mm stop | mm start | mm restart [--clear-safe] | mm rollback | mm selftest
 Internal (launchd and hooks): mm run [--dry-run] | mm watchdog | mm hook --event EVENT
 Exit: 0 ok, 1 none or problems, 2 error, 3 stale, 10 POOL, 20 WAIT."""
 
@@ -591,7 +591,11 @@ def cmd_check(args, as_json):
     lines = mminstall.check(online=flag(args, "--online"))
     probs = [x for x in lines if not x.startswith("W_")]
     warns = [x for x in lines if x.startswith("W_")]
-    emit(as_json, {"problems": probs, "warnings": warns}, probs + warns if probs else warns + ["check=ok"])
+    obj, extra = {"problems": probs, "warnings": warns}, []
+    note = mminstall.notify_line()  # None without a [notify] section: the output stays as before
+    if note:
+        obj["notify"], extra = note.split(" ", 1)[0].split("=", 1)[1], [note]
+    emit(as_json, obj, probs + warns + extra if probs else warns + extra + ["check=ok"])
     return 1 if probs else 0
 
 
@@ -649,6 +653,74 @@ def cmd_selftest(args, as_json):
     last = (p.stdout.strip().splitlines() or ["no output"])[-1]
     print("selftest=%s %s" % ("ok" if p.returncode == 0 else "failed", last))
     return 0 if p.returncode == 0 else 1
+
+
+def cmd_notify(args, as_json, profile):
+    """`mm notify ...` (NOTIFY.md). Only these verbs import mmnotify; only send, test and run reach the network."""
+    import mmnotify
+    sub = args.pop(0) if args else None
+
+    def done(obj, lines, rc=0):
+        emit(as_json, obj, lines)
+        return rc
+
+    def unknown():
+        if args:
+            raise mmcore.MMError("E_USAGE", "mm notify %s does not take %s" % (sub, " ".join(mmcore.quoted(a) for a in args)),
+                                 "mm help")
+    if sub == "send":
+        key_file = opt(args, "--key-file") or os.environ.get("MM_NOTIFY_KEY_FILE")
+        level, title, text = opt(args, "--level"), opt(args, "--title"), opt(args, "--text", "")
+        tags = []
+        while "--tag" in args:
+            tags.append(opt(args, "--tag"))
+        unknown()
+        if level is None or title is None:
+            return err("E_USAGE", "notify send needs --level and --title", 'mm notify send --level normal --title "..."')
+        try:
+            rec = mmnotify.send(profile, key_file, level, title, text, tags)
+        except mmcore.MMError as e:
+            if e.code in ("E_NOTIFY_LIMIT", "E_NOTIFY_DUPLICATE"):
+                print(str(e))
+                return 1
+            raise
+        return done(rec, [kv(rec)], 0 if rec["notify"] == "delivered" else 1)
+    if sub == "grant":
+        name = args.pop(0) if args and not args[0].startswith("--") else None
+        level = opt(args, "--max-level", mmnotify.GRANT_DEFAULT_LEVEL)
+        per_hour = opt(args, "--per-hour", mmnotify.GRANT_DEFAULT_PER_HOUR, int)
+        unknown()
+        if name is None:
+            return err("E_USAGE", "notify grant needs a NAME", "mm notify grant NAME [--max-level normal] [--per-hour 5]")
+        rec = mmnotify.grant(name, level, per_hour)
+        return done(rec, [kv(rec)])
+    if sub == "revoke":
+        name = args.pop(0) if args else None
+        unknown()
+        if name is None:
+            return err("E_USAGE", "notify revoke needs a NAME", "mm notify grants, then mm notify revoke NAME")
+        had = mmnotify.revoke(name)
+        rec = {"revoked": had, "grant": name}
+        return done(rec, [kv(rec) if had else kv(dict(rec, reason="not_found"))], 0 if had else 1)
+    if sub == "grants":
+        unknown()
+        rows = mmnotify.list_grants()
+        return done({"grants": rows}, [kv(r) for r in rows] or ["grants=none"], 0 if rows else 1)
+    if sub == "test":
+        level = opt(args, "--level", "normal")
+        unknown()
+        rec = mmnotify.test(profile, level)
+        return done(rec, [kv(rec)])
+    if sub == "status":
+        unknown()
+        rec = mmnotify.status(profile)
+        return done(rec, [kv(rec)])
+    if sub == "run":
+        unknown()
+        rc, rec = mmnotify.run(profile)
+        line = kv({"notify": rec["notify"]}) if rec["notify"] in ("off", "busy") else kv(rec)
+        return done(rec, [line], rc)
+    return err("E_USAGE", "mm notify needs send, grant, revoke, grants, test, status or run", "mm help")
 
 
 def cmd_tailscale(args, as_json):
@@ -803,6 +875,8 @@ def main(argv):
         return cmd_metrics(args, as_json, profile)
     if verb == "serve":  # hosting creates no data/state folders and never initiates collection
         return cmd_serve(args, as_json, profile)
+    if verb == "notify":  # opt-in phone notifications; only its own notify/ folder (NOTIFY.md)
+        return cmd_notify(args, as_json, profile)
     os.makedirs(mmcore.path("state"), exist_ok=True)
     if verb == "status":
         return cmd_status(args, as_json)

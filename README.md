@@ -14,6 +14,8 @@ machine-manager watches one build machine (macOS; Linux in a reduced form, see P
 3. It answers "where should this job run?" (`mm place`): this machine, a CI pool (GitHub Actions), or wait.
 4. It raises one-line alerts and delivers them into one Claude Code session through hooks.
 5. It deletes only safe, space-only files behind guards (off by default), and lists everything else with exact commands.
+6. It can send its alerts, and messages from agents the owner granted, to the owner's phone (ntfy or Pushover; off by
+   default; [NOTIFY.md](NOTIFY.md)).
 
 It is plain Python 3 (standard library only). The core knows no project: a **profile** (TOML) names the paths, and
 three **adapters** connect a job queue, a CI pool and an alert delivery. Every decision is a pure function with
@@ -277,7 +279,8 @@ every one of these labels, as `runs-on` matches; the list needs admin access to 
 shows only as the `UNKNOWN` runner record `id=runners`, never a read error or an alert), `delivery` (adapter `claude-code-hook`), `trim` (the guarded cache trim), `deletes`
 (`rules`, `cleanup`, `forbidden_parts`, `protected_roots`), `recovery` (`expected_jobs`: `{name, match}` regular
 expressions over process command lines, checked after a Mac reboot), `text_line_max` (default 4096, from 256 to
-1048576: the longest line any pattern sees, "Agent-written files", item 7). Placeholders: `{data}`, `{user_tmp}`,
+1048576: the longest line any pattern sees, "Agent-written files", item 7), `notify` (phone notifications, off unless
+`enabled = true`; [NOTIFY.md](NOTIFY.md)). Placeholders: `{data}`, `{user_tmp}`,
 `{claude_tmp}`, `~`. The schema is `schemas/profile.schema.json`.
 
 Clean-up list rule types (`deletes.cleanup`) are `git_worktrees`, `git_branches`, `stale_children` and `paths`.
@@ -614,7 +617,8 @@ the CI pool; `GUARD_NEAR`, `GUARD_STOP` the CI budget.
 Exit codes: 0 ok; 1 nothing found or problems listed; 2 error (one `E_` line); 3 stale; 10 `POOL`; 20 `WAIT`;
 75 the supervisor restarts itself (`mm run` only).
 Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFILE`, `E_NO_PROFILE`, `E_SETTINGS`, `E_HOOKS`, `E_READINGS`,
-`E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`, `E_PLATFORM`, `E_SERVE`, `E_STORAGE`.
+`E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`, `E_PLATFORM`, `E_SERVE`, `E_STORAGE`,
+`E_NOTIFY_*` ([NOTIFY.md](NOTIFY.md)).
 
 ## Roadmap
 
@@ -653,6 +657,9 @@ you add any resource with a profile entry, and a new kind of resource needs one 
    ([METRICS.md](METRICS.md)), within an 8 MiB storage text budget. The Storage Grafana dashboard and four storage
    alerts are in [GRAFANA.md](GRAFANA.md). Existing status, fleet.json, metrics and guards still use only the main
    filesystem. Owner deployment and target-host acceptance remain; optional latency/device health later.
+5. **Phone notifications: implemented (opt-in).** `mm notify run`, on its own timer/agent (never the supervisor),
+   sends mm alerts to ntfy or Pushover with rate limits, retries and a sent log; agents the owner granted send with
+   `mm notify send`. One-way, no remote control. See [NOTIFY.md](NOTIFY.md). Owner deployment remains.
 
 ## Tests
 

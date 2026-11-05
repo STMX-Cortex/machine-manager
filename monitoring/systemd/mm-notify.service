@@ -1,0 +1,12 @@
+# Optional phone notifications (NOTIFY.md): mm alerts and queued retries. Needs [notify] enabled = true.
+[Unit]
+Description=Send machine-manager alerts and queued messages to the phone
+
+[Service]
+Type=oneshot
+ExecStart=/ABS/PYTHON3 -I /ABS/MACHINE_MANAGER/bin/mm notify run --profile /ABS/PROFILE.toml --data /ABS/MM_DATA
+# Exit 1: some deliveries failed or wait in the outbox for a retry; the next run tries again.
+SuccessExitStatus=1
+TimeoutStartSec=300
+UMask=0077
+NoNewPrivileges=yes

@@ -52,6 +52,23 @@ def cut(line):
     return line if len(line) <= TEXT_LINE_MAX else line[:TEXT_LINE_MAX - len(CUT_MARK)] + CUT_MARK
 
 
+def bounded(text, limit):
+    """A text for mask(): at most limit characters, and fewer than TEXT_LINE_MAX - len(CUT_MARK), so mask()'s own
+    cut (cut) never splits a token. A longer text loses its last, possibly split, word: a secret cut short could
+    escape the mask and show once masking shortens the text. With no white space before the cut, the whole unfinished
+    word goes and CUT_MARK stands in its place (phone notifications, NOTIFY.md)."""
+    work = max(1, min(limit, TEXT_LINE_MAX - len(CUT_MARK)))
+    if len(text) <= work:
+        return text
+    head = text[:work]
+    if not text[work].isspace():
+        i = len(head)
+        while i and not head[i - 1].isspace():
+            i -= 1
+        head = head[:i - 1] if i else CUT_MARK
+    return head
+
+
 def split_lines(text):
     """The records of a text: split at its line feeds only (C-22), as str.splitlines() would give them but for the
     other line-breaking characters (an agent can put them inside a record)."""

@@ -28,13 +28,12 @@ Existing private transports remain supported. Monitoring grants no remote contro
 | `mm wait [--min-level action]` | block until an unseen alert (run it under a monitor) |
 | `mm event timing-failure --note TEXT` | report a test that failed by time (slots go down one step) |
 | `mm watch RUN_ID --note TEXT` | an alert when that CI run ends |
+| `mm notify send --key-file F --level quiet\|normal\|ring --title T [--text T] [--tag T]` | phone message to the owner, with an owner's grant only; exit 0 delivered, 1 queued/limited/duplicate (NOTIFY.md) |
 | `mm help` | every verb |
-
-Add `--json` for one JSON object.
 
 ## Output format
 
-- Plain `key=value` words, one record per line. No colour, no progress lines.
+- Plain `key=value` words, one record per line (`--json`: one JSON object). No colour, no progress lines.
 - An alert line: `LEVEL NAME text | do: command` (at most 200 characters; `do: mm explain ID` when the command is long).
 - An error: one line `E_CODE what; fix: how`.
 - Hooks show at most 3 alert lines, then `+N more: mm alerts`.
@@ -58,3 +57,4 @@ Levels: INFO, ATTENTION, ACTION. Alert names: README.md, Glossary.
 5. Never run `mm drill`, `mm install`, `mm rollback`, `mm stop`, `mm restart` or `mm on` without the owner's word.
    `SAFE_MODE` means automatic actions are off until the owner ends it.
 6. Never put secrets in `--note` or `--reason` text (they are masked, but still).
+7. `mm notify send` only for what the owner must see or decide, not routine progress; never grant yourself a key or read other keys.

@@ -329,6 +329,11 @@ def check(profile_file=None, online=False):
             out.append(str(e))
         except (KeyError, TypeError) as e:
             out.append("E_PROFILE [%s] lacks %s; fix: add it (README.md, Profile)" % (part, e))
+    import mmnotify
+    try:
+        mmnotify.config(prof)  # [notify]: no network, nothing sent (mm notify test sends)
+    except mmcore.MMError as e:
+        out.append(str(e))
     out += command_problems(prof, online)
     q = prof.get("queue") or {}
     if q.get("dir") and not os.path.isdir(mmcore.expand(q["dir"])):
@@ -343,6 +348,16 @@ def check(profile_file=None, online=False):
     for b in bad:
         out.append("E_READINGS %s; fix: the tool uses the command readings; report the macOS version" % b)
     return out
+
+
+def notify_line(profile_file=None):
+    """`mm check`'s notify word: notify=off or notify=ok service=S; None without a [notify] section, or when the
+    profile or the section is invalid (check() lists those as problems)."""
+    import mmnotify
+    try:
+        return mmnotify.check_line(mmcore.load_profile(profile_file))
+    except mmcore.MMError:
+        return None
 
 
 def timing_context(profile):
