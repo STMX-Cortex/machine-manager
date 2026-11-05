@@ -4,9 +4,10 @@ send. Services: ntfy (JSON publish) and Pushover (form POST).
 
 Only the `mm notify ...` verbs import this module; the supervisor, the watchdog and the hook never do. Importing it
 does nothing; it never reads the profile and never writes a file. Secrets stay out of errors, results and headers
-other than the one Authorization header. One request per deliver(): no redirects (a 3xx is a failure), TLS always
-verified (default context), at most RESPONSE_MAX response bytes read, one wall timeout. Plain http goes only to a
-loopback host, and never through a proxy (a proxy would see the token).
+other than the one Authorization header. One request per deliver() over http.client: no redirects (a 3xx is a
+failure; its Location is never read), TLS always verified (default context, host name checked), at most RESPONSE_MAX
++ 1 response bytes read, one wall deadline with no request sent after it. Plain http goes only to a loopback host,
+and never through a proxy (a proxy would see the token); https may use an http:// CONNECT proxy.
 """
 import ipaddress
 import json
@@ -27,6 +28,7 @@ URL_MAX = 512
 TITLE_MAX, TEXT_MAX, SENDER_MAX, TAGS_MAX = 100, 1000, 40, 4
 DETAIL_MAX = 120
 TIMEOUT_MAX = 30
+TEXT_WORK = 4000                   # characters of one text that masking sees
 PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 SERVICES = ("ntfy", "pushover")
 LEVELS = ("quiet", "normal", "ring")
@@ -180,18 +182,46 @@ def validate_url(url):
     return url
 
 
+def _bounded(value):
+    """At most TEXT_WORK characters, and fewer than mmtext's line cut, so mask() sees whole words: a longer text loses
+    its last, possibly split, word (a cut secret could escape the mask and show once masking shortens the text)."""
+    work = max(1, min(TEXT_WORK, mmtext.TEXT_LINE_MAX - len(mmtext.CUT_MARK)))
+    if len(value) <= work:
+        return value
+    head = value[:work]
+    if not value[work].isspace():
+        i = len(head)
+        while i and not head[i - 1].isspace():
+            i -= 1
+        if i:
+            head = head[:i - 1]
+    return head
+
+
 def _text(value, limit):
-    """A message text as it leaves the machine: str, no surrogates, controls and `|` cleaned, secrets masked, cut."""
+    """A message text as it leaves the machine: str, no surrogates, secrets masked before and after control
+    characters and `|` are cleaned (so `Bearer<TAB>secret` is masked, contract 4d.3), then cut to limit."""
     value = "" if value is None else value if isinstance(value, str) else str(value)
     value = value.encode("utf-8", "replace").decode("utf-8")  # a lone surrogate becomes "?"
-    value = mmtext.clean(value)[:max(limit * 4, 4096)]  # bound the work before masking
+    value = mmtext.clean(mmcore.mask(_bounded(value)))
     return mmtext.clean(mmcore.mask(value))[:limit]
 
 
-def _tags(value):
+def _tags(value, secret):
+    """The first TAGS_MAX valid tags. Dropped (contract 4d.2): a tag that mask() would change, that equals a secret
+    value, contains one of 6+ characters, or is a 6+ character part of one."""
     if not isinstance(value, (list, tuple)):
         return []
-    return [t for t in value if isinstance(t, str) and TAG.fullmatch(t)][:TAGS_MAX]
+    secrets, out = _secrets_of(secret), []
+    for t in value:
+        if not isinstance(t, str) or not TAG.fullmatch(t) or mmcore.mask(t) != t:
+            continue
+        if any(t == s or (len(s) >= 6 and s in t) or (len(t) >= 6 and t in s) for s in secrets):
+            continue
+        out.append(t)
+        if len(out) == TAGS_MAX:
+            break
+    return out
 
 
 def _header(value):
@@ -220,7 +250,8 @@ def _secret_value(secret, key):
 def render(cfg, secret, msg):
     """(url, headers, body bytes) for one message; pure (no I/O). cfg: the [notify] dict; secret: read_secret()'s
     dict or None; msg: {"title", "text", "level", "sender", "tags"}. Texts are cleaned, masked and cut again here
-    (title 100, text 1000, sender 40); tags keep the first 4 valid ones. Config problems raise MMError E_PROFILE,
+    (title 100, text 1000, sender 40); tags keep the first 4 valid ones that are not
+    secret-shaped (_tags). Config problems raise MMError E_PROFILE,
     a missing or invalid secret E_NOTIFY_SECRET, an unknown level E_USAGE."""
     if not isinstance(cfg, dict) or cfg.get("service") not in SERVICES:
         raise mmcore.MMError("E_PROFILE", "[notify] service must be ntfy or pushover", "correct [notify] service")
@@ -241,7 +272,7 @@ def render(cfg, secret, msg):
         if token is not None:
             headers["Authorization"] = "Bearer " + token
         body = json.dumps({"topic": topic, "title": title, "message": text, "priority": NTFY_PRIORITY[level],
-                           "tags": _tags(msg.get("tags"))}, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+                           "tags": _tags(msg.get("tags"), secret)}, ensure_ascii=True, separators=(",", ":")).encode("ascii")
     else:
         url = validate_url(cfg["url"]) if cfg.get("url") is not None else PUSHOVER_URL
         app, user = _secret_value(secret, "app_token"), _secret_value(secret, "user_key")
@@ -258,6 +289,8 @@ def render(cfg, secret, msg):
     return url, {k: _header(v) for k, v in headers.items()}, body
 
 
+
+
 def _secrets_of(secret):
     if not isinstance(secret, dict):
         return []
@@ -265,113 +298,244 @@ def _secrets_of(secret):
 
 
 def _detail(text, secret):
-    text = mmtext.clean(str(text))[:1000]
+    """detail as results carry it: secrets replaced first (before any cut, contract 4d.1), then cleaned, masked, cut.
+    Callers pass only fixed words and numbers; a server's reason phrase or body is never echoed."""
+    text = str(text)
     for value in _secrets_of(secret):
         text = text.replace(value, "***")
-    return mmtext.clean(mmcore.mask(text))[:DETAIL_MAX]
+    return mmtext.clean(mmcore.mask(mmtext.clean(text)))[:DETAIL_MAX]
 
 
 def _result(ok, status, error, detail, secret):
     return {"ok": ok, "status": status, "error": error, "detail": _detail(detail, secret)}
 
 
+class _ProxyError(OSError):
+    pass
+
+
 def _net_detail(exc):
+    import http.client
     import socket
     import ssl
-    reason = getattr(exc, "reason", exc)  # URLError wraps the cause
-    if isinstance(reason, (TimeoutError, socket.timeout)):
+    if isinstance(exc, (TimeoutError, socket.timeout)):
         return "timed out"
-    if isinstance(reason, ssl.SSLCertVerificationError):
+    if isinstance(exc, ssl.SSLCertVerificationError):
         return "TLS certificate not trusted"
-    if isinstance(reason, ssl.SSLError):
+    if isinstance(exc, ssl.SSLError):
         return "TLS error"
-    if isinstance(reason, socket.gaierror):
+    if isinstance(exc, socket.gaierror):
         return "DNS lookup failed"
-    if isinstance(reason, ConnectionRefusedError):
+    if isinstance(exc, _ProxyError):
+        return "proxy failed"
+    if isinstance(exc, ConnectionRefusedError):
         return "connection refused"
-    if isinstance(reason, ConnectionResetError):
+    if isinstance(exc, http.client.HTTPException):
+        return "no valid HTTP answer"
+    if isinstance(exc, ConnectionResetError):
         return "connection reset"
-    return "network error (%s)" % type(reason).__name__
+    return "network error (%s)" % type(exc).__name__
 
 
-def _send(url, headers, body, timeout_s, deadline):
-    """One POST; returns (status, note) for an HTTP answer. Network failures raise."""
+def _remaining(deadline):
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise TimeoutError("deadline")
+    return left
+
+
+def _proxy_for(host):
+    """(host, port, Proxy-Authorization value or None) of the https proxy the environment (or macOS settings) names
+    for host, or None. Only http:// proxies (CONNECT tunnel; TLS stays end to end)."""
+    import base64
+    import urllib.request
+    value = urllib.request.getproxies().get("https")
+    if not value or urllib.request.proxy_bypass(host):
+        return None
+    try:
+        parts = urllib.parse.urlsplit(value if "://" in value else "http://" + value)
+        port = parts.port or 80
+    except ValueError:
+        raise _ProxyError("invalid proxy") from None
+    if parts.scheme != "http" or not parts.hostname:
+        raise _ProxyError("unsupported proxy")
+    auth = None
+    if parts.username is not None:
+        pair = "%s:%s" % (urllib.parse.unquote(parts.username), urllib.parse.unquote(parts.password or ""))
+        auth = "Basic " + base64.b64encode(pair.encode("utf-8")).decode("ascii")
+    return parts.hostname, port, auth
+
+
+def _route(host, port, tls, deadline):
+    """(proxy, addresses to connect to). Loopback hosts never use a proxy (contract 4d.7) and their literal addresses
+    need no lookup. Other hosts: the proxy choice (it may look names up) and the DNS lookup run in a helper thread
+    the caller waits for until the deadline at most; a late lookup is dropped and never leads to a connection."""
+    import socket
+
+    def lookup(name, number):
+        return socket.getaddrinfo(name, number, type=socket.SOCK_STREAM)
+
+    if _loopback(host):
+        try:
+            return None, socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, flags=socket.AI_NUMERICHOST)
+        except socket.gaierror:
+            if host != "localhost":
+                raise
+    box = {}
+
+    def run():
+        try:
+            proxy = _proxy_for(host) if tls and not _loopback(host) else None
+            target = proxy[:2] if proxy else (host, port)
+            box["answer"] = (proxy, lookup(*target))
+        except Exception as e:  # handed to the caller below
+            box["failure"] = e
+
+    helper = threading.Thread(target=run, name="mm-notify-lookup", daemon=True)
+    helper.start()
+    helper.join(_remaining(deadline))
+    if helper.is_alive():
+        raise TimeoutError("lookup")
+    if "failure" in box:
+        raise box["failure"]
+    return box["answer"]
+
+
+def _connect(addresses, deadline):
+    import socket
+    last = None
+    for family, kind, proto, _, address in addresses:
+        sock = socket.socket(family, kind, proto)
+        try:
+            sock.settimeout(_remaining(deadline))
+            sock.connect(address)
+            return sock
+        except TimeoutError:
+            sock.close()
+            raise
+        except OSError as e:
+            sock.close()
+            last = e
+    raise last or OSError("no address")
+
+
+class _Watchdog:
+    """Shuts the connection's socket down at the deadline, so a server that trickles bytes (each read within the
+    socket timeout) cannot hold deliver() past it. stop() cancels and joins the timer before the socket is closed."""
+
+    def __init__(self, fd, deadline):
+        self.fd, self.fired, self.lock = fd, False, threading.Lock()
+        self.timer = threading.Timer(max(0.0, deadline - time.monotonic()), self.fire)
+        self.timer.daemon = True
+        self.timer.start()
+
+    def fire(self):
+        import socket
+        with self.lock:
+            if self.fd is None:
+                return
+            self.fired = True
+            try:
+                s = socket.socket(fileno=self.fd)  # the same descriptor, also after the TLS wrap
+                try:
+                    s.shutdown(socket.SHUT_RDWR)
+                finally:
+                    s.detach()
+            except OSError:
+                pass
+
+    def stop(self):
+        with self.lock:
+            self.fd = None
+        self.timer.cancel()
+        self.timer.join()
+
+
+def _tunnel(sock, host, port, auth):
+    import http.client
+    authority = "[%s]:%d" % (host, port) if ":" in host else "%s:%d" % (host, port)
+    lines = ["CONNECT %s HTTP/1.1" % authority, "Host: %s" % authority]
+    if auth:
+        lines.append("Proxy-Authorization: " + auth)
+    sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("ascii"))
+    response = http.client.HTTPResponse(sock, method="CONNECT")
+    try:
+        response.begin()
+    except http.client.HTTPException:
+        raise _ProxyError("bad proxy answer") from None
+    if response.status != 200:
+        raise _ProxyError("proxy refused the tunnel")
+
+
+def _send(url, headers, body, deadline):
+    """One POST over http.client: (status, note) for any HTTP answer, 3xx included (no Location is read, no redirect
+    is followed). Raises on network failures and at the deadline. The deadline is checked right before the request
+    is sent, and every thread this starts, but a dropped DNS lookup, has ended when it returns (contract 4d.4)."""
     import http.client
     import ssl
-    import urllib.error
-    import urllib.request
-
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
-            return None  # urllib then raises HTTPError with the 3xx code
-
-    handlers = [NoRedirect(), urllib.request.HTTPSHandler(context=ssl.create_default_context())]
-    if _loopback(urllib.parse.urlsplit(url).hostname or ""):
-        handlers.append(urllib.request.ProxyHandler({}))  # plain http never goes through a proxy
-    opener = urllib.request.build_opener(*handlers)
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    parts = urllib.parse.urlsplit(url)
+    host, tls = parts.hostname, parts.scheme == "https"
+    port = parts.port or (443 if tls else 80)
+    proxy, addresses = _route(host, port, tls, deadline)
+    sock = _connect(addresses, deadline)
+    dog = _Watchdog(sock.fileno(), deadline)
     try:
-        response = opener.open(request, timeout=timeout_s)
-    except urllib.error.HTTPError as e:
         try:
-            e.close()
-        except Exception:
-            pass
-        return e.code, "HTTP %d %s" % (e.code, e.reason if isinstance(e.reason, str) else "")
-    with response:
-        status = response.status
-        note = "HTTP %d" % status
-        got = 0
+            if proxy:
+                sock.settimeout(_remaining(deadline))
+                _tunnel(sock, host, port, proxy[2])
+            if tls:
+                context = ssl.create_default_context()  # verifies the chain and the host name (contract 4d.7)
+                sock.settimeout(_remaining(deadline))
+                sock = context.wrap_socket(sock, server_hostname=host)
+                conn = http.client.HTTPSConnection(host, port, context=context)
+            else:
+                conn = http.client.HTTPConnection(host, port)
+            conn.sock = sock  # already connected: http.client opens nothing itself
+            sock.settimeout(_remaining(deadline))  # the last check before any request byte is sent
+            conn.request("POST", parts.path or "/", body=body, headers=headers)
+            response = conn.getresponse()
+            if dog.fired:  # the shutdown's end of file can look like the end of trickled headers
+                raise TimeoutError("deadline")
+        except (OSError, http.client.HTTPException, ValueError):
+            if dog.fired or time.monotonic() >= deadline:
+                raise TimeoutError("deadline") from None
+            raise
+        status, note = response.status, "HTTP %d" % response.status
         try:
-            while got <= RESPONSE_MAX:
-                if time.monotonic() > deadline:
-                    note += " (response not read in time)"
-                    break
-                chunk = response.read(min(8192, RESPONSE_MAX + 1 - got))
-                if not chunk:
-                    break
-                got += len(chunk)
-            if got > RESPONSE_MAX:
+            if len(response.read(RESPONSE_MAX + 1)) > RESPONSE_MAX:  # at most 65536 + 1 bytes (contract 4d.6)
                 note += " (response cut at %d bytes)" % RESPONSE_MAX
         except (OSError, http.client.HTTPException, ValueError):
-            note += " (response not read)"  # the service answered; its status counts
-    return status, note
+            # the service answered; its status counts
+            note += " (response not read in time)" if dog.fired else " (response not read)"
+        return status, note
+    finally:
+        dog.stop()
+        sock.close()
 
 
 def deliver(cfg, secret, msg, timeout_s):
     """Send one message; never raises for network or HTTP problems. Returns {"ok", "status", "error", "detail"}:
-    2xx ok (error None); 4xx E_NOTIFY_REFUSED (do not retry); 3xx (never followed), 5xx and other codes
-    E_NOTIFY_HTTP; DNS, connect, TLS, timeout and broken responses E_NOTIFY_NET (status None). detail: at most 120
-    cleaned characters, never a secret or the request body. timeout_s (0 < t <= 30) bounds the whole call.
-    Config problems raise MMError as render() does; a bad timeout_s raises MMError E_PROFILE."""
+    2xx ok (error None); 4xx E_NOTIFY_REFUSED (do not retry); 3xx (never followed, Location never read), 5xx and other
+    codes E_NOTIFY_HTTP; DNS, connect, proxy, TLS, timeout and broken answers E_NOTIFY_NET (status None). detail: fixed
+    words and numbers only (never the server's reason phrase or body, a secret or the request), at most 120 characters.
+    timeout_s (0 < t <= 30) bounds the whole call; no request byte is sent after it (contract 4d.4). Config problems
+    raise MMError as render() does; a bad timeout_s raises MMError E_PROFILE."""
     if type(timeout_s) not in (int, float) or not math.isfinite(timeout_s) or not 0 < timeout_s <= TIMEOUT_MAX:
         raise mmcore.MMError("E_PROFILE", "[notify] timeout_s must be a number above 0 and at most %d" % TIMEOUT_MAX,
                              "correct [notify] timeout_s")
     url, headers, body = render(cfg, secret, msg)
     deadline = time.monotonic() + timeout_s
-    box = {}
-
-    def run():
-        try:
-            box["answer"] = _send(url, headers, body, timeout_s, deadline)
-        except BaseException as e:  # reported below, never raised to the caller
-            box["failure"] = e
-
-    worker = threading.Thread(target=run, name="mm-notify-send", daemon=True)
-    worker.start()
-    worker.join(timeout_s + 0.5)  # small grace so a socket timeout inside reports itself
-    if worker.is_alive() or not box:
-        return _result(False, None, "E_NOTIFY_NET", "timed out", secret)
-    if "failure" in box:
-        e = box["failure"]
-        if not isinstance(e, Exception):
-            return _result(False, None, "E_NOTIFY_NET", "send interrupted", secret)
+    try:
+        status, note = _send(url, headers, body, deadline)
+    except Exception as e:  # network problems are results, not exceptions
         return _result(False, None, "E_NOTIFY_NET", _net_detail(e), secret)
-    status, note = box["answer"]
     if 200 <= status <= 299:
         return _result(True, status, None, note, secret)
     if 300 <= status <= 399:
         return _result(False, status, "E_NOTIFY_HTTP", "HTTP %d redirect not followed" % status, secret)
     if 400 <= status <= 499:
-        return _result(False, status, "E_NOTIFY_REFUSED", note, secret)
-    return _result(False, status, "E_NOTIFY_HTTP", note, secret)
+        return _result(False, status, "E_NOTIFY_REFUSED", "HTTP %d refused" % status, secret)
+    if 500 <= status <= 599:
+        return _result(False, status, "E_NOTIFY_HTTP", "HTTP %d server error" % status, secret)
+    return _result(False, status, "E_NOTIFY_HTTP", "HTTP %d unexpected status" % status, secret)
