@@ -33,8 +33,26 @@ A12 The outbox is tested through `mm notify status queued=N` and the fake server
 A13 The suppression notice's words "N alerts suppressed" are in its title or its message.
 A14 A sent.jsonl record holds at least the contract's fields; any extra field never holds the text or a secret.
 A15 The ntfy JSON publish goes to the server base URL (path "/"); the Pushover form goes to the configured URL's path.
-Not covered here (Part B or impractical in a CLI test): a secret file owned by another uid, the 100-item outbox cap,
-the systemd/launchd templates, NOTIFY.md."""
+A16 (4c) A run that meets a state-file error delivers nothing it cannot account for: with cursor.json unreadable (a
+    folder in its place) the run sends nothing, so after the file is restored each alert arrives exactly once. With
+    the notify folder read-only (unless the run sets it back to 0700 itself and so meets no error) or sent.jsonl
+    replaced by a folder, a duplicate after the restore is tolerated, a loss is not. A failing run prints an error
+    line, never a traceback (stderr empty); a state-file write error exits 1 or 2.
+A17 (4c) After a SIGKILL in the middle of a delivery, the request the fake server already received counts as
+    delivered (the service got it); every other alert must arrive in later runs within 17 minutes (an outbox item
+    left by the killed run may wait for its backoff, but is not dropped before 1 hour).
+A18 (4c.3) "Nothing old is sent" covers old records that keep a higher seq earlier in the file: after a reset, only
+    records appended after it are sent, and a new record wins over an old one with the same seq.
+A19 (4c.4) The sent.jsonl rotation test pads sent.jsonl to just over 1 MiB with copies of its own last record
+    (status limited) instead of 5000 CLI sends; the next CLI appends must rotate it to sent.jsonl.1.
+A20 (4c.5) After a suppression, the first message of the next hour is the notice, and with alerts_per_hour = 1 it is
+    the only message of that hour.
+A21 (4c.6) The outbox holds at most 100 items; when a new failed delivery would make 101, one item is dropped, and
+    the first dropped item is the one first attempted earliest (here an agent message, retried once before the other
+    99 items were queued, so it may no longer be first in the list).
+A22 Backoff runs from the time of the failed try; the 1-hour drop runs from the first attempt.
+Not covered here (Part B or impractical in a CLI test): a secret file owned by another uid, the systemd/launchd
+templates, NOTIFY.md."""
 import hashlib
 import http.server
 import json
@@ -101,11 +119,13 @@ def controls(text):
 
 class FakeServer:
     """A threaded HTTP server on 127.0.0.1, port 0, that records every request and answers with the next queued status
-    (else `default`). A 3xx answer points at /followed on itself; `hang` makes the next answer wait 3 s."""
+    (else `default`). A 3xx answer points at /followed on itself; `hang` makes the next answer wait 3 s;
+    `hold` makes it wait until `release` is set (at most 15 s)."""
 
     def __init__(self, kind="ntfy"):
         self.kind, self.requests, self.responses, self.default = kind, [], [], 200
         self.lock = threading.Lock()
+        self.release = threading.Event()
         fake = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -118,6 +138,9 @@ class FakeServer:
                     status = fake.responses.pop(0) if fake.responses else fake.default
                 if status == "hang":
                     time.sleep(3)
+                    status = 200
+                if status == "hold":
+                    fake.release.wait(15)
                     status = 200
                 if 200 <= status < 300:
                     payload = b'{"status":1,"request":"fake"}' if fake.kind == "pushover" else \
@@ -152,6 +175,7 @@ class FakeServer:
         return "http://127.0.0.1:%d" % self.port
 
     def close(self):
+        self.release.set()
         self.srv.shutdown()
         self.srv.server_close()
 
@@ -1234,6 +1258,267 @@ class SupervisorPath(NotifyBase):
                 self.assertNotIn("mmnotify_send", mods, args)
                 self.assertFalse([m for m in mods if "notify" in m], args)
         self.assertEqual(self.fake.posts(), [])
+
+
+# =============================================================================================== 4c. durability, accounting
+
+
+class Durability(NotifyBase):
+    """Contract section 4c: no lost mm alert, alerts.jsonl rotation, sequence resets, hourly accounting outside the
+    rotating sent.jsonl, the suppression notice's slot, outbox overflow, the whole backoff ladder and the 1-hour drop."""
+
+    def titles(self):
+        return [b["title"] for b in self.fake.ntfy()]
+
+    def baseline(self, seq=1):
+        """A first run at seq: the cursor starts there (no history), no alert is sent."""
+        self.write_alerts(self.alert(seq, "BASE", "ACTION"))
+        self.cli("notify", "run")
+        self.assertEqual(self.status().get("cursor"), str(seq))
+        self.assertNotIn("[mm] BASE", self.titles())
+
+    def rotate_alerts(self):
+        os.replace(os.path.join(self.data, "alerts.jsonl"), os.path.join(self.data, "alerts.jsonl.1"))
+
+    # ---- 4c.1: no lost alert
+
+    def test_unreadable_cursor_sends_nothing_then_each_alert_once(self):
+        self.baseline()
+        cursor = os.path.join(self.notify_dir(), "cursor.json")
+        with open(cursor, "rb") as f:
+            saved = f.read()
+        self.write_alerts(self.alert(2, "W_2", "ACTION"), self.alert(3, "W_3", "ATTENTION"))
+        os.unlink(cursor)
+        os.mkdir(cursor)  # a folder in its place: neither read nor written
+        r = self.cli("notify", "run")
+        self.assertIn(r.returncode, (1, 2), r.stdout)
+        self.assertEqual(self.fake.posts(), [], "A16: a run that cannot read its cursor sends nothing")
+        os.rmdir(cursor)
+        with open(cursor, "wb") as f:
+            f.write(saved)
+        os.chmod(cursor, 0o600)
+        self.cli("notify", "run")
+        self.cli("notify", "run")
+        self.assertEqual(sorted(self.titles()), ["[mm] W_2", "[mm] W_3"], "each alert exactly once, nothing old")
+        self.assertEqual(self.status().get("cursor"), "3")
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores folder permissions")
+    def test_read_only_notify_folder_loses_no_alert(self):
+        self.baseline()
+        self.write_alerts(*[self.alert(i, "RO_%d" % i, "ACTION") for i in (2, 3, 4)])
+        os.chmod(self.notify_dir(), 0o500)  # read-only: no new file, no rename (write_atomic) in the notify folder
+        try:
+            r = self.cli("notify", "run")
+        finally:
+            os.chmod(self.notify_dir(), 0o700)
+        if r.returncode == 0:  # the run set the folder back to 0700 itself: no write error happened
+            self.assertEqual(sorted(self.titles()), ["[mm] RO_%d" % i for i in (2, 3, 4)])
+        else:
+            self.assertIn(r.returncode, (1, 2), "a state-file write error: exit 1 or 2 (%s)" % r.stdout)
+            self.assertEqual(self.status().get("cursor"), "1", "the cursor did not move")
+        self.assert_no_loss("RO_%d", (2, 3, 4))
+
+    def test_sent_log_replaced_by_folder_loses_no_alert(self):
+        self.baseline()
+        self.write_alerts(*[self.alert(i, "SL_%d" % i, "ACTION") for i in (2, 3, 4)])
+        sent = os.path.join(self.notify_dir(), "sent.jsonl")
+        if os.path.exists(sent):
+            os.unlink(sent)
+        os.mkdir(sent)  # the record of each outcome cannot be appended
+        r = self.cli("notify", "run")  # stderr empty: an error line, never a traceback (A16)
+        self.assertIn(r.returncode, (0, 1, 2), r.stdout)
+        os.rmdir(sent)
+        self.assert_no_loss("SL_%d", (2, 3, 4))
+
+    def assert_no_loss(self, pattern, seqs):
+        """Runs now and over the next 17 minutes (past the longest backoff step, before the 1-hour drop): each alert
+        arrived at least once (an outbox item counts only once delivered), BASE never; then no endless resending."""
+        for offset in (0, 40, 120, 400, 1000):
+            self.cli("notify", "run", offset=offset)
+        got = self.titles()
+        for i in seqs:
+            self.assertGreaterEqual(got.count("[mm] " + pattern % i), 1,
+                                    ("lost", i, got, self.status(offset=1000), self.sent()))
+        self.assertNotIn("[mm] BASE", got)
+        n = len(got)
+        self.cli("notify", "run", offset=2000)
+        self.assertEqual(len(self.fake.posts()), n, "no endless resending")
+
+    def test_sigkill_during_delivery_loses_no_alert(self):
+        self.baseline()
+        self.write_alerts(*[self.alert(i, "K_%d" % i, "ACTION") for i in (2, 3, 4)])
+        self.fake.responses = ["hold"]
+        cmd = [sys.executable, "-I", MM_PATH, "--profile", self.prof, "--data", self.data, "notify", "run"]
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            deadline = time.monotonic() + 10
+            while not self.fake.posts() and time.monotonic() < deadline and p.poll() is None:
+                time.sleep(0.02)
+            self.assertEqual(len(self.fake.posts()), 1, "the run is inside its first delivery")
+            p.kill()
+        finally:
+            if p.poll() is None:
+                p.kill()
+            p.wait(10)
+        self.fake.release.set()
+        self.assert_no_loss("K_%d", (2, 3, 4))  # the held request reached the service: it counts (A17)
+
+    # ---- 4c.2: rotation
+
+    def test_alert_rotated_to_dot_1_is_still_sent_once(self):
+        self.baseline()
+        self.write_alerts(self.alert(2, "R_2", "ACTION"))
+        self.rotate_alerts()  # the record that made alerts.jsonl rotate; no alerts.jsonl yet
+        self.cli("notify", "run")
+        self.assertEqual(self.titles(), ["[mm] R_2"])
+        self.write_alerts(self.alert(3, "R_3", "ACTION"))
+        self.cli("notify", "run")
+        self.assertEqual(self.titles(), ["[mm] R_2", "[mm] R_3"], "deduplicated by seq: R_2 not again")
+        self.write_alerts(self.alert(4, "R_4", "ACTION"))
+        self.rotate_alerts()  # .1 now holds R_3, R_4; a new alerts.jsonl gets R_5 before the next run
+        self.write_alerts(self.alert(5, "R_5", "ACTION"))
+        self.cli("notify", "run")
+        self.cli("notify", "run")
+        self.assertEqual(sorted(self.titles()), ["[mm] R_%d" % i for i in (2, 3, 4, 5)])
+        self.assertEqual(self.status().get("cursor"), "5")
+
+    # ---- 4c.3: sequence reset
+
+    def test_sequence_reset_moves_cursor_and_sends_nothing_old(self):
+        self.write_alerts(*[self.alert(i, "OLD_%d" % i, "ACTION") for i in range(1, 6)])
+        self.cli("notify", "run")
+        self.assertEqual(self.status().get("cursor"), "5")
+        self.write_alerts(self.alert(1, "NEW_1", "ACTION"), self.alert(2, "NEW_2", "ACTION"))  # the store restarted
+        self.cli("notify", "run")
+        self.assertEqual(self.status().get("cursor"), "2", "the cursor resets to the last record's seq")
+        self.assertEqual(self.titles(), [], "nothing old is sent")
+        self.write_alerts(self.alert(3, "NEW_3", "ACTION"))
+        self.cli("notify", "run")
+        self.assertEqual(self.titles(), ["[mm] NEW_3"], "OLD_4 and OLD_5 stay unsent (A18)")
+        self.cli("notify", "run")
+        self.write_alerts(self.alert(4, "NEW_4", "ATTENTION"))
+        self.cli("notify", "run")
+        self.assertEqual(self.titles(), ["[mm] NEW_3", "[mm] NEW_4"])
+        self.assertEqual(self.fake.ntfy()[1]["priority"], 3, "NEW_4 (ATTENTION), not OLD_4 (ACTION)")
+        self.assertEqual(self.status().get("cursor"), "4")
+
+    # ---- 4c.4: hourly accounting is not in sent.jsonl
+
+    def test_rotating_sent_jsonl_resets_no_limit(self):
+        self.write_profile(self.notify_cfg(alerts_per_hour=2))
+        a = self.grant("agent-a", "--per-hour", "2")
+        b = self.grant("agent-b", "--per-hour", "1")
+        self.assert_delivered(self.send(a, "a1"))
+        self.assert_delivered(self.send(a, "a2"))
+        self.assert_delivered(self.send(b, "b1"))
+        self.baseline()
+        self.write_alerts(self.alert(2, "M_2", "ACTION"), self.alert(3, "M_3", "ACTION"))
+        self.cli("notify", "run")
+        self.assertEqual(len(self.fake.posts()), 5)
+        sent = os.path.join(self.notify_dir(), "sent.jsonl")
+        with open(sent) as f:
+            last = json.loads(f.read().splitlines()[-1])
+        with open(sent, "a") as f:  # A19: as if many `limited` records had been written
+            i = 0
+            while f.tell() < (1 << 20) + 1024:
+                f.write(json.dumps(dict(last, id="pad%06d" % i, status="limited", error="E_NOTIFY_LIMIT")) + "\n")
+                i += 1
+        for key_file, title in ((b, "b2"), (b, "b3"), (a, "a3")):
+            r = self.send(key_file, title)
+            self.assertEqual(r.returncode, 1, (title, r.stdout))
+            self.assertIn("E_NOTIFY_LIMIT", r.stdout)
+        self.write_alerts(self.alert(4, "M_4", "ACTION"))
+        self.cli("notify", "run")
+        self.assertTrue(os.path.exists(sent + ".1"), "sent.jsonl rotated at 1 MiB")
+        self.assertLess(os.path.getsize(sent), 1 << 20)
+        self.assertEqual(len(self.fake.posts()), 5, "no limit was reset by the rotation")
+        self.assertEqual(self.sent()[-1]["status"], "suppressed")
+
+    def test_counted_outcomes_for_agent_limits(self):
+        """Counted: delivered, queued, failed, refused; a duplicate or a limited try is not."""
+        c = self.grant("agent-c", "--per-hour", "2")
+        self.fake.responses = [403, 500]
+        self.assertEqual(self.send(c, "c1").returncode, 2)  # refused
+        self.assert_queued(self.send(c, "c2"))  # queued
+        r = self.send(c, "c3")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("E_NOTIFY_LIMIT", r.stdout)
+        self.assertEqual(len(self.fake.posts()), 2)
+        d = self.grant("agent-d", "--per-hour", "2")
+        self.assert_delivered(self.send(d, "d1"))
+        self.assertIn("E_NOTIFY_DUPLICATE", self.send(d, "d1").stdout)
+        self.assertIn("E_NOTIFY_DUPLICATE", self.send(d, "d1").stdout)
+        self.assert_delivered(self.send(d, "d2"))  # the duplicates took no slot
+        self.assertIn("E_NOTIFY_LIMIT", self.send(d, "d3").stdout)
+
+    # ---- 4c.5: the notice takes a slot
+
+    def test_notice_uses_the_only_slot(self):
+        self.write_profile(self.notify_cfg(alerts_per_hour=1))
+        self.baseline()
+        self.write_alerts(*[self.alert(i, "S_%d" % i, "ACTION") for i in (2, 3, 4)])
+        self.cli("notify", "run")
+        self.assertEqual(self.titles(), ["[mm] S_2"])
+        self.write_alerts(*[self.alert(i, "S_%d" % i, "ACTION") for i in (5, 6, 7)])
+        self.cli("notify", "run", offset=3700)
+        later = self.fake.ntfy()[1:]
+        self.assertEqual(len(later), 1, ("at most 1 message in that hour, the notice included", later))
+        self.assertIn("alerts suppressed", later[0]["title"] + " " + later[0]["message"])  # A20
+        self.write_alerts(self.alert(8, "S_8", "ACTION"))
+        self.cli("notify", "run", offset=3800)
+        self.assertEqual(len(self.fake.posts()), 2, "still the same hour")
+
+    # ---- 4c.6: outbox overflow
+
+    def test_outbox_overflow_drops_oldest_first_attempt(self):
+        self.write_profile(self.notify_cfg(alerts_per_hour=600))
+        self.fake.default = 500
+        key_file = self.grant("agent-one")
+        self.assert_queued(self.send(key_file, "OLDEST"))  # first attempt at t0
+        self.baseline()
+        self.write_alerts(*[self.alert(i, "Q_%03d" % i, "ACTION") for i in range(2, 101)])  # 99 alerts
+        offset = 35  # OLDEST is due: it is retried (and fails) before the alerts' first attempts
+        while self.status(offset=offset).get("cursor") != "100":
+            self.assertLess(offset, 50, "the runs do not take up the alerts")
+            self.cli("notify", "run", offset=offset)
+            offset += 1
+        self.assertGreaterEqual(self.titles().count("[agent-one] OLDEST"), 2, "OLDEST was retried once")
+        self.assertEqual(self.status(offset=offset).get("queued"), "100")
+        self.assertNotIn("dropped", [x["status"] for x in self.sent()])
+        self.write_alerts(self.alert(101, "Q_101", "ACTION"))
+        self.cli("notify", "run", offset=offset)
+        dropped = [x for x in self.sent() if x["status"] == "dropped"]
+        self.assertTrue(dropped, "101 items: one is dropped")
+        self.assertEqual((dropped[0]["source"], dropped[0]["sender"]), ("agent", "agent-one"), dropped[0])
+        self.assertLessEqual(int(self.status(offset=offset).get("queued")), 100)
+
+    # ---- backoff ladder and the 1-hour drop
+
+    def test_backoff_doubles_to_15_minutes_then_drop_after_one_hour(self):
+        key_file = self.grant("agent-one")
+        self.fake.default = 500
+        self.assert_queued(self.send(key_file, "ladder"))  # try 1 at 0: next in 30 s
+        # (offset, retried?): each retry at due + 10 s; each check before it at due - 10 s (A22)
+        plan = [(20, False), (40, True),      # due 30
+                (90, False), (110, True),     # due 40 + 60
+                (220, False), (240, True),    # due 110 + 120
+                (470, False), (490, True),    # due 240 + 240
+                (960, False), (980, True),    # due 490 + 480
+                (1870, False), (1890, True),  # due 980 + 900 (not 960: capped at 15 minutes)
+                (2780, False), (2800, True)]  # due 1890 + 900
+        tries = 1
+        for offset, retried in plan:
+            self.cli("notify", "run", offset=offset)
+            tries += retried
+            self.assertEqual(len(self.fake.posts()), tries, (offset, retried))
+        self.assertEqual(self.status(offset=2800).get("queued"), "1")
+        self.assertNotIn("dropped", [x["status"] for x in self.sent()])
+        self.cli("notify", "run", offset=3610)  # more than 1 hour after the first attempt
+        self.assertEqual(self.status(offset=3610).get("queued"), "0")
+        self.assertIn("dropped", [x["status"] for x in self.sent()])
+        n = len(self.fake.posts())
+        self.cli("notify", "run", offset=4000)
+        self.assertEqual(len(self.fake.posts()), n)
 
 
 if __name__ == "__main__":
