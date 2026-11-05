@@ -353,9 +353,9 @@ class Off(NotifyBase):
 
     def test_status_and_check_say_off(self):
         self.assertEqual(self.status().get("notify"), "off")
-        r = self.cli("check")
+        r = self.cli("check")  # no [notify] section: check output stays byte-for-byte as before (no notify line)
         self.assertEqual(r.returncode, 0, r.stdout)
-        self.assertIn("notify=off", r.stdout)
+        self.assertNotIn("notify", r.stdout)
         self.write_profile(self.notify_cfg(enabled=False))
         self.assertEqual(self.status().get("notify"), "off")
         self.assertIn("notify=off", self.cli("check").stdout)
@@ -737,7 +737,8 @@ class Grants(NotifyBase):
         self.assertEqual(self.status().get("grants"), "0")
         self.assert_error(self.send(new_copy, "fourth"), "E_NOTIFY_KEY", 2)
         self.assertEqual([b["title"] for b in self.fake.ntfy()], ["[agent-one] first", "[agent-one] third"])
-        self.assert_refused(self.cli("notify", "revoke", "agent-one"))
+        r = self.cli("notify", "revoke", "agent-one")  # nothing found: exit 1 (repo rule), nothing changed
+        self.assertEqual(r.returncode, 1, r.stdout)
         self.assert_refused(self.cli("notify", "revoke", "../grants"))
 
 
@@ -891,10 +892,11 @@ class Send(NotifyBase):
         self.assertEqual(self.fake.posts(), [])
 
     def test_help_lists_the_verbs(self):
-        out = self.cli("help").stdout
-        for verb in ("mm notify send", "mm notify grant", "mm notify revoke", "mm notify grants", "mm notify run",
-                     "mm notify test", "mm notify status"):
-            self.assertIn(verb, out)
+        out = self.cli("help").stdout  # help is at most 30 lines of 100 characters (test_cli): owner verbs share a line
+        self.assertIn("mm notify send", out)
+        line = next(l for l in out.splitlines() if "mm notify grant" in l)
+        for verb in ("revoke", "grants", "run", "test", "status"):
+            self.assertRegex(line, r"\b%s\b" % verb)
 
 
 class SendPushover(NotifyBase):
