@@ -7,7 +7,7 @@ granted. Services: [ntfy](https://ntfy.sh) (self-hosted or public) and Pushover.
 Rules: only the `mm notify` verbs touch the network; the supervisor, the watchdog and the hook never send, never wait
 on the network and never import the delivery code. One-way: nothing a service returns triggers any machine-manager
 action; there is no reply or ack path. Secrets live in one file, never in the profile, argv, environment, logs or
-output. Redirects are never followed; TLS is always verified. Every title and text is masked, cleaned and bounded
+output. Redirects are never followed; TLS is always verified and at least version 1.2. Every title and text is masked, cleaned and bounded
 (title 100, text 1000 characters, at most 4 tags) before it leaves the machine.
 
 ## Setup
@@ -127,14 +127,19 @@ A lock file must be a regular file of this user (never a link; else `E_NOTIFY_ST
 level, title, text, tags, first attempt, next attempt, tries, error), `hour` (one event per counted message of the
 last hour, with the time of its latest counted outcome: delivered, queued, failed or refused; for `alerts_per_hour`
 and each grant's limit), `recent` (the 600 s duplicate memory) and `delivering` (the ids the running delivery holds;
-no writer drops them for overflow). Capacity: 10000 hour events and 2000 duplicate entries; when one is full,
-`send` is refused with `E_NOTIFY_LIMIT` (exit 1, nothing written or sent) and new alerts count as suppressed. A missing `state.json` is a first run; one that is
+no writer drops them for overflow; a failed delivery whose item left the queue meanwhile is queued again). Capacity:
+10000 hour events and 2000 duplicate entries (all senders). When either is full, `send` is refused with
+`E_NOTIFY_LIMIT` (exit 1; nothing written, sent or logged). When the hour events are full, new mm alerts count as
+suppressed; the duplicate memory holds agent messages only, so agents can never silence mm alerts. Retries back off
+to at most 15 min whatever the try count. A missing `state.json` is a first run; one that is
 not a valid document stops every verb that needs it with `E_NOTIFY_STATE` (exit 2), before any write or delivery:
 move it away. Files of older versions (`cursor.json`, `outbox.json`, `hour.json`, `recent.json`) are ignored.
 
 `sent.jsonl` is an audit log only, never read for a decision (deleting or rotating it changes no limit): one record
 per outcome; at 1 MiB it moves to `sent.jsonl.1`. A record: `{"time", "id", "source": "mm"|"agent", "sender", "level", "title", "status", "error"}`, status `delivered`,
-`queued`, `failed` (a retry failed), `refused`, `suppressed`, `dropped`, `limited` or `duplicate`; no text, no secret.
+`queued`, `failed` (a retry failed), `refused`, `suppressed`, `dropped`, `limited` (a grant's per-hour limit) or
+`duplicate`; no text, no secret. A failed item queued again after it left the queue gets one more `queued` record
+with error `E_NOTIFY_REQUEUED`.
 
 ## Verbs, output and exit codes
 
