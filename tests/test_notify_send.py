@@ -44,10 +44,14 @@ A24 4e.1 A word cut short is dropped or replaced by a marker whose text the test
     unknown inside the module, so the test moves each secret across 100, 1000 and mmtext's line cut (4e.1 sweep).
 A25 4e.4 The slowed functions: socket.socket.connect (and connect_ex) for 127.0.0.1:<fake port>, socket.getaddrinfo
     for "localhost". Each must be called; the no-delay control proves the same path delivers once, on time.
-A26 4e.3 is tested from outside only: after deliver returns (Connection: close, a server hang-up, a 4xx, a TLS
-    failure), sockets the test opens at once (likely reusing the freed descriptor numbers) must still work after
-    deliver's timeout has passed. A watchdog acting while deliver runs cannot be seen from outside. The test skips
-    when no descriptor number was reused (then 4e.3 was not exercised).
+A26 4e.3 The module reads its http response through socket.socket.recv_into or recv. In the first such read the
+    test makes the module's descriptor number name an unrelated echo connection (os.dup2), holds the read past
+    timeout_s so the watchdog fires, then fails the read. The unrelated connection must still work afterwards.
+A28 4e.1 The contract does not fix where the pre-mask cut is (1000 is the bound after masking, where a word may be
+    cut). So the cut word is 10000+ characters long, past any pre-mask cut. Then the message is the whole words
+    before it (whitespace at the end may go), or those words and mmtext.CUT_MARK, or empty when no word comes before
+    it: never any piece of the cut word. One lowercase word in the sweep gives the filler before the shape (no
+    pre-mask cut; the shape itself is masked), empty or CUT_MARK. Inputs are lowercase: they are never masked.
 A27 Byte counts (4d.6 with reads that raise): "api" is what HTTPResponse's read calls return to the module, plus
     IncompleteRead.partial when one raises; "wire" is what HTTPResponse takes from its buffered file after the
     headers, raising reads included. wire may exceed 65537 only by chunk framing (size lines, CRLF): at most 256.
@@ -156,6 +160,20 @@ def parts(secret, n=6):
 
 def form(body):
     return urllib.parse.parse_qs(body.decode("utf-8"), keep_blank_values=True, strict_parsing=True)
+
+
+def assert_cut_at_word(test, head, message, bound=1000):
+    """4e.1 (A28): the input was `head` (whole words, shorter than bound) and one word past the pre-mask cut.
+    The message is `head` (whitespace at the end may go), or `head` and mmtext.CUT_MARK, or empty with no head."""
+    test.assertLessEqual(len(message), bound)
+    run = message[:-len(mmtext.CUT_MARK)] if message.endswith(mmtext.CUT_MARK) else message
+    test.assertEqual(run.rstrip(), head.rstrip(), "the message keeps a piece of the cut word or loses whole words: "
+                     "%r" % message[-40:])
+
+
+def distinct_word(rng, n):
+    """One word of n lowercase letters, not one repeated character."""
+    return "".join(rng.choice(string.ascii_lowercase) for _ in range(n))
 
 
 class Base(unittest.TestCase):
@@ -468,15 +486,30 @@ class RenderNtfy(Base):
         self.assertLessEqual(len(doc["message"]), 1000)
         self.assertGreater(doc["message"].count("x"), 0)
 
-    def test_single_overlong_word_is_dropped_or_replaced(self):  # 4e.1, A24
+    def test_single_overlong_word_is_dropped_or_replaced(self):  # 4e.1, A24, A28
+        rng = random.Random(28)
         for service, cfg, sec in (("ntfy", ntfy_cfg(), {"token": NTFY_TOKEN}),
                                   ("pushover", pushover_cfg(), {"app_token": PO_APP, "user_key": PO_USER})):
-            with self.subTest(service=service):
-                _, _, body = self.ns.render(cfg, sec, msg(title="T" * 300, text="x" * 5000))
-                fields = json.loads(body) if service == "ntfy" else {k: v[0] for k, v in form(body).items()}
-                self.assertLessEqual(len(fields["message"]), 1000)
-                self.assertNotIn("x" * 8, fields["message"], "a word cut short is dropped, not kept in part")
-                self.assertTrue(fields["title"].startswith("[agent-x]"), fields["title"])
+            for before in (0, 1, 2, 7, 500, 980, 990):  # characters of whole words before the overlong word
+                head = ""
+                while len(head) < before:
+                    w = distinct_word(rng, min(rng.randint(1, 9), max(1, before - len(head) - 1)))
+                    head = (head + " " + w) if head else w
+                for length in (10001, 12000):  # distinct letters, past any pre-mask cut (A28)
+                    text = (head + " " if head else "") + distinct_word(rng, length)
+                    with self.subTest(service=service, head=len(head), word=length):
+                        _, _, body = self.ns.render(cfg, sec, msg(title="Build done", text=text))
+                        fields = json.loads(body) if service == "ntfy" else {k: v[0] for k, v in form(body).items()}
+                        assert_cut_at_word(self, head, fields["message"])
+                        self.assertEqual(fields["title"], "[agent-x] Build done")
+
+    def test_text_that_fits_is_unchanged(self):  # 4e.1 does not touch a text at or under the bound
+        rng = random.Random(29)
+        for n in (1, 999, 1000):
+            text = distinct_word(rng, n)
+            with self.subTest(length=n):
+                _, _, doc = self.render(m=msg(text=text))
+                self.assertEqual(doc["message"], text)
 
     def test_exact_bounds_pass_unchanged(self):
         _, _, doc = self.render(m=msg(title="T" * 100, text="x" * 1000, sender="s" * 40))
@@ -627,7 +660,8 @@ class RenderHardening(Base):
         rng = random.Random(4)
         tail = "".join(rng.choice(string.ascii_uppercase + string.digits) for _ in range(36))
         shapes = {"ghp": ":" + "gh" + "p_" + tail, "github_pat": "/" + "github" + "_pat_" + tail + "_" + tail[:22],
-                  "sk": ":" + "s" + "k-" + tail, "akia": "=" + "AK" + "IA" + tail[:16], "xoxb": ":" + "xo" + "xb-" + tail}
+                  "sk": ":" + "s" + "k-" + tail, "akia": "=" + "AK" + "IA" + tail[:16],
+                  "xoxb": ":" + "xo" + "xb-" + tail}
         lower = "".join(rng.choice(string.ascii_lowercase) for _ in range(5000))
         fillers = {  # what comes before the secret, with no white space before a cut (but "words")
             "lower": lower, "words": " ".join(lower[i:i + 7] for i in range(0, 5000, 7)),
@@ -646,6 +680,10 @@ class RenderHardening(Base):
                 fields = json.loads(body) if service == "ntfy" else {k: v[0] for k, v in form(body).items()}
                 shown = fields["title"] + "\n" + fields["message"]
                 self.assertEqual(sorted(x for x in pieces if x in shown), [])
+                if field == "text" and where.get("style") == "lower" and len(text) > 1000:  # one word (A28)
+                    kept = text[:min(where["start"] - 1, 1000)]  # the filler before the shape (the shape is masked)
+                    self.assertTrue(fields["message"] in ("", mmtext.CUT_MARK) or fields["message"].startswith(kept),
+                                    "a piece of the cut word was kept: %r" % fields["message"][:40])
         for name, shape in shapes.items():
             pieces = parts(shape[1:])
             for service, cfg, sec in services if name == "ghp" else services[:1]:
@@ -656,7 +694,7 @@ class RenderHardening(Base):
                                 check(service, cfg, sec, field, filler[:start - 1] + shape, shape=name, cut=point,
                                       start=start, style=style)
                     for start in range(3940, 4110):  # 3940+ characters before the shape: every start, two fillers
-                        for style in ("alnum", "printable"):
+                        for style in ("lower", "alnum", "printable"):
                             check(service, cfg, sec, field, fillers[style][:start - 1] + shape, shape=name,
                                   start=start, style=style)
 
@@ -1156,7 +1194,7 @@ class Deliver(Base):
                 self.assertLess(took, 1.5)
                 self.assertEqual(len([x for x in f.requests if x["method"] == "POST"]), 1)
 
-    def test_watchdog_never_shuts_down_another_socket(self):  # 4e.3, A26
+    def echo_server(self):
         class Echo(socketserver.BaseRequestHandler):
             def handle(self):
                 with contextlib.suppress(OSError):
@@ -1175,35 +1213,49 @@ class Deliver(Base):
         threading.Thread(target=echo.serve_forever, kwargs={"poll_interval": .01}, daemon=True).start()
         self.addCleanup(echo.server_close)
         self.addCleanup(echo.shutdown)
-        used, real_connect = set(), socket.socket.connect
+        return echo
 
-        def recording(sock, address, *a, **k):
-            if not (isinstance(address, tuple) and address[1] == echo.server_address[1]):
-                used.add(sock.fileno())
-            return real_connect(sock, address, *a, **k)
-        mine = []
+    def test_watchdog_never_shuts_down_a_reused_descriptor(self):  # 4e.3, A26
+        echo = self.echo_server()
+        unrelated = socket.create_connection(echo.server_address, timeout=3)
+        self.addCleanup(unrelated.close)
+        swapped, release = [], threading.Event()
+        self.addCleanup(release.set)
+
+        def stalled(real):
+            def method(sock, *a, **k):
+                try:
+                    peer = sock.getpeername()
+                except OSError:
+                    peer = None
+                if not swapped and isinstance(peer, tuple) and peer[1] == port[0]:
+                    fd = sock.fileno()
+                    os.dup2(unrelated.fileno(), fd)  # the module's number now names the unrelated connection
+                    swapped.append(fd)
+                    release.wait(1.8)  # past timeout_s: the watchdog fires while the number is reused
+                    raise TimeoutError("test: the read stalled")
+                return real(sock, *a, **k)
+            return method
+        port = [None]
+        with self.fake(lambda h, rec, release: release.wait(5)) as f:
+            port[0] = f.port
+            with mock.patch.object(socket.socket, "recv_into", stalled(socket.socket.recv_into)), \
+                    mock.patch.object(socket.socket, "recv", stalled(socket.socket.recv)):
+                r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, timeout_s=1)
+        self.assertTrue(swapped, "the injected read ran (A26)")
+        self.assertFalse(r["ok"])
+        got, problem = b"", None
         try:
-            def hang_up(h, rec, release):
-                h.close_connection = True  # no answer: the server closes the connection
-            cases = [("connection close", reply(200, b"ok", headers=[("Connection", "close")]), "http"),
-                     ("server hang-up", hang_up, "http"), ("refused 400", reply(400), "http"),
-                     ("TLS failure", reply(200), "https")]
-            for name, respond, scheme in cases:
-                with self.fake(respond) as f, mock.patch.object(socket.socket, "connect", recording):
-                    self.deliver(ntfy_cfg("%s://127.0.0.1:%d" % (scheme, f.port)), {"token": NTFY_TOKEN}, timeout_s=1)
-                for _ in range(4):  # at once: the lowest free descriptor numbers, among them deliver's own
-                    s = socket.create_connection(echo.server_address, timeout=2)
-                    mine.append((name, s))
-            time.sleep(1.5)  # past every deliver's timeout_s
-            for name, s in mine:
-                with self.subTest(after=name, fd=s.fileno()):
-                    s.sendall(b"ping")
-                    self.assertEqual(s.recv(4), b"ping", "a socket deliver does not own was shut down")
-            if not used & {s.fileno() for _, s in mine}:
-                self.skipTest("no descriptor number of deliver's was reused; 4e.3 not exercised (A26)")
-        finally:
-            for _, s in mine:
-                s.close()
+            unrelated.sendall(b"ping")
+            while b"ping" not in got:
+                data = unrelated.recv(64)
+                if not data:
+                    break
+                got += data
+        except OSError as e:
+            problem = e
+        self.assertIsNone(problem, "the watchdog shut down a socket it does not own")
+        self.assertIn(b"ping", got, "the watchdog shut down a socket it does not own")
 
     def test_reads_that_raise_are_counted_and_bounded(self):  # 4d.6, A27
         chunk = b"c" * 16384
