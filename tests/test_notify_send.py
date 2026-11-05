@@ -978,9 +978,10 @@ class Deliver(Base):
     def test_no_late_send_after_a_timeout(self):  # 4d.4, A20
         for name in ("socket.getaddrinfo", "socket.create_connection"):
             with self.subTest(slow=name), self.fake(reply(200)) as f:
-                gate = threading.Event()
+                gate, called = threading.Event(), []
 
                 def slow(*a, _real=getattr(socket, name.split(".")[1]), **k):
+                    called.append(1)
                     gate.wait(1.6)
                     return _real(*a, **k)
                 t0 = time.monotonic()
@@ -991,8 +992,12 @@ class Deliver(Base):
                         time.sleep(max(0.0, 2.4 - (time.monotonic() - t0)))  # a late send would land by now
                 finally:
                     gate.set()
-                self.assertEqual((r["ok"], r["error"]), (False, "E_NOTIFY_NET"))
                 self.assertLess(took, 2.5)
+                if not called:  # this path does not use the slowed function (for example a direct socket connect)
+                    self.assertTrue(r["ok"], r)  # then nothing was slow: one timely delivery, and nothing later
+                    self.assertEqual(len([x for x in f.requests if x["method"] == "POST"]), 1)
+                    continue
+                self.assertEqual((r["ok"], r["error"]), (False, "E_NOTIFY_NET"))
                 self.assertEqual([x["path"] for x in f.requests if x["method"] == "POST"], [],
                                  "no request reaches the server after deliver returned E_NOTIFY_NET")
 
