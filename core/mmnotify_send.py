@@ -484,6 +484,7 @@ def _send(url, headers, body, deadline):
                 _tunnel(sock, host, port, proxy[2])
             if tls:
                 context = ssl.create_default_context()  # verifies the chain and the host name (contract 4d.7)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2  # never TLS 1.0 or 1.1
                 sock.settimeout(_remaining(deadline))
                 sock = context.wrap_socket(sock, server_hostname=host)
                 conn = http.client.HTTPSConnection(host, port, context=context)

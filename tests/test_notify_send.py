@@ -1083,6 +1083,7 @@ class Deliver(Base):
         if made.returncode != 0:
             self.skipTest("openssl could not make a certificate: %s" % made.stderr[-200:])
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(cert, key)
         with self.fake(reply(200), tls_ctx=ctx) as f:
             r = self.deliver(ntfy_cfg(f.url), {"token": NTFY_TOKEN}, timeout_s=3)
@@ -1363,6 +1364,7 @@ class Deliver(Base):
 
         def server_ctx(name):
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             ctx.load_cert_chain(pki[name + ".pem"], pki[name + ".key"])
             return ctx
         with mock.patch("ssl.create_default_context", trusting), \
