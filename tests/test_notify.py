@@ -89,6 +89,8 @@ A36 (4g.6) Lock files are tested through `mm notify run` (both locks) and `mm no
 A37 (decision c) The test makes an item "evicted meanwhile" by removing it, under notify/notify.lock, from the queue
     and from `delivering` of the state the run wrote, while the fake server holds its request (then 500). The run
     exits 1 (a delivery failed). The item's title in state.json holds the alert name.
+A39 (decision c) "The normal failed line" is the line any retryable run failure writes: status failed or queued,
+    error E_NOTIFY_HTTP. The extra line must be status queued, error E_NOTIFY_REQUEUED.
 A38 (decision a) 11 or 13 hex characters, non-hex characters, null and a number are bad `delivering` values; ids
     need not be in the queue (20 unknown ids load). A run that delivers nothing leaves `delivering` empty.
 Not covered here (Part B or impractical in a CLI test): a secret file owned by another uid, the systemd/launchd
@@ -2113,8 +2115,9 @@ class Round4(NotifyBase):
         self.assertNotIn("Traceback", err)
         self.assertEqual(p.returncode, 1, out)
         recs = [x for x in self.sent() if x["id"] == item["id"]]
-        self.assertIn(("failed", "E_NOTIFY_HTTP"), [(x["status"], x["error"]) for x in recs], recs)
-        self.assertIn(("queued", "E_NOTIFY_REQUEUED"), [(x["status"], x["error"]) for x in recs], recs)
+        pairs = [(x["status"], x["error"]) for x in recs]
+        self.assertTrue(("failed", "E_NOTIFY_HTTP") in pairs or ("queued", "E_NOTIFY_HTTP") in pairs, recs)  # A39
+        self.assertIn(("queued", "E_NOTIFY_REQUEUED"), pairs, ("decision (c): the extra re-queue line", recs))
         self.assertEqual(self.status().get("queued"), "1", "re-queued")
         self.assertEqual(self.state()["delivering"], [])
         self.fake.default = 200
