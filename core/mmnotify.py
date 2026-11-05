@@ -693,9 +693,11 @@ class _RunLock:
                 os.close(self.fd)
 
 
-def _record_result(st, item, r, now, audit):
+def _record_result(st, item, r, now, audit, from_queue=False):
     """Record one delivery result in st: delivered or refused leaves the queue, a retryable failure backs off (or
-    joins the queue). The message's hour event moves to now. Returns the status word."""
+    joins the queue). The message's hour event moves to now. from_queue: the item was in the queue when selected (a
+    run), so a failed item that is gone now was evicted meanwhile and is re-queued with an extra audit line (4g.3).
+    Returns the status word."""
     _count(st, item, now)
     pos = next((i for i, x in enumerate(st["queue"]) if x["id"] == item["id"]), None)
     if r["ok"]:
@@ -709,7 +711,7 @@ def _record_result(st, item, r, now, audit):
             st["queue"][pos] = entry
         else:  # an agent's first attempt, or an entry that left the queue meanwhile: queued (again)
             _enqueue(st, entry, audit=audit)
-            if item.get("tries", 0):
+            if from_queue:
                 audit.append(dict(entry, status="queued", error="E_NOTIFY_REQUEUED"))
     else:
         status = "refused"
@@ -983,7 +985,7 @@ def _run(cfg, profile, counts, now):
             st["delivering"] = []
             audit = []
             for item, r in results:
-                counts[_record_result(st, item, r, t, audit)] += 1
+                counts[_record_result(st, item, r, t, audit, from_queue=True)] += 1
             save_state(st)
             problem = problem or _audit(audit, t)
     if problem is not None:
