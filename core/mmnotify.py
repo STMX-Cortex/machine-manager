@@ -488,7 +488,7 @@ def _msg(item):
 
 
 def _backoff(tries):
-    return min(BACKOFF_FIRST_S * 2 ** max(tries - 1, 0), BACKOFF_MAX_S)
+    return min(BACKOFF_FIRST_S * 2 ** min(max(tries - 1, 0), 32), BACKOFF_MAX_S)  # exponent capped: tries may be huge
 
 
 # --------------------------------------------------------------------------------------------- state.json
@@ -704,13 +704,13 @@ def _record_result(st, item, r, now, audit, from_queue=False):
         status = "delivered"
         st["last_delivery"] = round(now, 3)
     elif r["error"] in RETRYABLE:
-        tries = item.get("tries", 0) + 1
+        tries = min(item.get("tries", 0) + 1, INT_MAX)  # saturates: the state stays valid
         status = "queued" if tries == 1 else "failed"
         entry = _queued(item, tries=tries, next=round(now + _backoff(tries), 3), error=r["error"])
         if pos is not None:
             st["queue"][pos] = entry
         else:  # an agent's first attempt, or an entry that left the queue meanwhile: queued (again)
-            _enqueue(st, entry, audit=audit)
+            _enqueue(st, entry, keep=(entry["id"],), audit=audit)  # never evicts itself
             if from_queue:
                 audit.append(dict(entry, status="queued", error="E_NOTIFY_REQUEUED"))
     else:
@@ -982,10 +982,10 @@ def _run(cfg, profile, counts, now):
             t = time.time()
             st = load_state()
             _prune(st, t)
-            st["delivering"] = []
             audit = []
-            for item, r in results:
+            for item, r in results:  # the delivering ids stay protected until every result is recorded
                 counts[_record_result(st, item, r, t, audit, from_queue=True)] += 1
+            st["delivering"] = []
             save_state(st)
             problem = problem or _audit(audit, t)
     if problem is not None:
