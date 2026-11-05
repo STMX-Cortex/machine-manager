@@ -7,6 +7,7 @@ supervisor, the watchdog and the hook never do. The network module (mmnotify_sen
 deliver or read the secret file. State lives in <data>/notify/ (mode 0700, files 0600). The lock (notify.lock) is held
 only to read and change state files, never while a message is on the network.
 """
+import fcntl
 import hashlib
 import hmac
 import json
@@ -44,11 +45,10 @@ DUPLICATE_S = 600
 HOUR_S = 3600
 RUN_DELIVERIES = 20
 RUN_DEADLINE_S = 240     # no new delivery starts after it (the service template allows 300 s)
-LEASE_S = 300            # a claimed outbox item is not retried by another run before this
 BACKOFF_FIRST_S, BACKOFF_MAX_S = 30, 900
 OUTBOX_MAX, OUTBOX_KEEP_S = 100, 3600
 SENT_MAX_BYTES = 1 << 20
-STATE_MAX_BYTES = 1 << 20  # each JSON state file
+STATE_MAX_BYTES = 4 << 20  # each JSON state file (state.json: queue, hour events, duplicate memory)
 KEY_FILE_MAX = 256
 RECENT_MAX = 2000
 RETRYABLE = frozenset(("E_NOTIFY_HTTP", "E_NOTIFY_NET"))
@@ -175,30 +175,6 @@ def _read_bytes(p, limit):
     return raw if len(raw) <= limit else None
 
 
-def _read_tail(p, limit):
-    """The last limit bytes of a regular file from its first whole line (no link, no FIFO); b"" when none."""
-    try:
-        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
-    except OSError:
-        return b""
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode):
-            return b""
-        with os.fdopen(fd, "rb") as f:
-            fd = None
-            if st.st_size <= limit:
-                return f.read(limit)
-            f.seek(st.st_size - limit)
-            raw = f.read(limit)
-    except OSError:
-        return b""
-    finally:
-        if fd is not None:
-            os.close(fd)
-    return raw[raw.find(b"\n") + 1:]
-
-
 def _no_dupes(pairs):
     out = {}
     for k, v in pairs:
@@ -281,30 +257,6 @@ def _num_time(v):
         except (ValueError, OverflowError):
             return None
     return None
-
-
-def sent_records(since=None):
-    """The sent log's records (sent.jsonl.1, then sent.jsonl), each a dict with a numeric _t; since: only newer."""
-    out = []
-    for name in ("sent.jsonl.1", "sent.jsonl"):
-        raw = _read_tail(folder(name), SENT_MAX_BYTES * 2)
-        if not raw:
-            continue
-        for line in raw.decode("utf-8", "replace").split("\n"):
-            if not line:
-                continue
-            try:
-                r = _loads(line.encode())
-            except (ValueError, RecursionError):
-                continue
-            if not isinstance(r, dict):
-                continue
-            t = _num_time(r.get("time"))
-            if t is None or (since is not None and t < since):
-                continue
-            r["_t"] = t
-            out.append(r)
-    return out
 
 
 def log_sent(rec, now):
@@ -449,8 +401,15 @@ def find_grant(key, grants):
 # --------------------------------------------------------------------------------------------- messages
 
 def one_line(text, limit):
-    """A text as it may leave the machine: masked, white space folded, cleaned, at most limit characters."""
-    t = mmtext.clean(" ".join(mmcore.mask(str(text)[:limit * 4]).split()))
+    """A text as it may leave the machine: masked, white space folded, cleaned, at most limit characters. A text
+    longer than 4 * limit is cut before masking at a white space only (an unfinished word is dropped), so a secret
+    cut short never escapes the mask."""
+    text = str(text)
+    if len(text) > limit * 4:
+        head = text[:limit * 4]
+        cut = max(head.rfind(c) for c in " \t\n\r\f\v")
+        text = head[:cut] if cut > 0 else ""
+    t = mmtext.clean(" ".join(mmcore.mask(text).split()))
     return t if len(t) <= limit else t[:limit - 3].rstrip() + "..."
 
 
@@ -508,86 +467,215 @@ def _backoff(tries):
     return min(BACKOFF_FIRST_S * 2 ** max(tries - 1, 0), BACKOFF_MAX_S)
 
 
-def _outbox():
-    doc = read_state("outbox.json", {})
-    items = doc.get("items") if isinstance(doc.get("items"), list) else []
-    keep = ("id", "source", "sender", "level", "title", "text")
-    return [i for i in items if isinstance(i, dict) and all(isinstance(i.get(k), str) for k in keep)
-            and i["level"] in MSG_LEVELS and _num_time(i.get("first")) is not None
-            and _num_time(i.get("next")) is not None and type(i.get("tries")) is int]
+# --------------------------------------------------------------------------------------------- state.json
+# One state file holds every decision input (NOTIFY.md, Files): the alert cursor, the queue (outbox), the counted
+# events of the last hour, the suppressed count, the duplicate memory and the last delivery time. It is read and
+# written whole (write_atomic) under notify.lock, never held during a delivery. sent.jsonl is an audit log only.
 
-
-def _write_outbox(items):
-    write_state("outbox.json", {"schema_version": 1, "items": items})
-
-
-def _add_outbox(items, item, now, dropped=None):
-    """Add item; over OUTBOX_MAX the item with the oldest first attempt goes (whatever its place), logged as dropped
-    (or put in the list dropped, for the caller to log after its state writes)."""
-    items.append(item)
-    while len(items) > OUTBOX_MAX:
-        old = min(range(len(items)), key=lambda i: _num_time(items[i]["first"]))
-        rec = dict(items.pop(old), status="dropped", error="E_NOTIFY_QUEUE_FULL")
-        if dropped is None:
-            log_sent(rec, now)
-        else:
-            dropped.append(rec)
-
-
-# The hourly accounting (alerts_per_hour, each grant's per_hour): notify/hour.json holds one event per counted
-# message (delivered, queued, failed or refused; one per id, its first attempt), pruned by age. Never the rotating
-# sent log, so filling or rotating sent.jsonl never resets a limit.
+STATE = "state.json"
+STATE_KEYS = frozenset(("schema_version", "cursor", "suppressed", "last_delivery", "queue", "hour", "recent"))
+ITEM_KEYS = frozenset(("id", "source", "sender", "level", "title", "text", "tags", "first", "next", "tries", "error"))
+HOUR_KEYS = frozenset(("id", "source", "sender", "time"))
+RECENT_KEYS = frozenset(("id", "sender", "digest", "time"))
+ID = re.compile(r"[0-9a-f]{12}")
+SENDER = re.compile(r"mm|[a-z0-9][a-z0-9-]{0,39}")
+DIGEST = re.compile(r"(?:[0-9a-f]{64})?")
+ERRORS = (None, "E_NOTIFY_HTTP", "E_NOTIFY_NET")
 HOUR_MAX = 10000
 
 
-def _hour(now):
-    doc = read_state("hour.json", {})
-    evs = doc.get("events") if isinstance(doc.get("events"), list) else []
-    return [e for e in evs if isinstance(e, dict) and isinstance(e.get("id"), str) and isinstance(e.get("source"), str)
-            and isinstance(e.get("sender"), str) and (_num_time(e.get("time")) or 0) > now - HOUR_S][-HOUR_MAX:]
+def new_state():
+    return {"schema_version": 1, "cursor": None, "suppressed": 0, "last_delivery": None, "queue": [], "hour": [],
+            "recent": []}
 
 
-def _hour_count(events, source, sender):
-    return len({e["id"] for e in events if e["source"] == source and e["sender"] == sender})
+def _int(v, lo=0):
+    return type(v) is int and v >= lo
 
 
-def _hour_add(events, item, now):
-    """Count item once (by its id)."""
-    if not any(e["id"] == item["id"] for e in events):
-        events.append({"time": round(now, 3), "id": item["id"], "source": item["source"], "sender": item["sender"]})
+def _num(v):
+    return type(v) in (int, float) and math.isfinite(v)
 
 
-def _write_hour(events):
-    write_state("hour.json", {"schema_version": 1, "events": events[-HOUR_MAX:]})
+def _str(v, hi, lo=0):
+    return isinstance(v, str) and lo <= len(v) <= hi
 
 
-def _record(item, r, now, outbox):
-    """After one delivery attempt (outbox: the list to put a retryable failure in). Returns the status word."""
+def _item_ok(i):
+    return (isinstance(i, dict) and set(i) == ITEM_KEYS and isinstance(i["id"], str) and ID.fullmatch(i["id"])
+            and i["source"] in ("mm", "agent") and isinstance(i["sender"], str) and SENDER.fullmatch(i["sender"])
+            and (i["source"] == "mm") == (i["sender"] == "mm") and i["level"] in MSG_LEVELS
+            and _str(i["title"], TITLE_MAX, 1) and _str(i["text"], TEXT_MAX) and isinstance(i["tags"], list)
+            and len(i["tags"]) <= TAGS_MAX and all(isinstance(t, str) and TAG.fullmatch(t) for t in i["tags"])
+            and _num(i["first"]) and _num(i["next"]) and _int(i["tries"]) and i["error"] in ERRORS)
+
+
+def _hour_ok(e):
+    return (isinstance(e, dict) and set(e) == HOUR_KEYS and isinstance(e["id"], str) and ID.fullmatch(e["id"])
+            and e["source"] in ("mm", "agent") and isinstance(e["sender"], str) and SENDER.fullmatch(e["sender"])
+            and _num(e["time"]))
+
+
+def _recent_ok(e):
+    return (isinstance(e, dict) and set(e) == RECENT_KEYS and isinstance(e["id"], str) and ID.fullmatch(e["id"])
+            and isinstance(e["sender"], str) and SENDER.fullmatch(e["sender"]) and isinstance(e["digest"], str)
+            and DIGEST.fullmatch(e["digest"]) and _num(e["time"]))
+
+
+def valid_state(d):
+    """state.json's schema (NOTIFY.md, Files): exact keys, types and bounds; every queue entry, hour event and duplicate
+    entry valid; ids unique in the queue and in the hour events."""
+    try:
+        if not isinstance(d, dict) or set(d) != STATE_KEYS or type(d["schema_version"]) is not int \
+                or d["schema_version"] != 1:
+            return False
+        if not (d["cursor"] is None or _int(d["cursor"])) or not _int(d["suppressed"]) \
+                or not (d["last_delivery"] is None or _num(d["last_delivery"])):
+            return False
+        q, h, r = d["queue"], d["hour"], d["recent"]
+        if not (isinstance(q, list) and len(q) <= OUTBOX_MAX and all(_item_ok(i) for i in q)
+                and len({i["id"] for i in q}) == len(q)):
+            return False
+        if not (isinstance(h, list) and len(h) <= HOUR_MAX and all(_hour_ok(e) for e in h)
+                and len({e["id"] for e in h}) == len(h)):
+            return False
+        return isinstance(r, list) and len(r) <= RECENT_MAX and all(_recent_ok(e) for e in r)
+    except (TypeError, KeyError, AttributeError):
+        return False
+
+
+def load_state():
+    """state.json, checked (valid_state). Missing: a new state (the first run). Anything else that is not a valid
+    document (not a regular file, too large, bad JSON, a wrong type or entry): E_NOTIFY_STATE, before any write."""
+    p = folder(STATE)
+    if not os.path.lexists(p):
+        return new_state()
+    raw = _read_bytes(p, STATE_MAX_BYTES)
+    try:
+        doc = _loads(raw) if raw is not None else None
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        doc = None
+    if not valid_state(doc):
+        raise mmcore.MMError("E_NOTIFY_STATE", "notify/state.json is not a valid notify state",
+                             "move it away (the next run starts at the newest alert, with an empty queue)")
+    return doc
+
+
+def save_state(st):
+    """One atomic write of state.json (mode 0600). A write error is E_NOTIFY_STATE (exit 2)."""
+    write_state(STATE, st)
+
+
+def _prune(st, now):
+    """Hour events of the last hour only; duplicate memory of the last DUPLICATE_S only."""
+    st["hour"] = [e for e in st["hour"] if e["time"] > now - HOUR_S][-HOUR_MAX:]
+    st["recent"] = [e for e in st["recent"] if e["time"] > now - DUPLICATE_S][-RECENT_MAX:]
+
+
+def _hour_count(st, source, sender):
+    return sum(1 for e in st["hour"] if e["source"] == source and e["sender"] == sender)
+
+
+def _count(st, item, now):
+    """Count the message item at now, its latest counted outcome (one event per id; the time moves forward)."""
+    for e in st["hour"]:
+        if e["id"] == item["id"]:
+            e["time"] = max(e["time"], round(now, 3))
+            return
+    st["hour"].append({"id": item["id"], "source": item["source"], "sender": item["sender"], "time": round(now, 3)})
+
+
+def _queued(item, **change):
+    """A queue entry: exactly ITEM_KEYS."""
+    out = {k: item.get(k) for k in ITEM_KEYS}
+    out.update(change)
+    out["tags"] = list(out["tags"] or [])
+    out["tries"] = out["tries"] or 0
+    return out
+
+
+def _enqueue(st, item, keep=(), audit=None):
+    """Add item to the queue; over OUTBOX_MAX the entry with the oldest first attempt that is not in keep (the ids
+    selected for delivery in this run) goes, with a `dropped` audit record."""
+    st["queue"].append(item)
+    while len(st["queue"]) > OUTBOX_MAX:
+        cands = [i for i, x in enumerate(st["queue"]) if x["id"] not in keep]
+        if not cands:
+            break
+        old = st["queue"].pop(min(cands, key=lambda i: st["queue"][i]["first"]))
+        if audit is not None:
+            audit.append(dict(old, status="dropped", error="E_NOTIFY_QUEUE_FULL"))
+
+
+def _audit(records, now):
+    """Append audit records to sent.jsonl. Returns the first E_NOTIFY_STATE error (the state is already right)."""
+    for rec in records:
+        try:
+            log_sent(rec, now)
+        except mmcore.MMError as e:
+            return e
+    return None
+
+
+class _RunLock:
+    """notify/run.lock, held by `mm notify run` for its whole run (flock, non-blocking): busy = another run."""
+
+    def __enter__(self):
+        ensure()
+        try:
+            fd = os.open(folder("run.lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        except OSError:
+            raise _state_error("run.lock") from None
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            return None
+        except OSError:
+            os.close(fd)
+            raise _state_error("run.lock") from None
+        self.fd = fd
+        return self
+
+    def __exit__(self, *exc):
+        if getattr(self, "fd", None) is not None:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+            finally:
+                os.close(self.fd)
+
+
+def _record_result(st, item, r, now, audit):
+    """Record one delivery result in st: delivered or refused leaves the queue, a retryable failure backs off (or
+    joins the queue). The message's hour event moves to now. Returns the status word."""
+    _count(st, item, now)
+    pos = next((i for i, x in enumerate(st["queue"]) if x["id"] == item["id"]), None)
     if r["ok"]:
         status = "delivered"
+        st["last_delivery"] = round(now, 3)
     elif r["error"] in RETRYABLE:
         tries = item.get("tries", 0) + 1
         status = "queued" if tries == 1 else "failed"
-        _add_outbox(outbox, dict(item, tries=tries, next=round(now + _backoff(tries), 3), error=r["error"]), now)
+        entry = _queued(item, tries=tries, next=round(now + _backoff(tries), 3), error=r["error"])
+        if pos is not None:
+            st["queue"][pos] = entry
+        elif item.get("tries", 0) == 0:  # a first attempt that was not queued yet (an agent's message)
+            _enqueue(st, entry, audit=audit)
+        # else: the entry left the queue meanwhile (dropped by an overflow): not added again
     else:
         status = "refused"
-    log_sent(dict(item, status=status, error=r["error"]), now)
+    if status in ("delivered", "refused") and pos is not None:
+        st["queue"].pop(pos)
+    audit.append(dict(item, status=status, error=r["error"]))
     return status
 
 
 # --------------------------------------------------------------------------------------------- send (agents)
 
-def _recent(now):
-    doc = read_state("recent.json", {})
-    ents = doc.get("entries") if isinstance(doc.get("entries"), list) else []
-    return [e for e in ents if isinstance(e, dict) and isinstance(e.get("id"), str) and isinstance(e.get("sender"), str)
-            and isinstance(e.get("digest"), str) and (_num_time(e.get("time")) or 0) >= now - HOUR_S][-RECENT_MAX:]
-
-
 def send(profile, key_file, level, title, text="", tags=(), now=None):
     """One agent message (NOTIFY.md, Agents). Returns {"notify": "delivered"|"queued", "id"}; raises MMError
     (E_NOTIFY_OFF, E_NOTIFY_KEY, E_NOTIFY_LEVEL, E_NOTIFY_LIMIT, E_NOTIFY_DUPLICATE, E_NOTIFY_SECRET,
-    E_NOTIFY_REFUSED)."""
+    E_NOTIFY_REFUSED, E_NOTIFY_STATE)."""
     cfg = config(profile)
     if cfg is None:
         raise mmcore.MMError("E_NOTIFY_OFF", "phone notifications are off in this profile",
@@ -612,44 +700,48 @@ def send(profile, key_file, level, title, text="", tags=(), now=None):
         if RANK[level] > RANK[g["max_level"]]:
             raise mmcore.MMError("E_NOTIFY_LEVEL", "level %s is above this grant's max_level %s" % (level, g["max_level"]),
                                  "use --level %s, or ask the owner to grant more" % g["max_level"])
-        recent, hour = _recent(now), _hour(now)
-        mine = [e for e in recent if e["sender"] == name]
+        st = load_state()
+        _prune(st, now)
         mid = new_id()
         base = {"id": mid, "source": "agent", "sender": name, "level": level, "title": title, "text": text,
-                "tags": tags, "first": round(now, 3), "next": round(now, 3), "tries": 0}
-        if _hour_count(hour, "agent", name) >= g["per_hour"]:
-            log_sent(dict(base, status="limited", error="E_NOTIFY_LIMIT"), now)
+                "tags": tags, "first": round(now, 3), "next": round(now, 3), "tries": 0, "error": None}
+        if _hour_count(st, "agent", name) >= g["per_hour"]:
+            _audit([dict(base, status="limited", error="E_NOTIFY_LIMIT")], now)
             raise mmcore.MMError("E_NOTIFY_LIMIT", "grant %s reached its limit of %d messages per hour" % (name, g["per_hour"]),
                                  "wait, or ask the owner to raise --per-hour")
         digest = hashlib.sha256(json.dumps([name, title, text]).encode()).hexdigest()
-        if any(e["digest"] == digest and _num_time(e["time"]) >= now - DUPLICATE_S for e in mine):
-            log_sent(dict(base, status="duplicate", error="E_NOTIFY_DUPLICATE"), now)
+        if any(e["sender"] == name and e["digest"] == digest for e in st["recent"]):
+            _audit([dict(base, status="duplicate", error="E_NOTIFY_DUPLICATE")], now)
             raise mmcore.MMError("E_NOTIFY_DUPLICATE", "the same message was sent in the last %d s" % DUPLICATE_S,
                                  "send it only once; change the title or text when something changed")
         secret = _secret(cfg)
-        _hour_add(hour, base, now)  # counted from here: the attempt ends delivered, queued, failed or refused
-        _write_hour(hour)
-        recent.append({"time": round(now, 3), "id": mid, "sender": name, "digest": digest})
-        write_state("recent.json", {"schema_version": 1, "entries": recent})
+        _count(st, base, now)  # counted in the same write that accepts it
+        st["recent"].append({"id": mid, "sender": name, "digest": digest, "time": round(now, 3)})
+        save_state(st)
     try:
         r = deliver(cfg, secret, _msg(base))
     except mmcore.MMError:  # a config problem: the same message may go again once it is fixed
         with _Lock():
-            write_state("recent.json", {"schema_version": 1, "entries": [
-                dict(e, digest="") if e["id"] == mid else e for e in _recent(time.time())]})
+            st = load_state()
+            st["recent"] = [e for e in st["recent"] if e["id"] != mid]
+            save_state(st)
         raise
     with _Lock():
-        outbox = _outbox()
-        status = _record(base, r, time.time(), outbox)
-        if status == "queued":
-            _write_outbox(outbox)
-        elif status == "refused":
-            recent = [dict(e, digest="") if e["id"] == mid else e for e in _recent(time.time())]
-            write_state("recent.json", {"schema_version": 1, "entries": recent})
+        t = time.time()
+        st = load_state()
+        _prune(st, t)
+        audit = []
+        status = _record_result(st, base, r, t, audit)
+        if status == "refused":  # refused: not a duplicate when sent again
+            st["recent"] = [e for e in st["recent"] if e["id"] != mid]
+        save_state(st)
+        problem = _audit(audit, t)
     if status == "refused":
         raise mmcore.MMError("E_NOTIFY_REFUSED", "the service refused the message (HTTP %s)%s"
                              % (r["status"], ": " + r["detail"] if r["detail"] else ""),
                              "ask the owner to check [notify] and the secret file; mm notify test")
+    if problem is not None:
+        raise problem
     return {"notify": status, "id": mid}
 
 
@@ -662,6 +754,8 @@ def test(profile, level="normal"):
         raise mmcore.MMError("E_NOTIFY_OFF", "phone notifications are off in this profile", "[notify] enabled = true (NOTIFY.md)")
     if level not in MSG_LEVELS:
         raise mmcore.MMError("E_USAGE", "--level must be quiet, normal or ring", "mm notify test --level normal")
+    with _Lock():
+        load_state()  # a broken state stops here, before any delivery
     secret = _secret(cfg)
     mid, mach = new_id(), one_line(mmcore.machine_id(profile), 80)
     item = {"id": mid, "source": "mm", "sender": "mm", "level": level, "title": "test",
@@ -669,15 +763,20 @@ def test(profile, level="normal"):
     r = deliver(cfg, secret, _msg(item))
     with _Lock():
         t = time.time()
-        hour = _hour(t)
-        _hour_add(hour, item, t)
-        _write_hour(hour)
-        log_sent(dict(item, status="delivered" if r["ok"] else "refused" if r["error"] == "E_NOTIFY_REFUSED"
-                      else "failed", error=r["error"]), time.time())
+        st = load_state()
+        _prune(st, t)
+        _count(st, item, t)
+        if r["ok"]:
+            st["last_delivery"] = round(t, 3)
+        save_state(st)
+        problem = _audit([dict(item, status="delivered" if r["ok"] else "refused" if r["error"] == "E_NOTIFY_REFUSED"
+                               else "failed", error=r["error"])], t)
     if not r["ok"]:
         raise mmcore.MMError(r["error"], "test message not delivered (HTTP %s)%s"
                              % (r["status"], ": " + r["detail"] if r["detail"] else ""),
                              "check [notify] url/topic and the secret file (NOTIFY.md)")
+    if problem is not None:
+        raise problem
     return {"notify": "delivered", "id": mid}
 
 
@@ -701,106 +800,121 @@ def _alert_message(rec, cfg, mid_default):
     return level, title, text
 
 
-def _alert_records():
-    """The pushed alert records of the current sequence, in append order: alerts.jsonl.1, then alerts.jsonl (each
-    the same bounded tail as mmcore.read_pushed). Where a seq is not above the one before it (a new alerts-state.json,
-    or a record read twice), the sequence starts again: only the records after the last such point are returned."""
+def _alert_snapshot():
+    """alerts.jsonl.1 then alerts.jsonl (each the bounded tail mmcore.read_pushed reads), as one snapshot: read
+    under state/alerts.lock, the lock AlertStore holds to append and rotate (when the folder exists; without it no
+    supervisor writes alerts)."""
     log = mmcore.path("alerts.jsonl")
-    recs = mmcore.read_pushed(-1, log + ".1") + mmcore.read_pushed(-1, log)  # .1 first: a rotation in between
-    start = 0                                                               # repeats records, never skips them
-    for i in range(1, len(recs)):
-        if recs[i]["seq"] <= recs[i - 1]["seq"]:
-            start = i
-    return recs[start:]
+
+    def read():
+        return mmcore.read_pushed(-1, log + ".1") + mmcore.read_pushed(-1, log)
+    if not os.path.isdir(mmcore.path("state")):
+        return read()
+    try:
+        with mmcore.Locked(mmcore.path("state", "alerts.lock")):
+            return read()
+    except TimeoutError:
+        raise mmcore.MMError("E_NOTIFY_BUSY", "the alert log is locked", "try again (the timer runs again soon)") from None
+    except OSError:
+        raise mmcore.MMError("E_NOTIFY_STATE", "cannot lock state/alerts.lock", "check the data folder") from None
 
 
-def _alert_id(rec):
-    """One alert record's identity (its seq and a digest of key, name, time and why): an alert already in the outbox
-    is not added again when a run stopped between the outbox and the cursor writes."""
-    d = hashlib.sha256(json.dumps([rec.get("key"), rec.get("name"), rec.get("time"), rec.get("why")],
-                                  default=str).encode()).hexdigest()[:16]
-    return "%d:%s" % (rec["seq"], d)
+def alert_sequence(recs):
+    """The records of the current alert sequence, in append order. A record identical to one already read (same
+    seq, same content) is a duplicate and skipped; a seq lower than the record before it starts a new sequence (a new
+    alerts-state.json): only the records from the last such point on count. Another record with the seq of the one
+    before it is skipped."""
+    out, seen = [], {}
+    for r in recs:
+        canon = json.dumps(r, sort_keys=True, default=str)
+        if seen.get(r["seq"]) == canon:
+            continue
+        if out and r["seq"] < out[-1]["seq"]:
+            out, seen = [], {}
+        elif out and r["seq"] == out[-1]["seq"]:
+            continue
+        out.append(r)
+        seen[r["seq"]] = canon
+    return out
 
 
 def run(profile, now=None):
-    """The timer's run: due outbox retries, then new mm alerts (alerts.jsonl.1 and alerts.jsonl after the cursor).
-    Returns (rc, counts): rc 0, or 1 when a delivery failed, was queued, refused or dropped.
-    State order (NOTIFY.md, crash safety): hour.json, then outbox.json, then the sent-log records, cursor.json last; a
-    write error is E_NOTIFY_STATE (exit 2) and leaves the cursor where it was."""
+    """The timer's run (NOTIFY.md, crash rule): under notify/run.lock for the whole run; plan under the state lock
+    (alerts read as one snapshot, queue, hourly limit, overflow), ONE write of state.json, delivery without the lock,
+    then one write of the results. Returns (rc, counts): rc 0, or 1 when a delivery failed, was queued, refused or
+    dropped; {"notify": "busy"} when another run holds run.lock."""
     cfg = config(profile)
     counts = {"delivered": 0, "queued": 0, "failed": 0, "refused": 0, "suppressed": 0, "dropped": 0}
     if cfg is None:
         return 0, dict({"notify": "off"}, **counts, cursor=None)
+    with _RunLock() as held:
+        if held is None:
+            return 0, {"notify": "busy"}
+        return _run(cfg, profile, counts, now)
+
+
+def _run(cfg, profile, counts, now):
     start = time.monotonic()
     now = time.time() if now is None else now
     mid_default = mmcore.machine_id(profile)
+    audit = []
     with _Lock():
+        st = load_state()
         secret = _secret(cfg)
-        outbox, keep, todo, logs = _outbox(), [], [], []
-        for item in outbox:
-            if now - _num_time(item["first"]) > OUTBOX_KEEP_S:
-                logs.append(dict(item, status="dropped", error=item.get("error") or "E_NOTIFY_EXPIRED"))
-            elif _num_time(item["next"]) <= now and len(todo) < RUN_DELIVERIES:
-                todo.append(item)
-                keep.append(dict(item, next=round(now + LEASE_S, 3)))  # the lease: no other run retries it now
+        _prune(st, now)
+        keep, todo = [], []
+        for item in st["queue"]:  # (b) expire, then select the due entries (retries first)
+            if now - item["first"] > OUTBOX_KEEP_S:
+                audit.append(dict(item, status="dropped", error=item["error"] or "E_NOTIFY_EXPIRED"))
             else:
                 keep.append(item)
-        cur = read_state("cursor.json", None)
-        if cur is None and os.path.lexists(folder("cursor.json")):  # there but unreadable: change and send nothing
-            raise mmcore.MMError("E_NOTIFY_STATE", "cannot read notify/cursor.json",
-                                 "move it away (the next run starts at the newest alert); then run again")
-        cur = cur or {}
-        seq = cur.get("seq") if type(cur.get("seq")) is int and cur["seq"] >= 0 else None
-        suppressed = cur.get("suppressed") if type(cur.get("suppressed")) is int and cur["suppressed"] >= 0 else 0
-        every = _alert_records()
-        last = every[-1]["seq"] if every else 0  # the last record in append order
-        if seq is None or last < seq:  # the first run, or the sequence started again: start at the last record,
-            seq, recs = last, []       # never send the history
+                if item["next"] <= now and len(todo) < RUN_DELIVERIES:
+                    todo.append(item)
+        st["queue"] = keep
+        every = alert_sequence(_alert_snapshot())  # (a)
+        last = every[-1]["seq"] if every else 0
+        seq = st["cursor"]
+        if seq is None or last < seq:  # the first run, or a new sequence: start at its last record, send no history
+            seq, recs = last, []
         else:
             recs = [r for r in every if r["seq"] > seq]
-        queued_alerts = {i.get("alert") for i in keep if i["source"] == "mm" and isinstance(i.get("alert"), str)}
-        hour = _hour(now)
-        in_hour = _hour_count(hour, "mm", "mm")
+        in_hour = _hour_count(st, "mm", "mm")
+        suppressed = st["suppressed"]
         new = []
 
-        def item_for(level, title, text, alert=None):
-            it = {"id": new_id(), "source": "mm", "sender": "mm", "level": level, "title": title, "text": text,
-                  "tags": [], "first": round(now, 3), "next": round(now + LEASE_S, 3), "tries": 0}
-            if alert:
-                it["alert"] = alert
-            return it
+        def item_for(level, title, text):
+            return {"id": new_id(), "source": "mm", "sender": "mm", "level": level, "title": title, "text": text,
+                    "tags": [], "first": round(now, 3), "next": round(now, 3), "tries": 0, "error": None}
         if suppressed and in_hour < cfg["alerts_per_hour"] and len(todo) < RUN_DELIVERIES:
             new.append(item_for("quiet", "alerts suppressed", "%d alerts suppressed (machine %s)"
                                 % (suppressed, one_line(mid_default, 80))))
-            in_hour += 1  # the notice takes one slot of alerts_per_hour
+            in_hour += 1  # the notice takes one slot; the count goes back to 0 in the same write
             suppressed = 0
         for r in recs:
             if len(todo) + len(new) >= RUN_DELIVERIES:
                 break
             seq = r["seq"]
             m = _alert_message(r, cfg, mid_default)
-            if m is None or _alert_id(r) in queued_alerts:
+            if m is None:
                 continue
-            item = item_for(*m, alert=_alert_id(r))
+            item = item_for(*m)
             if in_hour >= cfg["alerts_per_hour"]:
-                logs.append(dict(item, status="suppressed", error="E_NOTIFY_LIMIT"))
+                audit.append(dict(item, status="suppressed", error="E_NOTIFY_LIMIT"))
                 counts["suppressed"] += 1
                 suppressed += 1
                 continue
             in_hour += 1
             new.append(item)
+        selected = {i["id"] for i in todo + new}
         for item in new:
-            _hour_add(hour, item, now)
-            _add_outbox(keep, item, now, logs)
-        counts["dropped"] = sum(1 for x in logs if x["status"] == "dropped")
-        # Crash safety: each new message is counted and in the outbox before the cursor passes its alert.
-        _write_hour(hour)
-        _write_outbox(keep)
-        for rec in logs:
-            log_sent(rec, now)
-        write_state("cursor.json", {"schema_version": 1, "seq": seq, "suppressed": suppressed})
-    results, problem = [], None
-    for item in todo + new:
+            _count(st, item, now)
+            _enqueue(st, item, keep=selected, audit=audit)
+        counts["dropped"] = sum(1 for x in audit if x["status"] == "dropped")
+        st["cursor"], st["suppressed"] = seq, suppressed
+        save_state(st)  # (c) the one write: queue, cursor, hour events and suppressed count together
+        problem = _audit(audit, now)
+    results = []
+    for item in todo + new:  # (d) no lock
         if time.monotonic() - start > RUN_DEADLINE_S:
             break
         try:
@@ -808,18 +922,16 @@ def run(profile, now=None):
         except mmcore.MMError as e:  # a config problem: record what was done, then report it (exit 2)
             problem = e
             break
-    with _Lock():
-        t = time.time()
-        done = {item["id"] for item, _ in results}
-        planned = {item["id"] for item in todo + new}
-        outbox = []
-        for i in _outbox():
-            if i["id"] in done:
-                continue
-            outbox.append(dict(i, next=round(t, 3)) if i["id"] in planned else i)  # not tried: due at the next run
-        for item, r in results:
-            counts[_record(item, r, t, outbox)] += 1
-        _write_outbox(outbox)
+    if results:  # (e) entries not tried stay due for the next run
+        with _Lock():
+            t = time.time()
+            st = load_state()
+            _prune(st, t)
+            audit = []
+            for item, r in results:
+                counts[_record_result(st, item, r, t, audit)] += 1
+            save_state(st)
+            problem = problem or _audit(audit, t)
     if problem is not None:
         raise problem
     rc = 1 if counts["queued"] or counts["failed"] or counts["refused"] or counts["dropped"] else 0
@@ -831,10 +943,9 @@ def run(profile, now=None):
 def status(profile):
     """notify on|off, service, host, secret, cursor, queued, last delivery, grants. Reads files only; writes none."""
     cfg = config(profile)
-    cur = read_state("cursor.json", {})
-    last = max((r["_t"] for r in sent_records() if r.get("status") == "delivered"), default=None)
+    st = load_state() if os.path.isdir(folder()) else new_state()
+    last = st["last_delivery"]
     host = urllib.parse.urlsplit(cfg["url"]).hostname if cfg else None
     return {"notify": "on" if cfg else "off", "service": cfg["service"] if cfg else None, "host": host,
-            "secret": secret_state(cfg) if cfg else "none",
-            "cursor": cur.get("seq") if type(cur.get("seq")) is int else None, "queued": len(_outbox()),
+            "secret": secret_state(cfg) if cfg else "none", "cursor": st["cursor"], "queued": len(st["queue"]),
             "last_delivery": mmcore.now_local(last) if last is not None else None, "grants": len(read_grants())}

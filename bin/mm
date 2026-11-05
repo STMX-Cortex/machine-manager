@@ -718,7 +718,7 @@ def cmd_notify(args, as_json, profile):
     if sub == "run":
         unknown()
         rc, rec = mmnotify.run(profile)
-        line = kv({"notify": "off"}) if rec["notify"] == "off" else kv(rec)
+        line = kv({"notify": rec["notify"]}) if rec["notify"] in ("off", "busy") else kv(rec)
         return done(rec, [line], rc)
     return err("E_USAGE", "mm notify needs send, grant, revoke, grants, test, status or run", "mm help")
 
