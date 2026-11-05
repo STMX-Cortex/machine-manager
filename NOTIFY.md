@@ -120,12 +120,15 @@ and is retried after 30 s, 60 s, 120 s ... (at most 15 min apart). It is dropped
 
 All files are in `<data>/notify/` (mode 0700; files 0600): `grants.json`, `keys/<name>.key`, `state.json`, the locks
 `notify.lock` (state changes; never held during a delivery) and `run.lock` (one run at a time), and `sent.jsonl`.
+A lock file must be a regular file of this user (never a link; else `E_NOTIFY_STATE`).
 
 `state.json` holds every decision input: `cursor` (the last alert seq read, or null before the first run),
 `suppressed` (alerts suppressed since the last notice), `last_delivery`, `queue` (the outbox: id, source, sender,
 level, title, text, tags, first attempt, next attempt, tries, error), `hour` (one event per counted message of the
 last hour, with the time of its latest counted outcome: delivered, queued, failed or refused; for `alerts_per_hour`
-and each grant's limit) and `recent` (the 600 s duplicate memory). A missing `state.json` is a first run; one that is
+and each grant's limit), `recent` (the 600 s duplicate memory) and `delivering` (the ids the running delivery holds;
+no writer drops them for overflow). Capacity: 10000 hour events and 2000 duplicate entries; when one is full,
+`send` is refused with `E_NOTIFY_LIMIT` (exit 1, nothing written or sent) and new alerts count as suppressed. A missing `state.json` is a first run; one that is
 not a valid document stops every verb that needs it with `E_NOTIFY_STATE` (exit 2), before any write or delivery:
 move it away. Files of older versions (`cursor.json`, `outbox.json`, `hour.json`, `recent.json`) are ignored.
 

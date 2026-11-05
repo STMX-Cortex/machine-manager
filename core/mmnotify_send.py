@@ -183,19 +183,9 @@ def validate_url(url):
 
 
 def _bounded(value):
-    """At most TEXT_WORK characters, and fewer than mmtext's line cut, so mask() sees whole words: a longer text loses
-    its last, possibly split, word (a cut secret could escape the mask and show once masking shortens the text). With
-    no whitespace before the cut, the whole unfinished word goes and mmtext.CUT_MARK stands in its place (4e.1)."""
-    work = max(1, min(TEXT_WORK, mmtext.TEXT_LINE_MAX - len(mmtext.CUT_MARK)))
-    if len(value) <= work:
-        return value
-    head = value[:work]
-    if not value[work].isspace():
-        i = len(head)
-        while i and not head[i - 1].isspace():
-            i -= 1
-        head = head[:i - 1] if i else mmtext.CUT_MARK
-    return head
+    """At most TEXT_WORK characters, and fewer than mmtext's line cut, so mask() sees whole words (4e.1; the one rule
+    for the core and delivery: mmtext.bounded)."""
+    return mmtext.bounded(value, TEXT_WORK)
 
 
 def _text(value, limit):

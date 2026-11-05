@@ -217,12 +217,33 @@ def write_state(name, doc):
         raise _state_error(name) from None
 
 
-def lock():
-    return mmcore.Locked(folder("notify.lock"))
+def _open_lock(name):
+    """A lock file of the notify folder: opened with O_NOFOLLOW and O_CLOEXEC, a regular file owned by this user, mode
+    0600 set through the descriptor. A link or a foreign file is E_NOTIFY_STATE."""
+    try:
+        fd = os.open(folder(name), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    except OSError:
+        raise mmcore.MMError("E_NOTIFY_STATE", "notify/%s cannot be opened (a link, or not a file)" % name,
+                             "move it away; mm notify makes it again") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():
+            raise mmcore.MMError("E_NOTIFY_STATE", "notify/%s is not a regular file of this user" % name,
+                                 "move it away; mm notify makes it again")
+        if stat.S_IMODE(st.st_mode) != 0o600:
+            os.fchmod(fd, 0o600)
+    except OSError:
+        os.close(fd)
+        raise _state_error(name) from None
+    except mmcore.MMError:
+        os.close(fd)
+        raise
+    return fd
 
 
 class _Lock:
-    """The notify lock; a busy lock is E_NOTIFY_BUSY."""
+    """notify/notify.lock (state changes; never held during a delivery); busy for 5 s is E_NOTIFY_BUSY."""
+    TIMEOUT_S = 5.0
 
     def __enter__(self):
         try:
@@ -230,26 +251,33 @@ class _Lock:
         except OSError:
             raise mmcore.MMError("E_NOTIFY_STATE", "cannot make the notify folder",
                                  "check free disk and that the data folder belongs to this user") from None
-        self.l = lock()
-        try:
-            self.l.__enter__()
-        except TimeoutError:
-            raise mmcore.MMError("E_NOTIFY_BUSY", "the notify state is locked by another mm notify", "try again")
-        except OSError:
-            raise _state_error("notify.lock") from None
-        try:
-            os.chmod(self.l.target, 0o600)
-        except OSError:
-            pass
-        return self
+        self.fd = _open_lock("notify.lock")
+        deadline = time.monotonic() + self.TIMEOUT_S
+        while True:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    os.close(self.fd)
+                    raise mmcore.MMError("E_NOTIFY_BUSY", "the notify state is locked by another mm notify",
+                                         "try again") from None
+                time.sleep(0.05)
+            except OSError:
+                os.close(self.fd)
+                raise _state_error("notify.lock") from None
 
     def __exit__(self, *exc):
-        return self.l.__exit__(*exc)
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_UN)
+        finally:
+            os.close(self.fd)
 
 
 def _num_time(v):
-    """A record's time: epoch seconds, or a `YYYY-MM-DD HH:MM:SS` local time; None when neither."""
-    if type(v) in (int, float) and math.isfinite(v):
+    """A record's time: epoch seconds (abs below TIME_MAX), or a `YYYY-MM-DD HH:MM:SS` local time; None when
+    neither."""
+    if _num(v):
         return float(v)
     if isinstance(v, str):
         try:
@@ -401,14 +429,10 @@ def find_grant(key, grants):
 # --------------------------------------------------------------------------------------------- messages
 
 def one_line(text, limit):
-    """A text as it may leave the machine: masked, white space folded, cleaned, at most limit characters. A text
-    longer than 4 * limit is cut before masking at a white space only (an unfinished word is dropped), so a secret
-    cut short never escapes the mask."""
-    text = str(text)
-    if len(text) > limit * 4:
-        head = text[:limit * 4]
-        cut = max(head.rfind(c) for c in " \t\n\r\f\v")
-        text = head[:cut] if cut > 0 else ""
+    """A text as it may leave the machine: masked, white space folded, cleaned, at most limit characters. Before
+    masking it is bounded at a whole word to min(4 * limit, TEXT_LINE_MAX - len(CUT_MARK)) characters (mmtext.bounded,
+    the rule delivery uses too), so mask() sees every token whole and a secret cut short never escapes it."""
+    text = mmtext.bounded(str(text), limit * 4)
     t = mmtext.clean(" ".join(mmcore.mask(text).split()))
     return t if len(t) <= limit else t[:limit - 3].rstrip() + "..."
 
@@ -473,7 +497,8 @@ def _backoff(tries):
 # written whole (write_atomic) under notify.lock, never held during a delivery. sent.jsonl is an audit log only.
 
 STATE = "state.json"
-STATE_KEYS = frozenset(("schema_version", "cursor", "suppressed", "last_delivery", "queue", "hour", "recent"))
+STATE_KEYS = frozenset(("schema_version", "cursor", "suppressed", "last_delivery", "queue", "hour", "recent",
+                        "delivering"))
 ITEM_KEYS = frozenset(("id", "source", "sender", "level", "title", "text", "tags", "first", "next", "tries", "error"))
 HOUR_KEYS = frozenset(("id", "source", "sender", "time"))
 RECENT_KEYS = frozenset(("id", "sender", "digest", "time"))
@@ -486,15 +511,22 @@ HOUR_MAX = 10000
 
 def new_state():
     return {"schema_version": 1, "cursor": None, "suppressed": 0, "last_delivery": None, "queue": [], "hour": [],
-            "recent": []}
+            "recent": [], "delivering": []}
+
+
+INT_MAX = 2 ** 53   # every integer of the state: 0 <= n <= INT_MAX
+TIME_MAX = 10 ** 12  # every time: finite, abs below it
 
 
 def _int(v, lo=0):
-    return type(v) is int and v >= lo
+    return type(v) is int and lo <= v <= INT_MAX
 
 
 def _num(v):
-    return type(v) in (int, float) and math.isfinite(v)
+    """A finite time with abs below TIME_MAX; never raises (a huge int compares exactly, no float conversion)."""
+    if type(v) is int:
+        return -TIME_MAX < v < TIME_MAX
+    return type(v) is float and math.isfinite(v) and -TIME_MAX < v < TIME_MAX
 
 
 def _str(v, hi, lo=0):
@@ -526,8 +558,12 @@ def valid_state(d):
     """state.json's schema (NOTIFY.md, Files): exact keys, types and bounds; every queue entry, hour event and duplicate
     entry valid; ids unique in the queue and in the hour events."""
     try:
-        if not isinstance(d, dict) or set(d) != STATE_KEYS or type(d["schema_version"]) is not int \
-                or d["schema_version"] != 1:
+        if not isinstance(d, dict) or set(d) not in (STATE_KEYS, STATE_KEYS - {"delivering"}) \
+                or type(d["schema_version"]) is not int or d["schema_version"] != 1:
+            return False
+        dv = d.get("delivering", [])
+        if not (isinstance(dv, list) and len(dv) <= RUN_DELIVERIES and len(set(dv)) == len(dv)
+                and all(isinstance(x, str) and ID.fullmatch(x) for x in dv)):
             return False
         if not (d["cursor"] is None or _int(d["cursor"])) or not _int(d["suppressed"]) \
                 or not (d["last_delivery"] is None or _num(d["last_delivery"])):
@@ -540,7 +576,7 @@ def valid_state(d):
                 and len({e["id"] for e in h}) == len(h)):
             return False
         return isinstance(r, list) and len(r) <= RECENT_MAX and all(_recent_ok(e) for e in r)
-    except (TypeError, KeyError, AttributeError):
+    except (TypeError, KeyError, AttributeError, ValueError, OverflowError, RecursionError):
         return False
 
 
@@ -558,18 +594,28 @@ def load_state():
     if not valid_state(doc):
         raise mmcore.MMError("E_NOTIFY_STATE", "notify/state.json is not a valid notify state",
                              "move it away (the next run starts at the newest alert, with an empty queue)")
+    doc.setdefault("delivering", [])  # a state written before `delivering` existed
     return doc
 
 
 def save_state(st):
-    """One atomic write of state.json (mode 0600). A write error is E_NOTIFY_STATE (exit 2)."""
+    """One atomic write of state.json (mode 0600), checked first with the load's check: a document that would not
+    load is never written (E_NOTIFY_STATE, the file stays). A write error is E_NOTIFY_STATE (exit 2)."""
+    if not valid_state(st):
+        raise mmcore.MMError("E_NOTIFY_STATE", "refused to write an invalid notify/state.json",
+                             "report this; the file was not changed")
     write_state(STATE, st)
 
 
 def _prune(st, now):
     """Hour events of the last hour only; duplicate memory of the last DUPLICATE_S only."""
-    st["hour"] = [e for e in st["hour"] if e["time"] > now - HOUR_S][-HOUR_MAX:]
-    st["recent"] = [e for e in st["recent"] if e["time"] > now - DUPLICATE_S][-RECENT_MAX:]
+    st["hour"] = [e for e in st["hour"] if e["time"] > now - HOUR_S]
+    st["recent"] = [e for e in st["recent"] if e["time"] > now - DUPLICATE_S]
+
+
+def _full(st):
+    """The state holds as many hour events or duplicate entries as it may: nothing new can be counted."""
+    return len(st["hour"]) >= HOUR_MAX or len(st["recent"]) >= RECENT_MAX
 
 
 def _hour_count(st, source, sender):
@@ -582,6 +628,8 @@ def _count(st, item, now):
         if e["id"] == item["id"]:
             e["time"] = max(e["time"], round(now, 3))
             return
+    if len(st["hour"]) >= HOUR_MAX:  # full (pruned meanwhile and refilled): the outcome is not counted again
+        return
     st["hour"].append({"id": item["id"], "source": item["source"], "sender": item["sender"], "time": round(now, 3)})
 
 
@@ -595,13 +643,12 @@ def _queued(item, **change):
 
 
 def _enqueue(st, item, keep=(), audit=None):
-    """Add item to the queue; over OUTBOX_MAX the entry with the oldest first attempt that is not in keep (the ids
-    selected for delivery in this run) goes, with a `dropped` audit record."""
+    """Add item to the queue; over OUTBOX_MAX the entry with the oldest first attempt that is not being delivered
+    (st["delivering"], and keep) goes, with a `dropped` audit record."""
+    keep = set(keep) | set(st["delivering"])
     st["queue"].append(item)
     while len(st["queue"]) > OUTBOX_MAX:
-        cands = [i for i, x in enumerate(st["queue"]) if x["id"] not in keep]
-        if not cands:
-            break
+        cands = [i for i, x in enumerate(st["queue"]) if x["id"] not in keep] or [len(st["queue"]) - 1]
         old = st["queue"].pop(min(cands, key=lambda i: st["queue"][i]["first"]))
         if audit is not None:
             audit.append(dict(old, status="dropped", error="E_NOTIFY_QUEUE_FULL"))
@@ -621,11 +668,12 @@ class _RunLock:
     """notify/run.lock, held by `mm notify run` for its whole run (flock, non-blocking): busy = another run."""
 
     def __enter__(self):
-        ensure()
         try:
-            fd = os.open(folder("run.lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            ensure()
         except OSError:
-            raise _state_error("run.lock") from None
+            raise mmcore.MMError("E_NOTIFY_STATE", "cannot make the notify folder",
+                                 "check free disk and that the data folder belongs to this user") from None
+        fd = _open_lock("run.lock")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -659,9 +707,10 @@ def _record_result(st, item, r, now, audit):
         entry = _queued(item, tries=tries, next=round(now + _backoff(tries), 3), error=r["error"])
         if pos is not None:
             st["queue"][pos] = entry
-        elif item.get("tries", 0) == 0:  # a first attempt that was not queued yet (an agent's message)
+        else:  # an agent's first attempt, or an entry that left the queue meanwhile: queued (again)
             _enqueue(st, entry, audit=audit)
-        # else: the entry left the queue meanwhile (dropped by an overflow): not added again
+            if item.get("tries", 0):
+                audit.append(dict(entry, status="queued", error="E_NOTIFY_REQUEUED"))
     else:
         status = "refused"
     if status in ("delivered", "refused") and pos is not None:
@@ -702,6 +751,10 @@ def send(profile, key_file, level, title, text="", tags=(), now=None):
                                  "use --level %s, or ask the owner to grant more" % g["max_level"])
         st = load_state()
         _prune(st, now)
+        if _full(st):  # nothing written, nothing delivered
+            raise mmcore.MMError("E_NOTIFY_LIMIT", "the notify state is full (%d messages in the last hour or %d in "
+                                 "the last %d s, for all senders)" % (HOUR_MAX, RECENT_MAX, DUPLICATE_S),
+                                 "wait; the oldest entries leave after one hour")
         mid = new_id()
         base = {"id": mid, "source": "agent", "sender": name, "level": level, "title": title, "text": text,
                 "tags": tags, "first": round(now, 3), "next": round(now, 3), "tries": 0, "error": None}
@@ -765,7 +818,7 @@ def test(profile, level="normal"):
         t = time.time()
         st = load_state()
         _prune(st, t)
-        _count(st, item, t)
+        _count(st, item, t)  # not counted when the state is full
         if r["ok"]:
             st["last_delivery"] = round(t, 3)
         save_state(st)
@@ -802,17 +855,12 @@ def _alert_message(rec, cfg, mid_default):
 
 def _alert_snapshot():
     """alerts.jsonl.1 then alerts.jsonl (each the bounded tail mmcore.read_pushed reads), as one snapshot: read
-    under state/alerts.lock, the lock AlertStore holds to append and rotate (when the folder exists; without it no
-    supervisor writes alerts)."""
+    under state/alerts.lock, the lock AlertStore holds to append and rotate (AlertStore.lock_file)."""
     log = mmcore.path("alerts.jsonl")
 
-    def read():
-        return mmcore.read_pushed(-1, log + ".1") + mmcore.read_pushed(-1, log)
-    if not os.path.isdir(mmcore.path("state")):
-        return read()
-    try:
+    try:  # always locked; mmcore.Locked makes state/ as AlertStore does when it is missing
         with mmcore.Locked(mmcore.path("state", "alerts.lock")):
-            return read()
+            return mmcore.read_pushed(-1, log + ".1") + mmcore.read_pushed(-1, log)
     except TimeoutError:
         raise mmcore.MMError("E_NOTIFY_BUSY", "the alert log is locked", "try again (the timer runs again soon)") from None
     except OSError:
@@ -862,6 +910,7 @@ def _run(cfg, profile, counts, now):
         st = load_state()
         secret = _secret(cfg)
         _prune(st, now)
+        st["delivering"] = []  # run.lock is held: a list left by a run that stopped is stale
         keep, todo = [], []
         for item in st["queue"]:  # (b) expire, then select the due entries (retries first)
             if now - item["first"] > OUTBOX_KEEP_S:
@@ -885,10 +934,12 @@ def _run(cfg, profile, counts, now):
         def item_for(level, title, text):
             return {"id": new_id(), "source": "mm", "sender": "mm", "level": level, "title": title, "text": text,
                     "tags": [], "first": round(now, 3), "next": round(now, 3), "tries": 0, "error": None}
-        if suppressed and in_hour < cfg["alerts_per_hour"] and len(todo) < RUN_DELIVERIES:
+        room = HOUR_MAX - len(st["hour"])  # the state's capacity: beyond it new alerts count as suppressed
+        if suppressed and in_hour < cfg["alerts_per_hour"] and room > 0 and len(todo) < RUN_DELIVERIES:
             new.append(item_for("quiet", "alerts suppressed", "%d alerts suppressed (machine %s)"
                                 % (suppressed, one_line(mid_default, 80))))
             in_hour += 1  # the notice takes one slot; the count goes back to 0 in the same write
+            room -= 1
             suppressed = 0
         for r in recs:
             if len(todo) + len(new) >= RUN_DELIVERIES:
@@ -898,20 +949,22 @@ def _run(cfg, profile, counts, now):
             if m is None:
                 continue
             item = item_for(*m)
-            if in_hour >= cfg["alerts_per_hour"]:
+            if in_hour >= cfg["alerts_per_hour"] or room <= 0:
                 audit.append(dict(item, status="suppressed", error="E_NOTIFY_LIMIT"))
                 counts["suppressed"] += 1
                 suppressed += 1
                 continue
             in_hour += 1
+            room -= 1
             new.append(item)
-        selected = {i["id"] for i in todo + new}
+        selected = [i["id"] for i in todo + new]
+        st["delivering"] = selected  # every queue writer keeps these until the result write
         for item in new:
             _count(st, item, now)
             _enqueue(st, item, keep=selected, audit=audit)
         counts["dropped"] = sum(1 for x in audit if x["status"] == "dropped")
         st["cursor"], st["suppressed"] = seq, suppressed
-        save_state(st)  # (c) the one write: queue, cursor, hour events and suppressed count together
+        save_state(st)  # (c) the one write: queue, cursor, hour events, suppressed count and delivering together
         problem = _audit(audit, now)
     results = []
     for item in todo + new:  # (d) no lock
@@ -922,11 +975,12 @@ def _run(cfg, profile, counts, now):
         except mmcore.MMError as e:  # a config problem: record what was done, then report it (exit 2)
             problem = e
             break
-    if results:  # (e) entries not tried stay due for the next run
+    if selected:  # (e) entries not tried stay due for the next run
         with _Lock():
             t = time.time()
             st = load_state()
             _prune(st, t)
+            st["delivering"] = []
             audit = []
             for item, r in results:
                 counts[_record_result(st, item, r, t, audit)] += 1
