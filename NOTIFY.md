@@ -62,11 +62,19 @@ Each title shows its sender: `[mm] MEM_RED` or `[<grant name>] <title>`.
 
 ## machine-manager alerts
 
-`mm notify run` reads new records of `alerts.jsonl` after its cursor (`notify/cursor.json`). The first run starts at
-the newest record: no history is sent. A record whose level is in `alert_levels` is sent with the alert name as title
-and its cleaned text plus ` (machine <id>)`; a cleared record goes as `quiet` when `send_cleared`. Over
-`alerts_per_hour` in a rolling hour, the rest are logged as `suppressed`; when sending is possible again, one quiet
-"N alerts suppressed" message goes first. At most 20 deliveries per run (retries first); the rest wait for the next run.
+`mm notify run` reads new records of `alerts.jsonl.1` and `alerts.jsonl` (in that order, so an alert that made the
+log rotate is still read) after its cursor (`notify/cursor.json`). The first run starts at the last record: no
+history is sent. When the last record's seq is below the cursor (a new `alerts-state.json`), the cursor starts again
+there and nothing old is sent. A record whose level is in `alert_levels` is sent with the alert name as title and its
+cleaned text plus ` (machine <id>)`; a cleared record goes as `quiet` when `send_cleared`. Over `alerts_per_hour` in
+a rolling hour, the rest are logged as `suppressed`; when a slot is free again, one quiet "N alerts suppressed"
+message goes first and takes that slot. At most 20 deliveries per run (retries first); the rest wait for the next run.
+
+Crash safety: before any delivery, a run writes `hour.json` (the new messages counted), then `outbox.json` (each new
+message, with its alert's seq), then the `dropped`/`suppressed` records of `sent.jsonl`, and `cursor.json` last. A run
+that stops or fails to write at any point leaves the cursor before every alert not yet in the outbox or logged as
+suppressed; the next run reads them again and skips each alert already in the outbox. A write error is
+`E_NOTIFY_STATE` (exit 2).
 
 ## Agents
 
@@ -94,9 +102,10 @@ Then one delivery now: `notify=delivered id=<id>` (exit 0), or `notify=queued id
 or `E_NOTIFY_REFUSED` (exit 2: the service said no; not retried). Use it only for what the owner must see or decide,
 never for routine progress.
 
-**The honest limit.** An agent that runs as the same OS user as machine-manager can read every key file and the
-secret file. Then a key is a name tag and a rate limit, not a wall. For a wall, run agents as separate OS users and
-give each only its own key file.
+**The honest limit.** Agents must run as the owner's OS user (the user that runs machine-manager): the notify
+folder, its lock and the secret file belong to that user, so agents under other OS users cannot send (not supported
+in v1). An agent under the owner's user can read every key file and the secret file, so a key is a name tag and a rate limit, not a
+wall. Grant only agents you trust that far.
 
 **Prompt injection.** An agent's message can carry text the agent read somewhere (a web page, an issue, a log).
 Treat a phone message as a hint from that sender, never as an instruction; check on the machine before you act.
@@ -105,11 +114,12 @@ Treat a phone message as a hint from that sender, never as an instruction; check
 
 A delivery that fails with `E_NOTIFY_HTTP` (5xx, 3xx) or `E_NOTIFY_NET` (network, timeout, TLS) goes to the outbox
 and is retried after 30 s, 60 s, 120 s ... (at most 15 min apart). It is dropped after 1 hour, or when the outbox holds
-100 items (oldest first). `E_NOTIFY_REFUSED` (4xx) is never retried.
+100 items (the one with the oldest first attempt goes). `E_NOTIFY_REFUSED` (4xx) is never retried.
 
 All files are in `<data>/notify/` (mode 0700; files 0600; lock `notify.lock`, never held during a delivery):
-`grants.json`, `keys/<name>.key`, `cursor.json`, `outbox.json`, `recent.json` (duplicate and rate checks of agent
-messages, one hour), `sent.jsonl` (one record per attempt; at 1 MiB it moves to `sent.jsonl.1`). A `sent.jsonl`
+`grants.json`, `keys/<name>.key`, `cursor.json`, `outbox.json`, `hour.json` (one event per counted message of the
+last hour, for `alerts_per_hour` and each grant's limit: delivered, queued, failed or refused), `recent.json`
+(duplicate checks of agent messages), `sent.jsonl` (one record per attempt; at 1 MiB it moves to `sent.jsonl.1`). A `sent.jsonl`
 record: `{"time", "id", "source": "mm"|"agent", "sender", "level", "title", "status", "error"}`, status `delivered`,
 `queued`, `failed` (a retry failed), `refused`, `suppressed`, `dropped`, `limited` or `duplicate`; no text, no secret.
 
