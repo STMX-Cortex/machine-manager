@@ -141,6 +141,15 @@ def _loopback(host):
 
 
 def check_url(url):
+    """True when url is a valid notify URL (the rules of validate_url), else False. Never raises."""
+    try:
+        validate_url(url)
+    except mmcore.MMError:
+        return False
+    return True
+
+
+def validate_url(url):
     """The url when it is a valid notify URL, else MMError E_PROFILE: a str of 1..URL_MAX printable ASCII characters
     without whitespace or backslash; scheme https, or http only to localhost or a loopback IP literal; a host; no
     userinfo, query (`?`) or fragment (`#`); a valid port (1..65535) if one is given. The error never repeats the URL."""
@@ -222,7 +231,7 @@ def render(cfg, secret, msg):
     title = "[%s] %s" % (_text(msg.get("sender"), SENDER_MAX), _text(msg.get("title"), TITLE_MAX))
     text = _text(msg.get("text"), TEXT_MAX)
     if cfg["service"] == "ntfy":
-        url = check_url(cfg.get("url"))
+        url = validate_url(cfg.get("url"))
         topic = cfg.get("topic")
         if not isinstance(topic, str) or not TOPIC.fullmatch(topic):
             raise mmcore.MMError("E_PROFILE", "[notify] topic must be 1..64 of A-Z a-z 0-9 _ -",
@@ -234,7 +243,7 @@ def render(cfg, secret, msg):
         body = json.dumps({"topic": topic, "title": title, "message": text, "priority": NTFY_PRIORITY[level],
                            "tags": _tags(msg.get("tags"))}, ensure_ascii=True, separators=(",", ":")).encode("ascii")
     else:
-        url = check_url(cfg["url"]) if cfg.get("url") is not None else PUSHOVER_URL
+        url = validate_url(cfg["url"]) if cfg.get("url") is not None else PUSHOVER_URL
         app, user = _secret_value(secret, "app_token"), _secret_value(secret, "user_key")
         if app is None or user is None:
             raise mmcore.MMError("E_NOTIFY_SECRET", "pushover needs app_token and user_key",

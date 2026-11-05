@@ -751,8 +751,12 @@ class Deliver(Base):
 
     def test_header_injection_never_reaches_the_server(self):  # A10
         with self.fake(reply(200)) as f:
-            for secret in ({"token": "abc\r\nX-Evil: 1"}, {"token": "t\u00f6ken\u20ac"}):
-                self.deliver(ntfy_cfg(f.url), secret, msg(title="a\r\nX-Evil: 2", sender="b\r\nX-Evil: 3"))
+            for secret in ({"token": "abc\r\nX-Evil: 1"}, {"token": "t\u00f6ken\u20ac"}, {"token": NTFY_TOKEN}):
+                try:  # A10: a bad secret may be refused (MMError) before any request; it never reaches a header
+                    self.deliver(ntfy_cfg(f.url), secret, msg(title="a\r\nX-Evil: 2", sender="b\r\nX-Evil: 3"))
+                except mmcore.MMError as e:
+                    self.assertEqual(e.code, "E_NOTIFY_SECRET")
+            self.assertTrue(f.requests, "the valid token must still deliver")
             for rec in f.requests:
                 self.assertNotIn("x-evil", dict(rec["headers"]))
 
