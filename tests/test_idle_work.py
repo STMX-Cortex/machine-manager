@@ -467,7 +467,7 @@ class BadFiles(Base):
         spec = self.KINDS[kind]
         name = "bad_" + kind
         if spec == "future":
-            return self.put(name, updated=iso(self.t + 6 * MIN))
+            return self.put(name, updated=iso(self.t + 7 * MIN))  # 6 min ahead at the tick below
         if spec == "big":
             doc = json.dumps({"owner": name, "updated": iso(self.t), "ready_units": 5, "next": "n"})
             return self.put(name, raw=doc + " " * (65537 - len(doc)))
@@ -507,7 +507,7 @@ class BadFiles(Base):
             self.skipTest("root reads a mode-000 file")
         p = self.put("beta", ready_units=9)
         os.chmod(p, 0)
-        self.addCleanup(os.chmod, p, 0o600)
+        self.addCleanup(lambda: os.path.lexists(p) and os.chmod(p, 0o600))
         self.put("alpha", ready_units=4)
         self.tick()
         got = self.stale()
@@ -732,8 +732,8 @@ class IdleRule(Base):
                 if mode == "off":
                     mmcore.write_atomic(off, json.dumps({"off": True, "since": "x", "reason": "test"}))
                 if mode == "safe":
-                    mmcore.write_atomic(os.path.join(self.data, "safe.json"),
-                                        json.dumps({"safe": True, "since": "x", "reason": "test"}))
+                    import mmrecover
+                    mmrecover.enter_safe("test", self.t)
                 self.t += 3600
                 self.keep_fresh()
                 self.start(dry_run=(mode == "dry"))
@@ -995,7 +995,7 @@ class MoreBadFiles(Base):
             self.skipTest("root lists a mode-000 folder")
         self.put("alpha", ready_units=5)
         os.chmod(self.ready, 0)
-        self.addCleanup(os.chmod, self.ready, 0o700)
+        self.addCleanup(lambda: os.path.lexists(self.ready) and os.chmod(self.ready, 0o700))
         self.tick()
         self.advance(16 * MIN)
         got = self.stale()
@@ -1018,7 +1018,7 @@ class MoreBadFiles(Base):
         self.tick()
         got = self.stale()
         self.assertEqual(len(got), 1, "the repaired file's alert clears; the stale one stays")
-        self.assertIn("100", next(iter(got.values()))["text"])
+        self.assertIn("alpha ready-work file is 101 min old", next(iter(got.values()))["text"])
 
 
 class FleetStatus(Base):
