@@ -395,7 +395,10 @@ class Pauser:
                 plan[str(pid)] = st
         if not plan:
             return out
-        mmrecover.add_paused(plan)
+        problem = mmrecover.add_paused(plan)
+        if problem:  # state/paused.json cannot be used: no record, so no pid is stopped
+            out["failed"] = "%s; no pause while it cannot be used" % problem
+            return out
         failed = []
         for pid in plan:
             try:
@@ -960,7 +963,7 @@ class Supervisor:
                          + self.settings.problem, command="mm check")
         active_before = set((mmcore.read_json(store.state_file, {}) or {}).get("active", {}))
         conds = mmalerts.evaluate(snap, s, now, active_before, self.p.get("names")) + snap.get("pool_conditions", [])
-        conds += self._recovery_conditions(now, s, safe)
+        conds += self._recovery_conditions(now, s, safe, off)
         for c in conds:
             store.raise_(c["key"], c["name"], c["level"], c["text"], value=c["value"], band=c["band"], worse=c["worse"],
                          command=c["command"], investigate=c["investigate"])
@@ -1046,12 +1049,27 @@ class Supervisor:
         except Exception as e:  # never stop a tick; the general clear rule still clears them later
             self._ready_log(now, "ready-work clear %r" % (e,))
 
-    def _recovery_conditions(self, now, s, safe):
-        """Safe mode, held events (a reboot, a self restart), the watchdog's stamp and the dead-man ping."""
+    def _recovery_conditions(self, now, s, safe, off=None):
+        """Safe mode, a control file or the pause record that cannot be used (CONTROL_FILE_BROKEN, PAUSED_FILE_BROKEN:
+        fail closed), held events (a reboot, a self restart), the watchdog's stamp and the dead-man ping."""
         out = []
-        if safe:
+        if safe and safe.get("broken"):
+            out.append(mmalerts._c("SAFE_MODE", "SAFE_MODE", "ACTION", "safe mode: %s" % safe["reason"], command="mm on"))
+        elif safe:
             out.append(mmalerts._c("SAFE_MODE", "SAFE_MODE", "ACTION", "safe mode since %s: %s; automatic actions off"
                                    % (mmcore.now_local(safe.get("since"))[11:16], safe.get("reason", "?")), command="mm on"))
+        for rec in (off, safe):
+            if rec and rec.get("broken"):
+                name = rec["broken"].split(":", 1)[0]
+                out.append(mmalerts._c("CONTROL_FILE_BROKEN:" + name, "CONTROL_FILE_BROKEN", "ACTION",
+                                       "%s; automatic actions stay off until the file is good again or removed "
+                                       "(mm on removes it)" % rec["broken"], command="mm on"))
+        problem = mmrecover.paused_problem(mmrecover.read_paused())
+        if problem:
+            out.append(mmalerts._c("PAUSED_FILE_BROKEN", "PAUSED_FILE_BROKEN", "ACTION",
+                                   "%s; no new pause, and no pid is continued from it: processes it listed may still be "
+                                   "stopped; inspect the file, continue them by hand (kill -CONT PID), then remove it"
+                                   % problem, command="mm explain PAUSED_FILE_BROKEN"))
         held = self.state.setdefault("held", {})
         for k in [k for k, h in held.items() if h["until"] <= now]:
             held.pop(k)
@@ -1285,6 +1303,15 @@ class Supervisor:
             gate.setdefault("red_since", now)
         else:
             gate.pop("red_since", None)
+        problem = mmrecover.paused_problem(mmrecover.read_paused())
+        if problem:
+            # fail closed (PAUSED_FILE_BROKEN): no pause and no resume from a record that cannot be used; logged once
+            if problem != self.state.get("paused_broken"):
+                self.log_decision("%s PAUSE-REFUSED %s; no pause and no resume while it cannot be used"
+                                  % (mmcore.now_local(now), problem))
+            self.state["paused_broken"] = problem
+            return
+        self.state.pop("paused_broken", None)
         if not s["pause_newest_call.enabled"]:
             self.state["pause_refused"] = self.state["pause_not_a_file"] = None
             self.state.pop("green_for_pause", None)  # no calm span carries across a disabled period
