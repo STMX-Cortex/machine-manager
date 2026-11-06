@@ -970,7 +970,7 @@ class MoreBadFiles(Base):
         kinds = {
             "utf8.json": b'{"owner": "\xff\xfe", "updated": "%s", "ready_units": 3}' % up.encode(),
             "deep.json": ('{"updated": "%s", "ready_units": 3, "x": %s%s}' % (up, "[" * 40, "]" * 40)).encode(),
-            "deeper.json": ('{"updated": "%s", "ready_units": 3, "x": %s%s}' % (up, "[" * 50000, "]" * 50000)).encode()[:65536],
+            "deeper.json": ('{"updated": "%s", "ready_units": 3, "x": %s%s}' % (up, "[" * 30000, "]" * 30000)).encode(),  # valid, under 64 KiB
             "inf.json": ('{"updated": "%s", "ready_units": Infinity}' % up).encode(),
             "nan.json": ('{"updated": "%s", "ready_units": 3, "x": NaN}' % up).encode(),
             "neginf.json": ('{"updated": "%s", "ready_units": 3, "x": -Infinity}' % up).encode(),
