@@ -309,16 +309,67 @@ class GoodFiles(Base):
         os.makedirs(os.path.join(self.ready, "sub"))
         with open(os.path.join(self.ready, "sub", "beta.json"), "w") as f:
             f.write(json.dumps({"owner": "beta", "updated": iso(self.t), "ready_units": 99, "next": "n"}))
-        os.makedirs(os.path.join(self.ready, "folder.json"))
-        outside = os.path.join(self.root, "outside.json")
-        with open(outside, "w") as f:
-            f.write(json.dumps({"owner": "gamma", "updated": iso(self.t), "ready_units": 99, "next": "n"}))
-        os.symlink(outside, os.path.join(self.ready, "gamma.json"))
+        os.makedirs(os.path.join(self.ready, ".hidden"))
         self.tick()
         rw = self.status()["ready_work"]
         self.assertEqual(rw["ready"], 5)
         self.assertEqual([o["owner"] for o in rw["owners"]], ["alpha"])
-        self.assertEqual(self.stale(), {}, "ignored names are not bad files")
+        self.assertEqual(self.stale(), {}, "names that are not *.json are ignored, not bad")
+
+    def test_folder_link_and_fifo_named_json_are_bad(self):
+        """Decision (review): ready files follow no link; a link, FIFO, folder or other non-regular file is bad."""
+        self.put("alpha", ready_units=5)
+        os.makedirs(os.path.join(self.ready, "folder.json"))
+        outside = os.path.join(self.root, "outside.json")
+        with open(outside, "w") as f:
+            f.write(json.dumps({"owner": "gamma", "updated": iso(self.t), "ready_units": 99, "next": "n"}))
+        os.symlink(outside, os.path.join(self.ready, "gamma.json"))          # a link out of the folder
+        os.symlink(os.path.join(self.ready, "alpha.json"), os.path.join(self.ready, "inside.json"))  # in it
+        os.symlink("alpha.json", os.path.join(self.ready, "relative.json"))  # a relative link in it
+        os.mkfifo(os.path.join(self.ready, "pipe.json"))
+        import signal
+        def hang(*_):
+            raise AssertionError("the tick blocked on a FIFO")
+        old = signal.signal(signal.SIGALRM, hang)
+        signal.alarm(30)
+        try:
+            self.tick()
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
+        rw = self.status()["ready_work"]
+        self.assertEqual(rw["ready"], 5, "no link is followed: alpha is counted once, the outside file never")
+        states = {o["file"]: (o["state"], o["units"]) for o in rw["owners"]}
+        for n in ("folder.json", "gamma.json", "inside.json", "relative.json", "pipe.json"):
+            self.assertEqual(states.get(n), ("bad", 0), (n, states))
+        self.assertEqual(states["alpha.json"], ("ok", 5))
+        texts = " ".join(a["text"] for a in self.stale().values())
+        self.assertEqual(len(self.stale()), 5, self.stale())
+        for n in ("folder.json", "gamma.json", "inside.json", "relative.json", "pipe.json"):
+            self.assertIn(n, texts)
+
+    def test_a_parent_swapped_for_a_link_is_never_read(self):
+        """The folder is opened once (a pinned fd); swapping its path for a link right after that is never followed."""
+        self.put("alpha", ready_units=5)
+        evil = os.path.join(self.root, "evil")
+        os.makedirs(evil)
+        with open(os.path.join(evil, "alpha.json"), "w") as f:
+            f.write(json.dumps({"owner": "alpha", "updated": iso(self.t), "ready_units": 99, "next": "n"}))
+        real_open, swapped = os.open, []
+
+        def opener(path, flags, *a, **k):
+            fd = real_open(path, flags, *a, **k)
+            if not swapped and isinstance(path, str) and os.path.realpath(path) == os.path.realpath(self.ready):
+                os.rename(self.ready, self.ready + "-orig")
+                os.symlink(evil, self.ready)
+                swapped.append(path)
+            return fd
+        self.start()
+        with mock.patch.object(os, "open", opener):
+            self.sup.tick()
+        self.assertTrue(swapped, "the folder is opened through os.open (a pinned folder fd)")
+        rw = self.status()["ready_work"]
+        self.assertEqual(rw["ready"], 5, "the pinned folder is read, not the link's target")
 
     def test_exactly_64_kib_is_good(self):
         doc = json.dumps({"owner": "alpha", "updated": iso(self.t), "ready_units": 6, "next": "n"})
@@ -665,12 +716,11 @@ class IdleRule(Base):
         self.assertEqual(mmschema.validate(self.status(), mmschema.load("status")), [])
 
     def test_raised_in_off_observe_and_dry_run(self):
-        for mode in ("off", "observe", "dry"):
+        for mode in ("off", "observe", "dry", "safe"):
             with self.subTest(mode=mode):
                 off = os.path.join(self.data, "off.json")
-                if os.path.exists(off):
-                    os.unlink(off)
-                for f in ("alerts-state.json", "state/controller.json"):
+                for f in ("off.json", "safe.json", "alerts-state.json", "state/controller.json",
+                          "state/" + mmready.STATE_NAME):
                     p = os.path.join(self.data, f)
                     if os.path.exists(p):
                         os.unlink(p)
@@ -679,19 +729,42 @@ class IdleRule(Base):
                 self.write_settings(**over)
                 if mode == "off":
                     mmcore.write_atomic(off, json.dumps({"off": True, "since": "x", "reason": "test"}))
+                if mode == "safe":
+                    mmcore.write_atomic(os.path.join(self.data, "safe.json"),
+                                        json.dumps({"safe": True, "since": "x", "reason": "test"}))
                 self.t += 3600
                 self.keep_fresh()
                 self.start(dry_run=(mode == "dry"))
                 self.tick()
                 self.advance(16 * MIN)
                 self.assertIsNotNone(self.idle(), mode)
+                if mode == "safe":
+                    self.assertEqual(self.status().get("mode"), "safe")
 
     def test_no_automatic_action(self):
         slots = os.path.join(self.data, "queue", "slots")
         before = open(slots).read()
-        self.tick()
-        self.advance(20 * MIN)
+        calls = {"kill": [], "pause": [], "resume": [], "deletes": [], "trim": [], "control": []}
+        self.start()
+        control = self.sup._control
+
+        def rec_control(*a, **k):
+            calls["control"].append(a[0])
+            return control(*a, **k)
+        self.sup._control = rec_control
+        self.sup.deletes.kick = lambda *a, **k: calls["deletes"].append(a)
+        rec = lambda name: (lambda *a, **k: calls[name].append(a))
+        with mock.patch.object(os, "kill", rec("kill")), mock.patch.object(os, "killpg", rec("kill")), \
+                mock.patch.object(mmsuper.Pauser, "pause", rec("pause")), \
+                mock.patch.object(mmsuper.Pauser, "resume", rec("resume")), \
+                mock.patch.object(mmsuper.Trim, "_start", rec("trim")):
+            self.tick()
+            self.advance(20 * MIN)
         self.assertIsNotNone(self.idle())
+        ticks = len(calls.pop("control"))
+        self.assertEqual(ticks, 21, "the slot controller runs once a tick, as always")
+        self.assertEqual(self.sup.state.get("virtual_slots"), self.would, "would is not raised for ready work")
+        self.assertEqual(calls, {k: [] for k in calls}, "no pause, kill, resume, delete or trim")
         self.assertEqual(open(slots).read(), before)
         log = os.path.join(self.data, "state", "decisions.log")
         text = open(log).read() if os.path.exists(log) else ""
@@ -723,8 +796,8 @@ class TimerRecord(Base):
         self.assertTrue(err)
         self.tick()
         got = self.stale()
-        self.assertEqual(len(got), 1, got)
-        self.assertIn("cannot be read", next(iter(got.values()))["text"])
+        self.assertEqual(list(got), ["READY_STALE:_state"], got)
+        self.assertIn("cannot be read", got["READY_STALE:_state"]["text"])
         self.advance(16 * MIN)
         self.assertIsNotNone(self.idle(), "the timer runs in memory from this start")
         with open(self.record) as f:
@@ -732,6 +805,47 @@ class TimerRecord(Base):
         os.unlink(self.record)
         self.advance(MIN)
         self.assertEqual(self.stale(), {}, "the error clears once the record is gone")
+
+    def test_damaged_after_start_is_kept_and_alerts(self):
+        self.tick()
+        self.advance(5 * MIN)
+        with open(self.record, "w") as f:
+            f.write("{broken")
+        self.would = self.busy  # since changes (to null): the supervisor wants to write the record
+        self.advance(MIN)
+        self.would = 5
+        self.advance(MIN)
+        with open(self.record) as f:
+            self.assertEqual(f.read(), "{broken", "the damaged record is kept unchanged")
+        self.assertIn("READY_STALE:_state", self.stale())
+
+    def test_a_failed_timer_write_does_not_stop_the_tick(self):
+        real = mmcore.write_atomic
+
+        def failing(target, *a, **k):
+            if os.path.basename(target) == mmready.STATE_NAME:
+                raise OSError(28, "No space left on device")
+            return real(target, *a, **k)
+        with mock.patch.object(mmcore, "write_atomic", failing):
+            self.tick()
+            self.advance(16 * MIN)
+        self.assertEqual(self.status().get("heartbeat", {}).get("tick"), 17, "every tick ran to its end")
+        self.assertIsNotNone(self.idle(), "the timer runs in memory")
+
+    def test_restart_after_a_zero_ready_reset(self):
+        self.tick()
+        self.advance(10 * MIN)
+        self.put("alpha", ready_units=0)
+        self.advance(MIN)
+        self.assertEqual(mmready.load_since(), (None, None), "ready == 0 resets the saved start")
+        self.sup = None
+        self.put("alpha", ready_units=8)
+        self.t += MIN
+        self.tick()
+        self.advance(15 * MIN)
+        self.assertIsNone(self.idle(), "the timer starts again after the reset, not at the first start")
+        self.advance(MIN)
+        self.assertIsNotNone(self.idle())
 
     def test_record_shapes(self):
         for raw in ('{"since": "x"}', '{"since": true}', "[]", '{"since": NaN}', "null"):
@@ -836,7 +950,94 @@ class ManyFiles(Base):
         self.tick()
         rw = self.status()["ready_work"]
         self.assertEqual(rw["ready"], mmready.FILES_MAX)
-        self.assertIn("READY_STALE:more", self.stale())
+        got = self.stale()
+        self.assertIn("READY_STALE:_more", got, "reserved _ prefix: never an owner's stem")
+        self.assertEqual(got["READY_STALE:_more"]["level"], "ATTENTION")
+        files = {o["file"] for o in rw["owners"]}
+        self.assertEqual(len(files), mmready.FILES_MAX)
+        for i in (mmready.FILES_MAX, mmready.FILES_MAX + 1):
+            self.assertNotIn("o%03d.json" % i, files, "the files past the limit by name are left out")
+        self.assertIn("o000.json", files)
+
+
+class MoreBadFiles(Base):
+    def raw(self, name, data):
+        with open(os.path.join(self.ready, name), "wb") as f:
+            f.write(data)
+
+    def test_more_bad_kinds(self):
+        up = iso(self.t)
+        kinds = {
+            "utf8.json": b'{"owner": "\xff\xfe", "updated": "%s", "ready_units": 3}' % up.encode(),
+            "deep.json": ('{"updated": "%s", "ready_units": 3, "x": %s%s}' % (up, "[" * 40, "]" * 40)).encode(),
+            "deeper.json": ('{"updated": "%s", "ready_units": 3, "x": %s%s}' % (up, "[" * 50000, "]" * 50000)).encode()[:65536],
+            "inf.json": ('{"updated": "%s", "ready_units": Infinity}' % up).encode(),
+            "nan.json": ('{"updated": "%s", "ready_units": 3, "x": NaN}' % up).encode(),
+            "neginf.json": ('{"updated": "%s", "ready_units": 3, "x": -Infinity}' % up).encode(),
+            "over.json": ('{"updated": "%s", "ready_units": %d}' % (up, 10 ** 9 + 1)).encode(),
+        }
+        for n, data in kinds.items():
+            self.raw(n, data)
+        self.raw("max.json", ('{"updated": "%s", "ready_units": %d}' % (up, 10 ** 9)).encode())
+        self.tick()
+        rw = self.status()["ready_work"]
+        states = {o["file"]: (o["state"], o["units"]) for o in rw["owners"]}
+        for n in kinds:
+            self.assertEqual(states.get(n), ("bad", 0), (n, states.get(n)))
+        self.assertEqual(states["max.json"], ("ok", 10 ** 9), "10**9 units is accepted")
+        self.assertEqual(rw["ready"], 10 ** 9)
+        self.assertEqual(len(self.stale()), len(kinds), sorted(self.stale()))
+
+    def test_an_unlistable_folder(self):
+        if os.geteuid() == 0:
+            self.skipTest("root lists a mode-000 folder")
+        self.put("alpha", ready_units=5)
+        os.chmod(self.ready, 0)
+        self.addCleanup(os.chmod, self.ready, 0o700)
+        self.tick()
+        self.advance(16 * MIN)
+        got = self.stale()
+        self.assertEqual(len(got), 1, got)
+        self.assertEqual(next(iter(got.values()))["level"], "ATTENTION")
+        self.assertIsNone(self.idle(), "nothing could be read: no ready work")
+        self.assertEqual(self.status()["ready_work"]["ready"], 0)
+        os.chmod(self.ready, 0o700)
+        self.advance(MIN)
+        self.assertEqual(self.stale(), {}, "it clears on the next tick once the folder lists")
+
+    def test_two_files_with_one_owner_keep_separate_alerts(self):
+        self.put("alpha", owner="alpha", updated=iso(self.t - 100 * MIN))
+        self.put("beta", owner="alpha", ready_units=-1)
+        self.tick()
+        got = self.stale()
+        self.assertEqual(len(got), 2, got)
+        self.t += MIN
+        self.put("beta", owner="alpha", ready_units=1)
+        self.tick()
+        got = self.stale()
+        self.assertEqual(len(got), 1, "the repaired file's alert clears; the stale one stays")
+        self.assertIn("100", next(iter(got.values()))["text"])
+
+
+class FleetStatus(Base):
+    def test_fleet_validates_a_status_with_ready_work(self):
+        import mmfleet
+        self.put("alpha", ready_units=7)
+        self.put("beta", raw="{")  # a bad-owner entry: units 0, age_min null
+        self.tick()
+        st = self.status()
+        owners = {o["file"]: o for o in st["ready_work"]["owners"]}
+        self.assertEqual((owners["beta.json"]["state"], owners["beta.json"]["units"]), ("bad", 0))
+        self.assertIsNone(owners["beta.json"]["age_min"])
+        cfg = {"id": "test-machine", "stale_after_s": 90, "status_url": "http://127.0.0.1:9/status.json"}
+        got = mmfleet.validate_status(st, cfg, NOW + 1)
+        self.assertEqual(got["ready_work"]["ready"], 7)
+        raw = json.dumps(st).encode()
+        self.assertEqual(mmfleet.validate_status(mmfleet._strict_json(raw), cfg, NOW + 1)["ready_work"]["free"], 3)
+        bad = json.loads(raw)
+        bad["ready_work"]["owners"][0]["units"] = "7"
+        with self.assertRaises(mmfleet.FleetError):
+            mmfleet.validate_status(bad, cfg, NOW + 1)
 
 
 class ProfileType(Base):
