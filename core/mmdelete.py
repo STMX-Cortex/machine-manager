@@ -192,7 +192,8 @@ def remove_at(dfd, parts, show=""):
 def untouched_at(dfd, parts, now, minutes, forbidden_parts, show=""):
     """Run.untouched for parts below the data folder fd `dfd`, read through folder fds only (never by path):
     (True, bytes, None) when nothing under it changed within `minutes`; a link, a forbidden folder inside or an
-    unreadable entry counts as touched."""
+    unreadable entry counts as touched. A link anywhere inside a folder refuses the folder ("refused: holds a link:
+    <path>"): rmtree would remove the link with it."""
     limit = now - minutes * 60
     pfd, why = open_dir_at(dfd, parts[:-1], show)
     if pfd is None:
@@ -206,7 +207,7 @@ def untouched_at(dfd, parts, now, minutes, forbidden_parts, show=""):
         if not stat.S_ISDIR(st.st_mode):
             return True, st.st_size, None
 
-        def walk(fd):  # depth-first: open folder fds = the depth only
+        def walk(fd, where):  # depth-first: open folder fds = the depth only
             total = 0
             with os.scandir(fd) as it:
                 entries = list(it)
@@ -214,20 +215,22 @@ def untouched_at(dfd, parts, now, minutes, forbidden_parts, show=""):
                 if e.name in forbidden_parts:
                     raise _Touched("holds a %s folder (protected)" % e.name)
                 est = e.stat(follow_symlinks=False)
+                if stat.S_ISLNK(est.st_mode):
+                    raise _Touched("refused: holds a link: %s" % os.path.join(where, e.name))
                 if est.st_mtime > limit:
                     raise _Touched("an entry changed %.0f min ago" % ((now - est.st_mtime) / 60))
                 total += est.st_blocks * 512
                 if stat.S_ISDIR(est.st_mode):
                     cfd = os.open(e.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
                     try:
-                        total += walk(cfd)
+                        total += walk(cfd, os.path.join(where, e.name))
                     finally:
                         os.close(cfd)
             return total
 
         top = os.open(parts[-1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=pfd)
         try:
-            return True, walk(top), None
+            return True, walk(top, os.path.join(show, *parts)), None
         except _Touched as t:
             return False, 0, str(t)
         except (OSError, RecursionError):
@@ -465,8 +468,20 @@ class Run:
                 try:
                     pat = r.get("slot_pattern", "[0-9][0-9]")
                     for n in sorted(os.listdir(sfd)):
-                        if fnmatch.fnmatchcase(n, pat) and stat.S_ISDIR(
-                                os.stat(n, dir_fd=sfd, follow_symlinks=False).st_mode):
+                        if not fnmatch.fnmatchcase(n, pat):
+                            continue
+                        slot = os.path.join(data, *(name.split("/") + [n]))
+                        try:  # each slot on its own: one that fails never ends the list
+                            mode = os.stat(n, dir_fd=sfd, follow_symlinks=False).st_mode
+                        except FileNotFoundError:
+                            continue  # gone since the listing
+                        except (OSError, ValueError) as e:
+                            self.log("KEEP", r["id"], slot, guard="refused: slot cannot be checked (%s)"
+                                     % e.__class__.__name__)
+                            continue
+                        if stat.S_ISLNK(mode):
+                            self.log("KEEP", r["id"], slot, guard="refused: slot is a link")
+                        elif stat.S_ISDIR(mode):
                             cands.append(name.split("/") + [n])
                 except OSError as e:
                     self.log("KEEP", r["id"], self._own_path(data, name), guard="refused: slot_dir cannot be listed "

@@ -360,8 +360,10 @@ text is never read letter by letter), or `slot_dir` or `slot_pattern` that is no
 The real data folder is opened once per rule without following a link (a link there, or a folder that changed while
 it was opened, refuses the whole rule), and every check and delete goes through folder descriptors from it, each
 part opened without following a link, so a part swapped for a link after the checks is refused. The data folder and
-every folder above it must belong to the owner: those are not checked. `mm check` shows the name and type problems
-as `E_PROFILE`.
+every folder above it must belong to the owner: those are not checked. A folder candidate that holds a link
+anywhere inside is refused (`holds a link`), and a slot that is a link gives a KEEP line. These checks stop wrong
+names and links set up beforehand; they cannot stop another process of the same user that moves or replaces files in
+the data folder during a delete pass. `mm check` shows the name and type problems as `E_PROFILE`.
 
 Clean-up list rule types (`deletes.cleanup`) are `git_worktrees`, `git_branches`, `stale_children` and `paths`.
 A `git_worktrees` rule may set `keep = ["journal-*"]`: case-sensitive `fnmatch` patterns on each tree folder's
