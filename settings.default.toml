@@ -99,6 +99,13 @@ wide_free_pct = 50  # %
 idle_room_minutes = 30  # min
 default_run_minutes = 10  # min
 
+[ready_work]
+# Ready work: the profile's ready_work_dir holds one JSON file per owner ({"owner", "updated", "ready_units", "next"}).
+# IDLE_WITH_WORK (ACTION) when free slots (would - busy) and ready units stay above 0 together for longer than
+# idle_minutes; READY_WORK_STALE (ATTENTION) for a file older than stale_minutes, or bad. Readings only, no action.
+idle_minutes = 15  # min of free slots while ready work waits; default 15; range 5-120; authority: the owner
+stale_minutes = 90  # min after a file's `updated` time before it is stale; default 90; range 15-720; authority: the owner
+
 [github]
 # The CI pool (GitHub Actions): minutes, money, stuck runs.
 included_minutes = 3000  # min/month

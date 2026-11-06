@@ -113,6 +113,7 @@ PROFILE_DEFAULTS = {
     "deletes": {"forbidden_parts": [".ssh"], "protected_roots": [], "rules": [], "cleanup": []},
     "recovery": {"expected_jobs": []},
     "text_line_max": mmtext.TEXT_LINE_MAX_DEFAULT,  # C-22: the longest line any pattern sees (mmtext.cut)
+    "ready_work_dir": "",  # one JSON file per owner of ready work (mmready); "" = IDLE_WITH_WORK off
 }
 # text_line_max's range: a line long enough for any record machine-manager parses; short enough that a pattern's cost
 # per line stays small.
@@ -142,6 +143,9 @@ def load_profile(file=None):
     if isinstance(n, bool) or not isinstance(n, int) or not TEXT_LINE_MAX_RANGE[0] <= n <= TEXT_LINE_MAX_RANGE[1]:
         raise MMError("E_PROFILE", "text_line_max must be a whole number from %d to %d: %s"
                       % (TEXT_LINE_MAX_RANGE + (f,)), "correct text_line_max in the profile; mm check")
+    if not isinstance(out["ready_work_dir"], str):
+        raise MMError("E_PROFILE", "ready_work_dir must be a string path: %s" % f,
+                      'correct ready_work_dir in the profile (or "" for off); mm check')
     mmtext.set_text_line_max(n)
     out["_file"] = f
     return out
@@ -337,6 +341,8 @@ SCHEMA = {
     "queue.long_call_minutes": ("num", 1, 1440), "queue.head_block_minutes": ("num", 1, 1440),
     "queue.slot_cpu_cores": ("num", 0.5, 64), "queue.placement_max_mac_wait_minutes": ("num", 0, 1440),
     "queue.wide_free_pct": ("num", 0, 100), "queue.idle_room_minutes": ("num", 1, 1440),
+    # Defaults 15 and 90 min; ranges 5-120 and 15-720 min; authority: the owner. IDLE_WITH_WORK, READY_WORK_STALE.
+    "ready_work.idle_minutes": ("num", 5, 120), "ready_work.stale_minutes": ("num", 15, 720),
     "github.reserve_minutes": ("int", 0, 1000000),
     "other.fseventsd_mb": ("num", 1, 1000000), "other.cache_5m_share_pct": ("num", 0, 100),
     "other.cache_5m_min_tokens_m": ("num", 0, 100000), "other.recipient_tool_wait_minutes": ("num", 1, 1440),
