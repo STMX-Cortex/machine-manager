@@ -1066,10 +1066,8 @@ class Supervisor:
                                        "(mm on removes it)" % rec["broken"], command="mm on"))
         problem = mmrecover.paused_problem(mmrecover.read_paused())
         if problem:
-            out.append(mmalerts._c("PAUSED_FILE_BROKEN", "PAUSED_FILE_BROKEN", "ACTION",
-                                   "%s; no new pause, and no pid is continued from it: processes it listed may still be "
-                                   "stopped; inspect the file, continue them by hand (kill -CONT PID), then remove it"
-                                   % problem, command="mm explain PAUSED_FILE_BROKEN"))
+            text, command = mmrecover.paused_broken_alert(problem)
+            out.append(mmalerts._c("PAUSED_FILE_BROKEN", "PAUSED_FILE_BROKEN", "ACTION", text, command=command))
         held = self.state.setdefault("held", {})
         for k in [k for k, h in held.items() if h["until"] <= now]:
             held.pop(k)

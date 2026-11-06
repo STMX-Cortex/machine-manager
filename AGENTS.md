@@ -53,8 +53,8 @@ Levels: INFO, ATTENTION, ACTION. Alert names: README.md, Glossary.
    unless the owner asks; use `mm off`, `mm slots pin`, `mm on`.
 2. Never delete what `mm cleanup` lists; it is a list for the owner, with exact commands.
 3. Never start a heavy job when `mm place` says WAIT, or many agents at RED.
-4. Never kill, stop or resume a process the tool paused; tell the owner.
+4. Never kill, stop or resume a process the tool paused; tell the owner (also at `PAUSED_FILE_BROKEN`).
 5. Never run `mm drill`, `mm install`, `mm rollback`, `mm stop`, `mm restart` or `mm on` without the owner's word.
-   `SAFE_MODE` means automatic actions are off until the owner ends it.
+   `SAFE_MODE` and `CONTROL_FILE_BROKEN` mean automatic actions are off until the owner ends them.
 6. Never put secrets in `--note` or `--reason` text (they are masked, but still).
 7. `mm notify send` only for what the owner must see or decide, not routine progress; never grant yourself a key or read other keys.

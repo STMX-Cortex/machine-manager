@@ -603,6 +603,10 @@ def rollback(profile):
     resumed = mmrecover.resume_paused("rollback")
     if resumed:
         lines.append("resumed=%s" % ",".join(str(p) for p in resumed))
+    problem = mmrecover.paused_problem(mmrecover.read_paused())
+    if problem:  # no pid can be known from it: nothing continued from it; the owner checks by hand
+        lines.append("paused_broken=%s nothing continued from it; inspect it, kill -CONT the pids, remove it"
+                     % json.dumps(mmcore.clean(problem)))
     hf = mmcore.expand((profile.get("delivery") or {}).get("settings_file") or "")
     rec = os.path.join(mmcore.base_dir(), "install.json")
     if hf and os.path.exists(hf):
