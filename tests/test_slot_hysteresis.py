@@ -998,6 +998,135 @@ class SupervisorReview(SupervisorHour):
         self.assertIn("SET slots 8 -> 5: safe mode", self.decisions())
 
 
+# ------------------------------------------------------------------------------------------- re-check round
+TIME_FIELDS = ("last_down", "last_change", "last_red", "last_trim", "green_since", "demand_since", "raise_hold_since")
+ALLOWED_NULL = ("green_since", "demand_since")  # bind: the fields the code itself writes as null
+
+
+class NullTimes(unittest.TestCase):
+    def state_with_null(self, key):
+        st = dict(calm_state(NOW), last_down=NOW - 3600, last_red=NOW - 7200, last_trim=NOW - 7200,
+                  raise_hold_since=NOW - 7200)
+        st[key] = None
+        return st
+
+    def test_no_crash_and_repair_with_one_full_hold(self):
+        s = settings()
+        for key in TIME_FIELDS:
+            with self.subTest(key=key):
+                r = mmdecide.slot_decide(self.state_with_null(key), inp(NOW, free_pct=80.0), s)
+                if key in ALLOWED_NULL:
+                    self.assertIsNone(r.get("problem"), r)
+                else:
+                    self.assertIsNone(r["slots"], r)
+                    self.assertIn(key, r["problem"] or "", r)
+                    self.assertEqual(r["state"]["raise_hold_since"], NOW)
+                    st = r["state"]
+                    for m, want in ((14.9, None), (15.0, 6)):
+                        got = mmdecide.slot_decide(st, inp(NOW + m * MIN, free_pct=80.0), s)
+                        st = got["state"]
+                        self.assertEqual(got["slots"], want, (key, m, got))
+
+    def test_amber_and_timing_failure_still_step_down(self):
+        s = settings()
+        for key in TIME_FIELDS:
+            with self.subTest(key=key):
+                r = mmdecide.slot_decide(self.state_with_null(key), inp(NOW, "AMBER", 49.0, slots=6), s)
+                self.assertEqual(r["slots"], 5, r)
+                r = mmdecide.slot_decide(self.state_with_null(key),
+                                         inp(NOW, "STEADY", 60.0, slots=6, events=["timing-failure"]), s)
+                self.assertEqual(r["slots"], 5, r)
+
+
+class ReadClearLogFails(RecoveryBase):
+    def test_e_clear_is_raised_even_when_its_log_write_fails(self):
+        mmrecover.enter_safe("test", NOW)
+        real_write = mmcore.write_atomic
+
+        def refuse(path, *a, **k):
+            if os.path.basename(path).startswith("self-check-clear"):
+                raise PermissionError(13, "Permission denied", path)
+            return real_write(path, *a, **k)
+
+        def log_fails(*a, **k):
+            raise OSError(28, "No space left on device")
+
+        with mock.patch.object(mmcore, "write_atomic", refuse), mock.patch.object(mmrecover, "log", log_fails):
+            with self.assertRaises(mmcore.MMError) as cm:
+                mmrecover.clear_safe("unit test", now=NOW + 5)
+        self.assertEqual(cm.exception.code, "E_CLEAR")
+        self.assertIsNotNone(mmcore.safe_state())
+
+    @mmtest.darwin_only
+    def test_restart_clear_safe_with_a_failed_clear_write_never_stops_or_starts(self):
+        mmrecover.enter_safe("test", time.time())
+        state = os.path.join(self.data, "state")
+        os.chmod(state, 0o500)
+        try:
+            rc, out, err = self.run_mm("restart", "--clear-safe", FAKE_HEARTBEAT_PID="4343")
+        finally:
+            os.chmod(state, 0o700)
+        self.assertEqual((rc, out), (2, [CLEAR_WRITE_ERROR]), err)
+        self.assertEqual(self.launchctl(), [], "no bootout, no bootstrap")
+        self.assertIsNotNone(mmcore.safe_state())
+
+
+class ControllerFileShapes(SupervisorReview):
+    def path(self):
+        return os.path.join(self.data, "state", "controller.json")
+
+    def held_full_hold(self, sup, clock, t0):
+        raises = self.tick_until(sup, clock, t0 + 16 * MIN)
+        alerts = [r for r in self.pushed() if r.get("name") == CONTROLLER_UNREADABLE]
+        self.assertTrue(alerts, [r.get("name") for r in self.pushed()])
+        self.assertEqual(alerts[0]["level"], "ATTENTION")
+        self.assertTrue(all(t >= t0 + 15 * MIN for t in raises), raises)
+
+    def test_a_non_object_controller_record_is_held(self):
+        for text in ('{"controller": []}', '{"controller": false}', '{"controller": 0}', '{"controller": ""}',
+                     "false", "0", '""', "[]"):
+            with self.subTest(text=text):
+                for f in (self.path(), self.path() + ".unreadable", os.path.join(self.data, "alerts.jsonl"),
+                          os.path.join(self.data, "alerts-state.json")):
+                    if os.path.lexists(f):
+                        os.remove(f)
+                with open(self.path(), "w") as fh:
+                    fh.write(text)
+                clock = {"t": NOW}
+                sup, _ = self.build(lambda now: 60.0, clock)
+                self.held_full_hold(sup, clock, NOW)
+
+    def test_a_dangling_link_is_unreadable_not_a_first_start(self):
+        os.symlink(os.path.join(self.root, "no-such-file"), self.path())
+        clock = {"t": NOW}
+        sup, _ = self.build(lambda now: 60.0, clock)
+        self.assertEqual((sup.state.get("controller") or {}).get("raise_hold_since"), NOW)
+        self.held_full_hold(sup, clock, NOW)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "no-such-file")), "the link target is not created")
+
+    def test_an_existing_copy_is_kept_unchanged(self):
+        with open(self.path() + ".unreadable", "w") as fh:
+            fh.write("OLD COPY")
+        with open(self.path(), "w") as fh:
+            fh.write("{broken")
+        clock = {"t": NOW}
+        sup, _ = self.build(lambda now: 60.0, clock)
+        sup.tick()
+        self.assertEqual(open(self.path() + ".unreadable").read(), "OLD COPY")
+
+    def test_a_link_at_the_copy_path_is_not_followed(self):
+        target = os.path.join(self.root, "outside-target")
+        with open(target, "w") as fh:
+            fh.write("TARGET")
+        os.symlink(target, self.path() + ".unreadable")
+        with open(self.path(), "w") as fh:
+            fh.write("{broken")
+        clock = {"t": NOW}
+        sup, _ = self.build(lambda now: 60.0, clock)
+        sup.tick()
+        self.assertEqual(open(target).read(), "TARGET", "the link's target stays untouched")
+
+
 del RecoveryBase
 
 
