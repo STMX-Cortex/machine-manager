@@ -123,7 +123,9 @@ def own_name_problem(name):
     """Why an own_files name (slot_dir, a `files` name) is refused before any file is looked at, or None: it must be a
     non-empty text, relative, and stay inside the data folder after normalization ("state/decisions.log.1" is fine;
     "/abs", "../x" and "a/../../x" are not). `mm check` shows the same problems (E_PROFILE)."""
-    if not isinstance(name, str) or not name:
+    if not isinstance(name, str):
+        return "not a text name"
+    if not name:
         return "an empty name"
     if os.path.isabs(name):
         return "an absolute name"
@@ -133,13 +135,28 @@ def own_name_problem(name):
     return None
 
 
+def own_files_shape(r):
+    """{key: problem} for an own_files rule's values of the wrong type: `slot_dir` not a text, `slot_pattern` not a
+    text, `files` not a list (each name in the list is checked by own_name_problem). `mm check` shows them too."""
+    out = {}
+    if "slot_dir" in r and not isinstance(r["slot_dir"], str):
+        out["slot_dir"] = "slot_dir is not a name"
+    if "slot_pattern" in r and not isinstance(r["slot_pattern"], str):
+        out["slot_pattern"] = "slot_pattern is not a text pattern"
+    if "files" in r and not isinstance(r["files"], list):
+        out["files"] = "files is not a list of names"
+    return out
+
+
 def own_name_refusal(data, name):
     """Why an own_files name must not be used in the data folder `data` (a real path), or None: own_name_problem,
     a link at any component below data (lstat), or a real parent outside data. Returns (path, why): the normalized
     path inside data when the name is usable."""
     bad = own_name_problem(name)
     if bad:
-        return (name if isinstance(name, str) and os.path.isabs(name) else os.path.join(data, str(name or ""))), bad
+        if not isinstance(name, str):
+            return data, bad
+        return (name if os.path.isabs(name) else os.path.join(data, name)), bad
     p = os.path.join(data, os.path.normpath(name))
     cur = data
     for part in os.path.normpath(name).split(os.sep):
@@ -321,15 +338,22 @@ class Run:
         days = self.s[r.get("age_days_setting", "deletes.evidence_keep_days")]
         data = os.path.realpath(self.c.data)
         # every name must be relative and stay inside the real data folder, with no link below it (own_name_refusal):
-        # a refused slot_dir gives no slot candidates, a refused file name is skipped; each is one KEEP line
-        slot_dir, bad = own_name_refusal(data, r.get("slot_dir", "evidence"))
-        if bad:
-            self.log("KEEP", r["id"], slot_dir, guard="refused: slot_dir is %s" % bad)
+        # a refused slot_dir gives no slot candidates, a refused file name is skipped; each is one KEEP line. A value
+        # of the wrong type (own_files_shape) refuses all its names: `files` as one text is never read letter by letter
+        shape = own_files_shape(r)
+        for key in sorted(shape):
+            self.log("KEEP", r["id"], data, guard="refused: %s" % shape[key])
+        if "slot_dir" in shape or "slot_pattern" in shape:
             slot_dir, cands = None, []
         else:
-            cands = children(slot_dir, [r.get("slot_pattern", "[0-9][0-9]")], dirs_only=True)
+            slot_dir, bad = own_name_refusal(data, r.get("slot_dir", "evidence"))
+            if bad:
+                self.log("KEEP", r["id"], slot_dir, guard="refused: slot_dir is %s" % bad)
+                slot_dir, cands = None, []
+            else:
+                cands = children(slot_dir, [r.get("slot_pattern", "[0-9][0-9]")], dirs_only=True)
         allowed = set()
-        for n in r.get("files", []):
+        for n in ([] if "files" in shape else r.get("files", [])):
             p, bad = own_name_refusal(data, n)
             if bad:
                 self.log("KEEP", r["id"], p, guard="refused: files name is %s" % bad)
