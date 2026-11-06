@@ -946,7 +946,8 @@ def main(argv):
     if verb == "recover-paused":
         import mmrecover
         pids = mmrecover.resume_paused("service stopped")
-        print(kv({"resumed": ",".join(str(p) for p in pids)}))
+        problem = mmrecover.paused_problem(mmrecover.read_paused())  # broken: no pid known, maybe still paused
+        print(kv(dict({"resumed": ",".join(str(p) for p in pids)}, **({"broken": problem} if problem else {}))))
         return 1 if mmrecover.read_paused() else 0
     if verb == "watchdog":
         import mmwatch

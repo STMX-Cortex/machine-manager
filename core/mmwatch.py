@@ -35,9 +35,20 @@ def check(now, s, profile, restart=True):
         age = None
     limit = s["other.heartbeat_max_age_s"]
     # a supervisor that died or hangs while it held a pause: continue every paused process (pid and start time checked)
-    if (age is None or age > s["self.resume_paused_after_s"] or stopped) and mmrecover.read_paused():
-        got = mmrecover.resume_paused("watchdog: supervisor %s" % ("stopped" if stopped else "stale"), now)
-        mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s resumed paused pids %s" % (mmcore.now_local(now), got))
+    paused = mmrecover.read_paused()
+    if (age is None or age > s["self.resume_paused_after_s"] or stopped) and paused:
+        problem = mmrecover.paused_problem(paused)
+        if problem:  # fail closed: no pid can be known from it, so nothing is continued and the file is kept
+            mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s paused record unusable (%s): nothing resumed, "
+                               "processes may still be stopped" % (mmcore.now_local(now), problem))
+            store.raise_("WD:paused-file", "PAUSED_FILE_BROKEN", "ACTION", "%s; the supervisor is %s and nothing was "
+                         "continued from it: processes it listed may still be stopped; inspect it, continue them by "
+                         "hand (kill -CONT PID), then remove it" % (problem, "stopped" if stopped else "stale"),
+                         command="mm explain WD:paused-file")
+            problems.append(problem)
+        else:
+            got = mmrecover.resume_paused("watchdog: supervisor %s" % ("stopped" if stopped else "stale"), now)
+            mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s resumed paused pids %s" % (mmcore.now_local(now), got))
     ref = mmrecover.start_ref(now)
     in_grace = ref is not None and now - ref < s["self.start_grace_s"]
     if not stopped and (age is None or age > limit) and in_grace:
