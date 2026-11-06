@@ -56,13 +56,15 @@ class Base(TempData):
         self.sup = None
 
     # ---- the profile and the ready-work files
-    def set_profile(self, value):
+    def set_profile(self, value, extra=""):
         with open(mmtest.PROFILE) as f:
             text = f.read()
         head = 'machine_id = "test-machine"\n'
         self.assertIn(head, text)
         if value is not None:
             text = text.replace(head, head + "ready_work_dir = %s\n" % json.dumps(value), 1)
+        if extra:
+            text = text.replace(head, head + extra, 1)
         p = os.path.join(self.root, "profile.toml")
         with open(p, "w") as f:
             f.write(text)
@@ -1050,6 +1052,137 @@ class ProfileType(Base):
         with self.assertRaises(mmcore.MMError) as cm:
             mmcore.load_profile(p)
         self.assertEqual(cm.exception.code, "E_PROFILE")
+
+
+# ------------------------------------------------------------------------------------------------ ready_work_owners
+# Contract addendum (2026-11-06): listed owners are expected as <name>.json (by file stem); a missing one is
+# READY_STALE:<name>. Coordinator rule: listed owners' files are looked at even past the FILES_MAX cap.
+
+class Owners(Base):
+    def owners(self, names):
+        self.set_profile(os.path.join(self.root, "ready"), "ready_work_owners = %s\n" % json.dumps(names))
+
+    def test_absent_or_empty_list_is_todays_rule(self):
+        for names in (None, []):
+            with self.subTest(names=names):
+                if names is None:
+                    self.set_profile(os.path.join(self.root, "ready"))
+                else:
+                    self.owners(names)
+                self.put("alpha", ready_units=4)
+                self.sup = None
+                self.tick()
+                self.assertEqual(self.stale(), {})
+                self.assertEqual(self.status()["ready_work"]["ready"], 4)
+
+    def test_a_missing_listed_file_alerts_and_clears_next_tick(self):
+        self.owners(["alpha", "beta"])
+        self.put("alpha", ready_units=4)
+        calls = []
+        self.start()
+        self.sup.deletes.kick = lambda *a, **k: calls.append(("deletes", a))
+        rec = lambda name: (lambda *a, **k: calls.append((name, a)))
+        with mock.patch.object(os, "kill", rec("kill")), mock.patch.object(os, "killpg", rec("kill")), \
+                mock.patch.object(mmsuper.Pauser, "pause", rec("pause")), \
+                mock.patch.object(mmsuper.Trim, "_start", rec("trim")):
+            self.tick()
+            got = self.stale()
+            self.assertEqual(list(got), ["READY_STALE:beta"], got)
+            self.assertEqual(got["READY_STALE:beta"]["level"], "ATTENTION")
+            self.assertEqual(got["READY_STALE:beta"]["name"], "READY_WORK_STALE")
+            rw = self.status()["ready_work"]
+            self.assertEqual(rw["ready"], 4, "a missing file counts 0 units")
+            self.advance(20 * MIN)
+            self.assertIn("READY_STALE:beta", self.stale())
+            self.put("beta", ready_units=3)
+            self.advance(MIN)
+            self.assertEqual(self.stale(), {}, "it clears on the next tick once the file is present and good")
+            self.assertEqual(self.status()["ready_work"]["ready"], 7)
+        self.assertEqual(calls, [], "a missing file never pauses, kills, trims or deletes")
+
+    def test_a_listed_owner_with_a_link_bad_or_stale_file_has_the_same_key(self):
+        self.owners(["beta"])
+        outside = os.path.join(self.root, "outside.json")
+        with open(outside, "w") as f:
+            f.write(json.dumps({"owner": "beta", "updated": iso(self.t), "ready_units": 9, "next": "n"}))
+        cases = {"link": lambda p: os.symlink(outside, p),
+                 "bad": lambda p: open(p, "w").write("{"),
+                 "stale": lambda p: open(p, "w").write(json.dumps({"updated": iso(self.t - 200 * MIN), "ready_units": 2}))}
+        for kind, make in cases.items():
+            with self.subTest(kind=kind):
+                p = os.path.join(self.ready, "beta.json")
+                if os.path.lexists(p):
+                    os.unlink(p)
+                make(p)
+                self.t += MIN
+                self.tick()
+                got = self.stale()
+                self.assertEqual(list(got), ["READY_STALE:beta"], (kind, got))
+                self.assertEqual(got["READY_STALE:beta"]["level"], "ATTENTION")
+                want = 2 if kind == "stale" else 0
+                self.assertEqual(self.status()["ready_work"]["ready"], want, kind)
+
+    def test_a_listed_owner_is_seen_past_the_file_cap(self):
+        for i in range(70):
+            self.put("o%03d" % i, ready_units=1)
+        self.put("zeta", ready_units=5)  # sorts after every o### file: past the cap by name
+        self.owners(["zeta", "zmissing"])
+        self.tick()
+        rw = self.status()["ready_work"]
+        files = {o["file"]: o for o in rw["owners"]}
+        self.assertIn("zeta.json", files, "a listed owner's file is looked at even past the cap")
+        self.assertEqual((files["zeta.json"]["state"], files["zeta.json"]["units"]), ("ok", 5))
+        got = self.stale()
+        self.assertNotIn("READY_STALE:zeta", got)
+        self.assertIn("READY_STALE:zmissing", got)
+        self.assertIn("READY_STALE:_more", got)
+
+    def test_matching_is_by_file_stem_not_by_json_owner(self):
+        self.owners(["alpha"])
+        self.put("beta", owner="alpha", ready_units=6)  # says owner alpha, but its stem is beta
+        self.tick()
+        self.assertEqual(list(self.stale()), ["READY_STALE:alpha"], "alpha.json is missing")
+        self.assertEqual(self.status()["ready_work"]["ready"], 6, "beta.json still counts as an unlisted file")
+
+    def test_unlisted_files_still_count(self):
+        self.owners(["alpha"])
+        self.put("alpha", ready_units=1)
+        self.put("gamma", ready_units=9)
+        self.tick()
+        self.assertEqual(self.stale(), {})
+        self.assertEqual(self.status()["ready_work"]["ready"], 10)
+
+
+class OwnersProfile(TempData):
+    def load(self, value):
+        with open(mmtest.PROFILE) as f:
+            text = f.read()
+        head = 'machine_id = "test-machine"\n'
+        text = text.replace(head, head + 'ready_work_dir = "{data}/ready"\nready_work_owners = %s\n' % value, 1)
+        p = os.path.join(self.root, "profile-owners.toml")
+        with open(p, "w") as f:
+            f.write(text)
+        return mmcore.load_profile(p)
+
+    def test_good_lists(self):
+        for names in ([], ["alpha"], ["builder-a", "b.2", "C_3"], ["n%02d" % i for i in range(64)]):
+            with self.subTest(names=names[:3]):
+                self.assertEqual(self.load(json.dumps(names)).get("ready_work_owners"), names)
+
+    def test_bad_lists_are_profile_errors(self):
+        bad = ['"alpha"', "5", "true", "[1]", '["alpha", 2]', '[["alpha"]]', '[""]', '["-alpha"]', '["_more"]',
+               '[".hidden"]', '["a/b"]', '["a b"]', '["alpha.json/../x"]', '["alpha", "alpha"]',
+               json.dumps(["n%02d" % i for i in range(65)]), json.dumps(["x" * 65])]
+        for value in bad:
+            with self.subTest(value=value[:40]):
+                with self.assertRaises(mmcore.MMError) as cm:
+                    self.load(value)
+                self.assertEqual(cm.exception.code, "E_PROFILE")
+
+    def test_profile_schema_takes_the_list(self):
+        prof = self.load(json.dumps(["alpha", "beta"]))
+        doc = {k: v for k, v in prof.items() if not k.startswith("_")}
+        self.assertEqual(mmschema.validate(doc, mmschema.load("profile")), [])
 
 
 if __name__ == "__main__":
