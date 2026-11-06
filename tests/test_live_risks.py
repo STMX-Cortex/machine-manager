@@ -715,23 +715,22 @@ class F3PausedFile(F3PausedBase):
                 before = self.broken(shape)
                 r = self.mm("recover-paused")
                 self.assertEqual(r.returncode, 1, "a broken paused.json is not 'nothing paused': %s" % r.stdout)
-                self.assertEqual(r.stdout.strip(), 'resumed=""')
+                self.assertEqual(r.stdout.strip(), 'resumed="" broken="%s"' % mmrecover.paused_problem(
+                    mmrecover.read_paused()))
                 self.assertEqual(raw(self.paused()), before)
         self.assertEqual(spy.calls, [])
 
     def test_watchdog_treats_a_broken_file_as_maybe_paused(self):
         """A stopped supervisor (state/stopped.json): a broken file counts as "maybe paused", so the watchdog's resume
-        path runs; it cannot know the pids, so it signals nothing, keeps the file and logs the refusal."""
+        path runs; it cannot know the pids, so it signals nothing, keeps the file and says so in watchdog.log."""
         spy = SignalSpy(self)
         write_raw(os.path.join(self.data, "state", "stopped.json"), json.dumps({"time": time.time()}))
         before = self.broken("invalid_json")
         mmwatch.check(time.time(), self.s(), self.profile(), restart=False)
         self.assertEqual(raw(self.paused()), before)
         self.assertEqual(spy.calls, [])
-        self.assertIn("resumed paused pids []", open(os.path.join(self.data, "state", "watchdog.log")).read())
-        log = open(os.path.join(self.data, "state", "recovery.log")).read()
-        self.assertIn("RESUME from state/paused.json refused: state/paused.json: cannot be read (JSONDecodeError); no "
-                      "pid signalled from it, the file is kept (watchdog: supervisor stopped)", log)
+        self.assertIn("paused record unusable (state/paused.json: cannot be read (JSONDecodeError)): nothing resumed, "
+                      "processes may still be stopped", open(os.path.join(self.data, "state", "watchdog.log")).read())
 
 
 # ===================================================================================== the coder's API (405277033a07)
@@ -865,7 +864,7 @@ class F1Pinned(SupBase):
         self.sup().tick()
         r = self.mm("status")
         self.assertFalse([l for l in r.stdout.splitlines() if l.startswith("broken=")], r.stdout)
-        self.assertEqual(json.loads(self.mm("status", "--json").stdout)["broken"], [])
+        self.assertNotIn("broken", json.loads(self.mm("status", "--json").stdout), "the usual output is unchanged")
 
     def paused_file(self):
         return os.path.join(self.data, "state", "paused.json")
@@ -916,6 +915,9 @@ class F1Pinned(SupBase):
         self.assertEqual(raw(target), before)
         mmrecover.mark_safe_slot_write("SET 8 -> 5")
         self.assertEqual(raw(target), before, "mark_safe_slot_write never writes over a broken safe.json")
+        log = open(os.path.join(self.data, "state", "recovery.log")).read()
+        self.assertIn("SAFE MODE trip (self-check: test): safe.json: safe is not true or false is kept as it is; safe "
+                      "mode stays on", log)
 
 
 from test_recovery import Base as _RecoveryBase  # noqa: E402  (its fake launchctl writes a fresh heartbeat)
@@ -1101,6 +1103,22 @@ class F3Pinned(F3PausedBase):
 
 
 
+from test_install import SetupBase as _SetupBase  # noqa: E402  (a fake launchctl, a synthetic settings file)
+
+
+class F3Rollback(_SetupBase):
+    @mmtest.darwin_only
+    def test_rollback_names_a_broken_paused_json(self):
+        self.assertEqual(self.run_mm("install")[0], 0)
+        target = os.path.join(self.data, "state", "paused.json")
+        write_raw(target, "[]")
+        rc, out, _ = self.run_mm("rollback")
+        self.assertEqual(rc, 0, out)
+        self.assertIn('paused_broken="state/paused.json: not a JSON object" nothing continued from it; inspect it, '
+                      'kill -CONT the pids, remove it', out)
+        self.assertEqual(raw(target), b"[]")
+
+
 class F3Watchdog(F3PausedBase):
     """The watchdog's own PAUSED_FILE_BROKEN (key WD:paused-file; coordinator's decision 2026-11-06): raised only when
     the watchdog runs its resume path (supervisor stale, unloaded or stopped), with the supervisor's text and command,
@@ -1229,6 +1247,115 @@ class F2Pinned(F2Base):
         r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": "../outside", "files": []}])
         self.assertEqual(len(self.recs(r)), 1, r.lines)
         self.assertEqual(len(self.refusals(r)), 1, r.lines)
+
+    def guards(self, run):
+        return [x["guard"] for x in self.recs(run)]
+
+    def test_guard_texts(self):
+        victim = self.old_file(os.path.join(self.outside, "victim.log"))
+        self.old_file(os.path.join(self.outside, "old.log"))
+        os.makedirs(os.path.join(self.data, "a"))
+        os.symlink(self.outside, os.path.join(self.data, "linkdir"))
+        os.symlink(victim, os.path.join(self.data, "metrics.csv.1"))
+        cases = [(victim, "refused: files name is an absolute name"),
+                 ("../outside/victim.log", "refused: files name is a name that leaves the data folder"),
+                 ("a/../../outside/victim.log", "refused: files name is a name that leaves the data folder"),
+                 ("", "refused: files name is an empty name"),
+                 (".", "refused: files name is a name that leaves the data folder"),
+                 ("state/..", "refused: files name is a name that leaves the data folder"),
+                 ("linkdir/old.log", "refused: files name is a link inside the data folder: %s"
+                  % os.path.join(os.path.realpath(self.data), "linkdir")),
+                 ("metrics.csv.1", "refused: files name is a link inside the data folder: %s"
+                  % os.path.join(os.path.realpath(self.data), "metrics.csv.1"))]
+        for name, guard in cases:
+            with self.subTest(name=name):
+                r = self.run_rules([{"id": "S1", "type": "own_files", "files": [name]}])
+                self.assertEqual(self.guards(r), [guard], r.lines)
+        for slot_dir, guard in ((self.outside, "refused: slot_dir is an absolute name"),
+                                ("../outside", "refused: slot_dir is a name that leaves the data folder"),
+                                ("", "refused: slot_dir is an empty name")):
+            with self.subTest(slot_dir=slot_dir):
+                r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": slot_dir, "files": []}])
+                self.assertEqual(self.guards(r), [guard], r.lines)
+        self.assertTrue(os.path.exists(victim))
+
+    def test_one_keep_line_per_refused_name(self):
+        victim = self.old_file(os.path.join(self.outside, "victim.log"))
+        good = self.old_file(os.path.join(self.data, "metrics.csv.1"))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": "../outside",
+                             "files": [victim, "../x", "", "metrics.csv.1"]}])
+        verbs = [x["verb"] for x in self.recs(r)]
+        self.assertEqual(sorted(verbs), ["DELETE", "KEEP", "KEEP", "KEEP", "KEEP"], r.lines)
+        self.assertEqual(len(self.refusals(r)), 4)
+        self.assertFalse(os.path.lexists(good))
+        self.assertTrue(os.path.exists(victim))
+
+    def test_wrong_type_files_deletes_nothing(self):
+        """done2: files = "abc" (a text, not a list) must not mean the names "a", "b", "c"."""
+        for files in ("abc", 5, {"a": 1}, None, True):
+            with self.subTest(files=files):
+                for n in ("a", "b", "c", "abc"):
+                    self.old_file(os.path.join(self.data, n))
+                r = self.run_rules([{"id": "S1", "type": "own_files", "files": files}])
+                for n in ("a", "b", "c", "abc"):
+                    self.assertTrue(os.path.exists(os.path.join(self.data, n)), (files, n, r.lines))
+                self.assertEqual([x for x in self.recs(r) if x["verb"] != "KEEP"], [], r.lines)
+                self.assertIn("refused: files is not a list of names", self.guards(r), r.lines)
+
+    def test_wrong_type_name_inside_files_is_refused(self):
+        good = self.old_file(os.path.join(self.data, "metrics.csv.1"))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": [5, None, ["x"], "metrics.csv.1"]}])
+        self.assertFalse(os.path.lexists(good), "the good name still runs")
+        self.assertEqual(sorted(x["verb"] for x in self.recs(r)), ["DELETE", "KEEP", "KEEP", "KEEP"], r.lines)
+
+    def test_wrong_type_slot_dir_or_pattern_gives_no_slot_candidates(self):
+        """done2: slot_dir or slot_pattern of the wrong type: no slot is deleted (the default evidence slots too)."""
+        ev = make(os.path.join(self.data, "evidence", "01"))
+        for key, value in (("slot_dir", 5), ("slot_dir", ["evidence"]), ("slot_dir", None),
+                           ("slot_pattern", 5), ("slot_pattern", ["[0-9][0-9]"]), ("slot_pattern", None)):
+            with self.subTest(key=key, value=value):
+                r = self.run_rules([{"id": "S1", "type": "own_files", key: value, "files": []}])
+                self.assertTrue(os.path.exists(ev), r.lines)
+                self.assertEqual([x for x in self.recs(r) if x["verb"] != "KEEP"], [], r.lines)
+                self.assertTrue([g for g in self.guards(r) if g.startswith("refused: %s" % key)], r.lines)
+
+    def profile_with(self, rule_toml):
+        prof = os.path.join(self.root, "profile.toml")
+        with open(mmtest.PROFILE) as f:
+            text = f.read()
+        with open(prof, "w") as f:
+            f.write(text + "\n[[deletes.rules]]\n" + rule_toml)
+        self.queue_dir()
+        return prof
+
+    def check_lines(self, prof):
+        r = self.mm("check", "--profile", prof)
+        return r.returncode, [l for l in r.stdout.splitlines() if l.startswith("E_PROFILE deletes rule")]
+
+    def test_mm_check_lists_each_bad_name(self):
+        prof = self.profile_with('id = "S1"\ntype = "own_files"\nslot_dir = "/abs"\n'
+                                 'files = ["/abs/x", "../y", "", "metrics.csv.1", "state/decisions.log.1"]\n')
+        rc, lines = self.check_lines(prof)
+        fix = "; fix: use a name relative to the data folder, inside it"
+        self.assertEqual(lines, ['E_PROFILE deletes rule S1: slot_dir "/abs" is an absolute name' + fix,
+                                 'E_PROFILE deletes rule S1: files "/abs/x" is an absolute name' + fix,
+                                 'E_PROFILE deletes rule S1: files "../y" is a name that leaves the data folder' + fix,
+                                 'E_PROFILE deletes rule S1: files "" is an empty name' + fix])
+        self.assertEqual(rc, 1)
+
+    def test_mm_check_good_names_no_line(self):
+        prof = self.profile_with('id = "S1"\ntype = "own_files"\n'
+                                 'files = ["metrics.csv.1", "alerts.jsonl.1", "deletes.log.1", "state/decisions.log.1"]\n')
+        self.assertEqual(self.check_lines(prof)[1], [])
+
+    def test_mm_check_wrong_types(self):
+        """done2: files, slot_dir or slot_pattern of the wrong type is an E_PROFILE line each."""
+        for key, value in (("files", '"abc"'), ("slot_dir", "5"), ("slot_pattern", "5")):
+            with self.subTest(key=key):
+                prof = self.profile_with('id = "S1"\ntype = "own_files"\n%s = %s\n' % (key, value))
+                rc, lines = self.check_lines(prof)
+                self.assertTrue([l for l in lines if l.startswith("E_PROFILE deletes rule S1: %s" % key)], lines)
+                self.assertEqual(rc, 1)
 
     def test_refused_file_names_have_refused_guards(self):
         victim = self.old_file(os.path.join(self.outside, "victim.log"))
