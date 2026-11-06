@@ -54,7 +54,7 @@ def _ready_work(rw, s):
         return out
     if rw.get("not_folder"):
         out.append(_c("READY_STALE:_folder", "READY_WORK_STALE", "ATTENTION",
-                      "ready_work_dir is not a folder: %s" % _q(rw.get("folder") or "")))
+                      "ready_work_dir %s: %s" % (rw.get("folder_why") or "is not a folder", _q(rw.get("folder") or ""))))
     for o in rw.get("owners") or []:
         if o["state"] == "bad":
             out.append(_c("READY_STALE:" + o["stem"], "READY_WORK_STALE", "ATTENTION",

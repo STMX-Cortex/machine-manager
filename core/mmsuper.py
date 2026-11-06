@@ -39,6 +39,7 @@ EXIT_RESTART = 75  # a self-check restart: launchd starts the supervisor again (
 STOP_DEADLINE_S = 8  # without settings: s from a SIGTERM to the forced end (under the plist's ExitTimeOut)
 HELD_REBOOT_S = 3600
 HELD_SELF_S = 1800
+READY_KEY_PREFIX = "READY_STALE:"  # every READY_WORK_STALE key (mmalerts._ready_work)
 
 
 class KernelStream:
@@ -531,6 +532,7 @@ class Supervisor:
         # the IDLE_WITH_WORK timer: its start outlives a restart (mmready.load_since; an unreadable record is kept)
         self.ready_since, self.ready_error = mmready.load_since()
         self.ready_saved = self.ready_since  # the record's value (None: missing, or not read)
+        self.ready_last = None  # the last ready_work part (kept when a read fails unexpectedly)
         # every start: no process stays stopped by an earlier run (a crash or a kill during a pause)
         legacy = self.state.pop("paused", None)
         if mmrecover.read_paused() or legacy:
@@ -837,6 +839,7 @@ class Supervisor:
         for c in conds:
             store.raise_(c["key"], c["name"], c["level"], c["text"], value=c["value"], band=c["band"], worse=c["worse"],
                          command=c["command"], investigate=c["investigate"])
+        self._ready_clear(store, active_before, now)
         store.finish(scope_prefixes=None)
         for rec in store.pushed:
             if rec["level"] == "ACTION" and self.delivery:
@@ -867,29 +870,49 @@ class Supervisor:
         self.save_state()
 
     def _ready_work(self, now, s, q):
-        """The snapshot's ready_work part (mmready.scan, mmdecide.ready_free and ready_since), or None when the
-        profile names no ready_work_dir or nothing is at it. A reading only: the same in every mode. The timer's
-        start is saved when it differs from the record, never over a record that does not read (the timer then runs
-        in memory; the record is read again each tick until it reads or is gone)."""
-        if self.ready_error:
-            saved, self.ready_error = mmready.load_since()
-            if self.ready_error is None:
-                self.ready_saved = saved
+        """The snapshot's ready_work part (_ready_read), or None when the feature is off. Never raises out of the
+        tick: an unexpected error is logged and the last part stays (so its alerts neither flap nor clear)."""
+        try:
+            self.ready_last = self._ready_read(now, s, q)
+        except Exception as e:  # the feature is a reading; it must never stop a tick
+            mmcore.append_line(mmcore.path("state", "errors.log"),
+                               mmcore.mask("%s ready-work %r" % (mmcore.now_local(now), e)))
+        return self.ready_last
+
+    def _ready_read(self, now, s, q):
+        """mmready.scan, mmdecide.ready_free and ready_since; None when the profile names no ready_work_dir or nothing
+        is at it. A reading only: the same in every mode. Before every write of the timer record it is read again: a
+        record that exists but does not read is kept unchanged (READY_STALE:_state), and the timer runs in memory."""
         found = mmready.scan(mmready.folder(self.p), now, s["ready_work.stale_minutes"])
         free = mmdecide.ready_free(self.state.get("virtual_slots"), len((q or {}).get("busy") or []))
         ready = sum(o["units"] for o in (found or {}).get("owners") or [] if o["state"] != "bad")
         self.ready_since = mmdecide.ready_since(self.ready_since, free, ready, now) if found else None
-        if self.ready_error is None and self.ready_since != self.ready_saved:
-            try:
-                mmready.save_since(self.ready_since)
-                self.ready_saved = self.ready_since
-            except OSError as e:  # the timer still runs in memory; the next tick tries again
-                mmcore.append_line(mmcore.path("state", "errors.log"),
-                                   mmcore.mask("%s ready-work state %r" % (mmcore.now_local(now), e)))
+        if self.ready_error is not None or self.ready_since != self.ready_saved:
+            saved, self.ready_error = mmready.load_since()
+            if self.ready_error is None:
+                self.ready_saved = saved
+                if self.ready_since != saved:
+                    try:
+                        mmready.save_since(self.ready_since)
+                        self.ready_saved = self.ready_since
+                    except OSError as e:  # the timer still runs in memory; the next tick tries again
+                        mmcore.append_line(mmcore.path("state", "errors.log"),
+                                           mmcore.mask("%s ready-work state %r" % (mmcore.now_local(now), e)))
         if not found:
             return None
         return dict(found, free=free, ready=ready, state_error=self.ready_error,
                     idle_minutes=None if self.ready_since is None else (now - self.ready_since) / 60)
+
+    def _ready_clear(self, store, active_before, now):
+        """IDLE_WITH_WORK and READY_WORK_STALE clear on the first tick their condition is false (not after
+        repeat.clear_after_minutes, like the other alerts): a free slot is taken, or a file is mended, at once."""
+        try:
+            for key in sorted(active_before):
+                if (key == "IDLE_WITH_WORK" or key.startswith(READY_KEY_PREFIX)) and key not in store.seen:
+                    store.clear(key)
+        except Exception as e:  # never stop a tick; the general clear rule still clears them later
+            mmcore.append_line(mmcore.path("state", "errors.log"),
+                               mmcore.mask("%s ready-work clear %r" % (mmcore.now_local(now), e)))
 
     def _recovery_conditions(self, now, s, safe):
         """Safe mode, held events (a reboot, a self restart), the watchdog's stamp and the dead-man ping."""

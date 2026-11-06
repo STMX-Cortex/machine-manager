@@ -8,6 +8,8 @@ The idle timer's start survives a restart in state/ready-work.json (`{"since": n
 control reader: a missing file is "no record"; a file that exists but does not read is an error, never "no record".
 """
 import datetime
+import errno
+import heapq
 import json
 import os
 import re
@@ -34,21 +36,29 @@ def folder(profile):
     return mmcore.expand(p) if isinstance(p, str) and p else None
 
 
-def _read_bytes(p, limit):
-    """(raw, why): at most limit bytes of a regular file, opened without blocking on a FIFO."""
+LINK_WHY = "is a link (links are not followed)"
+
+
+def _read_bytes(p, limit, dir_fd=None):
+    """(raw, why): at most limit bytes of a regular file, opened without blocking on a FIFO and never through a link
+    (dir_fd: p is a name in that open folder). A link, a folder, a FIFO or any other type is a why."""
     try:
-        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
     except OSError as e:
+        if e.errno == errno.ELOOP:
+            return None, LINK_WHY
         return None, "cannot be opened (%s)" % (e.strerror or e.__class__.__name__)
     try:
-        f = os.fdopen(fd, "rb")
+        regular = stat.S_ISREG(os.fstat(fd).st_mode)
+        f = os.fdopen(fd, "rb") if regular else None
     except OSError as e:
         os.close(fd)
         return None, "cannot be opened (%s)" % (e.strerror or e.__class__.__name__)
+    if f is None:
+        os.close(fd)
+        return None, "is not a regular file"
     try:
         with f:
-            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
-                return None, "is not a regular file"
             raw = f.read(limit + 1)
     except OSError as e:
         return None, "cannot be read (%s)" % (e.strerror or e.__class__.__name__)
@@ -73,12 +83,13 @@ def _time(text):
         return None
 
 
-def read_file(path, name, now, stale_minutes):
-    """One owner record: {file, stem, owner, units, age_min, state (ok|stale|bad), why, next}. Never raises."""
+def read_file(path, name, now, stale_minutes, dir_fd=None):
+    """One owner record: {file, stem, owner, units, age_min, state (ok|stale|bad), why, next}. path: the file, or its
+    name in the open folder dir_fd. Only a regular file reads; a link is never followed. Never raises."""
     stem = name[:-5] if name.endswith(".json") else name
     rec = {"file": name, "stem": stem, "owner": stem, "units": 0, "age_min": None, "state": "bad", "why": None,
            "next": ""}
-    raw, why = _read_bytes(path, FILE_MAX)
+    raw, why = _read_bytes(path, FILE_MAX, dir_fd)
     doc = None
     if why is None:
         doc, why = _strict(raw, FILE_MAX)
@@ -114,42 +125,49 @@ def read_file(path, name, now, stale_minutes):
     return rec
 
 
+def _bad_folder(why):
+    return {"file": ".", "stem": "_list", "owner": "the folder", "units": 0, "age_min": None, "state": "bad",
+            "why": why, "next": ""}
+
+
 def scan(path, now, stale_minutes):
-    """None when the feature is off (no path, or nothing at it). Else {folder, not_folder, owners, more}: the owner
-    records of the folder's direct children named like NAME, by name, at most FILES_MAX of them."""
+    """None when the feature is off (no path, or nothing at it). Else {folder, not_folder, folder_why, owners, more}.
+    The folder is opened once (never through a link at its last part) and listed through that descriptor; each direct
+    child named like NAME is opened by name in it, never through a link. The FILES_MAX smallest names are read (only
+    those are held); `more` counts the other matching names. A link, a folder, a FIFO or another type under such a
+    name is a bad file. Never raises."""
     if not path or not os.path.lexists(path):
         return None
-    out = {"folder": path, "not_folder": False, "owners": [], "more": 0}
-    if not os.path.isdir(path):
-        out["not_folder"] = True
+    out = {"folder": path, "not_folder": False, "folder_why": None, "owners": [], "more": 0}
+    try:
+        dfd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as e:
+        if e.errno == errno.ELOOP or os.path.islink(path):
+            out.update(not_folder=True, folder_why=LINK_WHY)
+        elif e.errno == errno.ENOTDIR:
+            out.update(not_folder=True, folder_why="is not a folder")
+        else:
+            out["owners"].append(_bad_folder("the folder cannot be opened (%s)" % (e.strerror or "error")))
         return out
     try:
-        names = sorted(n for n in os.listdir(path) if NAME.fullmatch(n))
-    except OSError as e:
-        out["owners"].append({"file": ".", "stem": "_list", "owner": "the folder", "units": 0, "age_min": None,
-                              "state": "bad", "why": "the folder cannot be listed (%s)" % (e.strerror or "error"),
-                              "next": ""})
+        count = [0]
+
+        def names(it):
+            for entry in it:
+                if NAME.fullmatch(entry.name):
+                    count[0] += 1
+                    yield entry.name
+        try:
+            with os.scandir(dfd) as it:
+                picked = heapq.nsmallest(FILES_MAX, names(it))
+        except OSError as e:
+            out["owners"].append(_bad_folder("the folder cannot be listed (%s)" % (e.strerror or "error")))
+            return out
+        out["more"] = max(0, count[0] - len(picked))
+        out["owners"] = [read_file(n, n, now, stale_minutes, dir_fd=dfd) for n in picked]
         return out
-    real = os.path.realpath(path)
-    picked = []
-    for n in names:
-        p = os.path.join(path, n)
-        if os.path.islink(p):
-            target = os.path.realpath(p)
-            if os.path.commonpath([real, target]) != real or target == real:
-                continue  # a link that leaves the folder
-            if os.path.dirname(target) == real and os.path.basename(target) in names \
-                    and not os.path.islink(os.path.join(path, os.path.basename(target))):
-                continue  # a link to another file that is read itself
-            if os.path.isdir(target):
-                continue
-            p = target
-        elif os.path.isdir(p):
-            continue
-        picked.append((n, p))
-    out["more"] = max(0, len(picked) - FILES_MAX)
-    out["owners"] = [read_file(p, n, now, stale_minutes) for n, p in picked[:FILES_MAX]]
-    return out
+    finally:
+        os.close(dfd)
 
 
 def state_file():

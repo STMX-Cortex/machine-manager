@@ -150,9 +150,9 @@ hook; the endpoint above publishes only their counts (`alerts` in `/status.json`
 
 | Alert | Level | When | Clears |
 | --- | --- | --- | --- |
-| `IDLE_WITH_WORK` | ACTION | free slots (`would - busy`) and ready units both above 0 for longer than `ready_work.idle_minutes` (default 15) | no free slot, or no ready unit |
-| `READY_WORK_STALE:<file>` | ATTENTION | a ready-work file is bad (its units count as 0), or older than `ready_work.stale_minutes` (default 90) | the file is good and fresh again, or gone |
-| `READY_WORK_STALE:_folder`, `_list`, `_more`, `_state` | ATTENTION | `ready_work_dir` is not a folder; it cannot be listed; over 64 files; the timer record does not read | the cause is gone |
+| `IDLE_WITH_WORK` | ACTION | free slots (`would - busy`) and ready units both above 0 for longer than `ready_work.idle_minutes` (default 15) | the next tick with no free slot, or no ready unit |
+| `READY_WORK_STALE:<file>` | ATTENTION | a ready-work file is bad (its units count as 0), or older than `ready_work.stale_minutes` (default 90) | the next tick the file is good and fresh again, or gone |
+| `READY_WORK_STALE:_folder`, `_list`, `_more`, `_state` | ATTENTION | `ready_work_dir` is not a folder (or is a link); it cannot be opened or listed; over 64 files; the timer record does not read | the next tick the cause is gone |
 
 They are off unless the profile sets `ready_work_dir` (README.md, "Ready work"). They are readings only: no mode
 turns them off and nothing acts on them. `ready_work` in status.json is not on the `/status.json` allowlist.
