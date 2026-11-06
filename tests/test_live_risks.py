@@ -980,7 +980,7 @@ class F3Pinned(F3PausedBase):
                          "state/paused.json: cannot be read (PermissionError)")
 
     def test_good_record_is_a_plain_dict(self):
-        for good in ({}, {"123": "Mon Nov  6 20:00:00 2026"}, {"9999999999": "boot:1"}):
+        for good in ({}, {"123": "Mon Nov  6 20:00:00 2026"}, {"2147483647": "boot:1"}):
             with self.subTest(good=good):
                 write_raw(self.paused(), json.dumps(good))
                 d = mmrecover.read_paused()
