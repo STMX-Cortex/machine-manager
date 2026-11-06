@@ -323,7 +323,7 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
     off = g("off")
     if off:
         out.append(_c("OFF", "OFF", "ATTENTION", "automatic actions are off since %s (%s); readings and alerts go on"
-                      % (off.get("since", "?"), (off.get("reason") or "")[:60]), command="mm on"))
+                      % (off.get("since", "?"), str(off.get("reason") or "")[:60]), command="mm on"))
 
     for pid, rc in g("jobs_dead") or []:
         out.append(_c("JOB_DEAD:%d" % pid, "JOB_DEAD", "ATTENTION",

@@ -589,12 +589,24 @@ def control_problem(name, flag):
     return (d if d[flag] else None), None
 
 
+class ControlBroken(dict):
+    """off_state/safe_state's record for a control file that cannot be used: a SET guard. `problem` (an attribute,
+    never a field of the user's file) names the file and the problem; the "broken" and "reason" keys are for display.
+    Only record_problem() decides that a record is broken: a user-written "broken" field means nothing."""
+
+    def __init__(self, flag, problem):
+        super().__init__({flag: True, "broken": problem, "reason": "%s; automatic actions stay off" % problem})
+        self.problem = problem
+
+
+def record_problem(rec):
+    """The reader's problem text of an off_state/safe_state record (ControlBroken), or None."""
+    return rec.problem if isinstance(rec, ControlBroken) else None
+
+
 def _flag_state(name, flag):
     rec, problem = control_problem(name, flag)
-    if problem is None:
-        return rec
-    # a broken file is a SET guard (truthy for every caller); `broken` names the file and the problem
-    return {flag: True, "broken": problem, "reason": "%s; automatic actions stay off" % problem}
+    return rec if problem is None else ControlBroken(flag, problem)
 
 
 def off_state():
@@ -608,9 +620,10 @@ def safe_state():
     """Safe mode (safe.json in the data folder, written by the supervisor): automatic actions off, readings and alerts
     on. Only `mm on` or `mm restart --clear-safe` ends it. Returns the record or None. A safe.json that cannot be used
     (control_problem) is safe mode ON: {"safe": True, "broken": "safe.json: <problem>", "reason": ..., "slot_write":
-    "none (safe.json broken)"}: no slot step down is made for it, and the supervisor never writes over it."""
+    "none (safe.json broken)"} (ControlBroken): no slot write at all is made for it (as for off.json), and the
+    supervisor never writes over it."""
     rec = _flag_state("safe.json", "safe")
-    if rec and rec.get("broken"):
+    if record_problem(rec):
         rec["slot_write"] = "none (safe.json broken)"
     return rec
 
