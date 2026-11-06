@@ -204,8 +204,10 @@ def slot_decide(state, inp, s):
     return {"slots": target, "why": why, "held": None, "problem": problem, "state": slot_mark(st, slots, target, now)}
 
 
-# The controller state's times (epoch s, or None where the key allows it).
+# The controller state's times (epoch s). Null is valid only where slot_decide itself writes null (SLOT_NULLABLE:
+# the GREEN span when not GREEN, the demand span without demand); a null anywhere else is invalid.
 SLOT_STAMPS = ("last_change", "green_since", "demand_since", "last_red", "last_trim", "last_down", "raise_hold_since")
+SLOT_NULLABLE = ("green_since", "demand_since")
 STAMP_FUTURE_S = 60  # a stored time later than now by more than this is invalid (a clock that went back, a bad file)
 
 
@@ -223,16 +225,19 @@ def slot_state_clean(state, now):
     """The controller state with every invalid time repaired, and the names of the invalid ones. A repair never delays
     a step down and never allows a raise: an invalid last_down is dropped (the AMBER step interval then does not wait),
     green_since and demand_since restart (None), any other time becomes now, and raise_hold_since becomes now (one full
-    slots.raise_hold_after_down_minutes before a raise, as after a step down). A state that is not a dict counts as
-    invalid ("state") and starts empty."""
+    slots.raise_hold_after_down_minutes before a raise, as after a step down). A null is valid only in SLOT_NULLABLE.
+    None (no state yet) starts empty; any other state that is not a dict ([], false, 0, "") counts as invalid
+    ("state") and starts as {"raise_hold_since": now}."""
     if state is None:
         return {}, []
     if not isinstance(state, dict):
         return {"raise_hold_since": now}, ["state"]
     st, bad = dict(state), []
     for k in SLOT_STAMPS:
-        v = st.get(k)
-        if v is None or stamp_ok(v, now):
+        if k not in st:
+            continue
+        v = st[k]
+        if (v is None and k in SLOT_NULLABLE) or (v is not None and stamp_ok(v, now)):
             continue
         bad.append(k)
         if k == "last_down":

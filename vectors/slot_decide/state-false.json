@@ -1,0 +1,34 @@
+{
+ "case": "state-false",
+ "expected": {
+  "held": null,
+  "problem": "slot controller state invalid: state",
+  "slots": 4,
+  "state": {
+   "demand_since": 1800000000.0,
+   "green_since": null,
+   "last_change": 1800000000.0,
+   "last_down": 1800000000.0,
+   "raise_hold_since": 1800000000.0
+  },
+  "why": "AMBER: free 49% < 50%"
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 5,
+   "free_pct": 80.0,
+   "mac_state": "AMBER",
+   "now": 1800000000.0,
+   "reasons": [
+    "free 49% < 50%"
+   ],
+   "slots": 5,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": false
+ },
+ "settings": "base",
+ "settings_over": {}
+}

@@ -214,8 +214,11 @@ def clear_safe(why, now=None):
         mmcore.write_atomic(mmcore.path(*CLEAR_FILE), json.dumps(
             mmcore.stamp({"cleared_at": now, "why": str(why)[:200], "was_safe": bool(cur)}), sort_keys=True))
     except OSError as e:
-        log("SELF-CHECK clear record not written (%s); safe mode and the unclean starts are kept" % e.__class__.__name__,
-            now)
+        try:  # best effort: the log may fail for the same reason; E_CLEAR is raised either way
+            log("SELF-CHECK clear record not written (%s); safe mode and the unclean starts are kept"
+                % e.__class__.__name__, now)
+        except OSError:
+            pass
         raise mmcore.MMError("E_CLEAR", "the clear record state/self-check-clear.json was not written (%s); safe mode "
                              "and the unclean starts are kept" % e.__class__.__name__,
                              "make the data folder's state/ writable, then run it again")

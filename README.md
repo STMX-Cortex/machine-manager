@@ -509,16 +509,23 @@ that only these two rules refuse writes one `HOLD slots N: raise held: ...` line
 unknown free memory, or the time since the step down), at most once per 10 min while the same kind of hold lasts.
 Steps down, RED, a pin and `mm event` events are not changed by them. The count's last step down and last change
 follow the tick's final count, also when safe mode lowers it. The controller's saved times (in
-`state/controller.json`) must be finite numbers at most 60 s in the future: an invalid one is repaired on the tick it
-is read (an invalid last step down is dropped, so a step down never waits; the GREEN and demand spans restart; any
-other time becomes now), no raise follows for one full `slots.raise_hold_after_down_minutes` from then ("raise held:
-N min since the controller state was repaired < 15 min"), and `SLOT_STATE` (ATTENTION, held 30 min) says
-`slot controller state invalid: <keys>; no raise for one full hold (slots.raise_hold_after_down_minutes)`. A
-`state/controller.json` that exists but cannot be read, or is not a JSON object, is copied once to
-`state/controller.json.unreadable` (kept, never deleted), a fresh record starts with the same full hold before a
-raise, and `SLOT_STATE` says `state/controller.json unreadable (<error>), kept as state/controller.json.unreadable; a
-fresh record starts, no raise for one full hold (slots.raise_hold_after_down_minutes)`. No file at all is a first
-start, with no hold. GREEN also needs free disk of at least `slots.green_disk_gb` (default 0 = follow `disk.recover_gb`; else at
+`state/controller.json`) must be finite numbers at most 60 s in the future; null is valid only in the GREEN and
+demand spans (`green_since`, `demand_since`), which the controller itself sets to null. An invalid one, a `controller`
+that is not an object (also null, `[]`, `false`, `0`, `""`), is repaired on the tick it is read (an invalid last step
+down is dropped, so a step down never waits; the GREEN and demand spans restart; any other time becomes now), no raise
+follows for one full `slots.raise_hold_after_down_minutes` from then ("raise held: N min since the controller state
+was repaired < 15 min"), and `SLOT_STATE` (ATTENTION, held 30 min) says `slot controller state invalid: <keys>; no
+raise for one full hold (slots.raise_hold_after_down_minutes)` (`state` for a non-object). Only a real absence of
+`state/controller.json` is a first start, with no hold. Anything else that is not a JSON object (a read error, a link,
+also a dangling one, which is never followed, not a regular file, bad JSON) is kept: its bytes (for a link, one line
+naming its target) go to a new file, `state/controller.json.unreadable` (else `.unreadable.2` to `.unreadable.9`;
+created with `O_EXCL|O_NOFOLLOW`, mode 0600, so an existing copy is never replaced and nothing is deleted). A fresh
+record then starts with the same full hold before a raise, and `SLOT_STATE` says `state/controller.json unreadable
+(<error>), kept as state/<copy>; a fresh record starts, no raise for one full hold
+(slots.raise_hold_after_down_minutes)`. While the copy fails, `state/controller.json` is not replaced, no raise is
+made (steps down still are), the copy is tried again each tick, and `SLOT_STATE` says `state/controller.json
+unreadable (<error>), its copy failed (<error>); the file is kept and not replaced, no raise until the copy works
+(tried each tick)`. GREEN also needs free disk of at least `slots.green_disk_gb` (default 0 = follow `disk.recover_gb`; else at
 least `slots.red_disk_gb`). `queue.slot_cpu_cores` is the CPU cap per held slot: each call's process tree is counted
 once, with one alert per call after two readings over its cap.
 

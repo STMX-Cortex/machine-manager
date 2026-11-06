@@ -1,0 +1,34 @@
+{
+ "case": "green-null-spans-are-valid",
+ "expected": {
+  "held": null,
+  "problem": null,
+  "slots": null,
+  "state": {
+   "demand_since": 1800000000.0,
+   "green_since": 1800000000.0,
+   "last_change": 1799996400.0
+  },
+  "why": null
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 5,
+   "free_pct": 80.0,
+   "mac_state": "GREEN",
+   "now": 1800000000.0,
+   "reasons": [],
+   "slots": 5,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": {
+   "demand_since": null,
+   "green_since": null,
+   "last_change": 1799996400.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}
