@@ -1113,6 +1113,9 @@ class ControllerFileShapes(SupervisorReview):
         sup, _ = self.build(lambda now: 60.0, clock)
         sup.tick()
         self.assertEqual(open(self.path() + ".unreadable").read(), "OLD COPY")
+        self.assertEqual(open(self.path() + ".unreadable.2").read(), "{broken", "the new copy takes the next name")
+        alerts = [r for r in self.pushed() if r.get("name") == CONTROLLER_UNREADABLE]
+        self.assertIn("kept as state/controller.json.unreadable.2;", alerts[0]["text"])
 
     def test_a_link_at_the_copy_path_is_not_followed(self):
         target = os.path.join(self.root, "outside-target")
@@ -1125,6 +1128,78 @@ class ControllerFileShapes(SupervisorReview):
         sup, _ = self.build(lambda now: 60.0, clock)
         sup.tick()
         self.assertEqual(open(target).read(), "TARGET", "the link's target stays untouched")
+        self.assertTrue(os.path.islink(self.path() + ".unreadable"), "the link itself is not replaced")
+        self.assertEqual(open(self.path() + ".unreadable.2").read(), "{broken")
+
+    def test_a_dangling_link_copy_names_its_target(self):
+        os.symlink(os.path.join(self.root, "no-such-file"), self.path())
+        clock = {"t": NOW}
+        self.build(lambda now: 60.0, clock)
+        self.assertEqual(open(self.path() + ".unreadable").read(),
+                         "symbolic link to %s\n" % os.path.join(self.root, "no-such-file"))
+
+    def test_a_non_object_controller_key_has_the_state_text(self):
+        for text in ('{"controller": []}', '{"controller": false}', '{"controller": 0}', '{"controller": ""}'):
+            with self.subTest(text=text):
+                for f in (self.path(), os.path.join(self.data, "alerts.jsonl"),
+                          os.path.join(self.data, "alerts-state.json")):
+                    if os.path.lexists(f):
+                        os.remove(f)
+                with open(self.path(), "w") as fh:
+                    fh.write(text)
+                clock = {"t": NOW}
+                sup, _ = self.build(lambda now: 60.0, clock)
+                sup.tick()
+                alerts = [r for r in self.pushed() if r.get("name") == CONTROLLER_UNREADABLE]
+                self.assertTrue(alerts, [r.get("name") for r in self.pushed()])
+                self.assertEqual(alerts[0]["text"], "slot controller state invalid: state; " + HOLD_NOTE)
+
+    def failing_copy(self):
+        return mock.patch.object(mmsuper, "keep_copy", lambda *a, **k: (None, "PermissionError"))
+
+    def test_a_failed_copy_keeps_the_original_holds_and_is_tried_again(self):
+        with open(self.path(), "w") as fh:
+            fh.write("{broken")
+        t0 = NOW
+        clock = {"t": t0}
+        with self.failing_copy():
+            sup, _ = self.build(lambda now: 80.0, clock)
+            for _ in range(20):  # 20 minutes: far over every hold, and still no raise
+                sup.tick()
+                clock["t"] += 60
+            self.assertEqual(open(self.path()).read(), "{broken", "the original is kept and not replaced")
+            self.assertFalse(os.path.lexists(self.path() + ".unreadable"))
+        log = self.decisions()
+        self.assertNotIn(": GREEN", log, "no raise while the copy fails")
+        self.assertIn("HOLD slots 6: raise held: state/controller.json unreadable and not yet kept", log)
+        alerts = [r for r in self.pushed() if r.get("name") == CONTROLLER_UNREADABLE]
+        self.assertTrue(alerts, [r.get("name") for r in self.pushed()])
+        self.assertEqual((alerts[0]["level"], alerts[0]["text"]),
+                         ("ATTENTION", "state/controller.json unreadable (JSONDecodeError), its copy failed "
+                          "(PermissionError); the file is kept and not replaced, no raise until the copy works "
+                          "(tried each tick)"))
+        t_ok = clock["t"]
+        sup.tick()  # the copy works again: the next save keeps it, then a fresh record starts
+        self.assertEqual(open(self.path() + ".unreadable").read(), "{broken")
+        self.assertIsInstance(json.load(open(self.path())), dict, "now replaced by the fresh record")
+        clock["t"] += 60
+        raises = self.tick_until(sup, clock, t_ok + 16 * MIN)
+        self.assertTrue(raises, self.decisions())
+        self.assertGreaterEqual(raises[0], t_ok + 15 * MIN, "one full hold from the kept copy")
+
+    def test_a_failed_copy_still_steps_down(self):
+        with open(self.path(), "w") as fh:
+            fh.write("{broken")
+        clock = {"t": NOW}
+        with self.failing_copy():
+            sup, _ = self.build(lambda now: 49.0, clock)
+            sup.tick()
+            clock["t"] += 180
+            sup.tick()
+            self.assertEqual(open(self.path()).read(), "{broken")
+        log = self.decisions()
+        self.assertIn("WOULD slots 6 -> 5: AMBER", log)
+        self.assertIn("WOULD slots 5 -> 4: AMBER", log)
 
 
 del RecoveryBase
