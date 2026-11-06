@@ -704,8 +704,10 @@ class SupervisorHour(RecoveryBase):
 
 # ------------------------------------------------------------------------------------------- review round 1
 # Exact texts from the coder's "review fixes done" message.
-CONTROLLER_UNREADABLE = "CONTROLLER_STATE_UNREADABLE"  # bind: the ATTENTION alert name
-CLEAR_WRITE_ERROR = "E_"                                # bind: the `mm on` error line start
+CONTROLLER_UNREADABLE = "SLOT_STATE"  # ATTENTION
+CLEAR_WRITE_ERROR = ("E_CLEAR the clear record state/self-check-clear.json was not written (PermissionError); safe mode "
+                     "and the unclean starts are kept; fix: make the data folder's state/ writable, then run it again")
+HOLD_NOTE = "no raise for one full hold (slots.raise_hold_after_down_minutes)"
 
 
 class BadLastDown(unittest.TestCase):
@@ -718,6 +720,42 @@ class BadLastDown(unittest.TestCase):
                 st = dict(calm_state(NOW), last_down=bad)
                 r = mmdecide.slot_decide(st, inp(NOW, free_pct=80.0), settings())
                 self.assertIsNone(r["slots"], r)
+
+    def test_held_text_and_problem_name_the_key(self):
+        for bad in self.BAD:
+            with self.subTest(last_down=bad):
+                r = mmdecide.slot_decide(dict(calm_state(NOW), last_down=bad), inp(NOW, free_pct=80.0), settings())
+                self.assertEqual(r["held"], "raise held: controller state invalid (last_down)")
+                self.assertEqual(r["problem"], "slot controller state invalid: last_down; " + HOLD_NOTE)
+                self.assertNotIn("last_down", r["state"], "an invalid last_down is dropped")
+                self.assertEqual(r["state"]["raise_hold_since"], NOW)
+
+    def test_one_full_hold_after_the_repair(self):
+        s = settings()
+        r = mmdecide.slot_decide(dict(calm_state(NOW), last_down="broken"), inp(NOW, free_pct=80.0), s)
+        st = r["state"]
+        for m, want in ((6.0, None), (14.9, None), (15.0, 6)):
+            r = mmdecide.slot_decide(st, inp(NOW + m * MIN, free_pct=80.0), s)
+            self.assertEqual(r["slots"], want, m)
+        r = mmdecide.slot_decide(st, inp(NOW + 6 * MIN, free_pct=80.0), s)
+        self.assertEqual(r["held"], "raise held: 6 min since the controller state was repaired < 15 min")
+
+    def test_other_invalid_times_become_now(self):
+        for key in ("last_change", "green_since", "last_red", "demand_since"):
+            for bad in ("x", float("nan"), True, NOW + 61, 10 ** 400):
+                with self.subTest(key=key, bad=bad):
+                    r = mmdecide.slot_decide(dict(calm_state(NOW), **{key: bad}), inp(NOW, free_pct=80.0), settings())
+                    self.assertIsNone(r["slots"])
+                    self.assertIn(key, r["problem"])
+                    self.assertEqual(r["state"]["raise_hold_since"], NOW)
+
+    def test_a_time_up_to_60_s_ahead_is_valid(self):
+        st = dict(calm_state(NOW), last_down=NOW - 3600, last_red=NOW + 60)
+        r = mmdecide.slot_decide(st, inp(NOW, free_pct=80.0), settings(**{"slots.hold_after_red_minutes": 0}))
+        self.assertIsNone(r.get("problem"))
+
+    def test_valid_state_has_no_problem(self):
+        self.assertIsNone(mmdecide.slot_decide(calm_state(NOW), inp(NOW, free_pct=80.0), settings()).get("problem"))
 
     def test_step_down_still_works(self):
         for bad in self.BAD:
@@ -790,14 +828,11 @@ class ClearWriteFails(RecoveryBase):
                 raise PermissionError(13, "Permission denied", path)
             return real(path, *a, **k)
 
-        with mock.patch.object(mmcore, "write_atomic", refuse), mock.patch.object(mmrecover.mmcore, "write_atomic",
-                                                                                  refuse):
-            try:
-                result = mmrecover.clear_safe("unit test", now=NOW + 5)
-            except OSError:
-                result = "raised"
-        self.assertTrue(result == "raised" or (isinstance(result, dict) and result.get("error"))
-                        or (isinstance(result, tuple) and result[-1]), "an error: %r" % (result,))
+        with mock.patch.object(mmcore, "write_atomic", refuse):
+            with self.assertRaises(mmcore.MMError) as cm:
+                mmrecover.clear_safe("unit test", now=NOW + 5)
+        self.assertEqual(cm.exception.code, "E_CLEAR")
+        self.assertEqual(str(cm.exception), CLEAR_WRITE_ERROR)
         self.assertIsNotNone(mmcore.safe_state(), "safe mode stays")
         self.assertEqual(json.load(open(starts)), [NOW - 60], "the crash history stays")
 
@@ -811,11 +846,24 @@ class ClearWriteFails(RecoveryBase):
         self.addCleanup(os.chmod, state, 0o700)
         rc, out, err = self.run_mm("on")
         os.chmod(state, 0o700)
-        self.assertNotEqual(rc, 0, out)
-        self.assertTrue(out and out[-1].startswith(CLEAR_WRITE_ERROR), out + [err])
+        self.assertEqual((rc, out), (2, [CLEAR_WRITE_ERROR]), err)
         self.assertIsNotNone(mmcore.safe_state(), "safe mode stays")
         self.assertEqual(open(starts).read(), before, "the crash history stays")
         self.assertFalse(os.path.exists(os.path.join(state, "self-check-clear.json")))
+
+
+class ClearWriteFailsWithOff(RecoveryBase):
+    def test_mm_on_failure_keeps_the_off_switch_too(self):
+        mmrecover.enter_safe("test", time.time())
+        mmcore.write_atomic(os.path.join(self.data, "off.json"), json.dumps({"off": True, "since": "x", "reason": "t"}))
+        state = os.path.join(self.data, "state")
+        os.chmod(state, 0o500)
+        self.addCleanup(os.chmod, state, 0o700)
+        rc, out, err = self.run_mm("on")
+        os.chmod(state, 0o700)
+        self.assertEqual((rc, out), (2, [CLEAR_WRITE_ERROR]), err)
+        self.assertIsNotNone(mmcore.off_state(), "a failed clear changes nothing: off stays")
+        self.assertIsNotNone(mmcore.safe_state())
 
 
 class SupervisorReview(SupervisorHour):
@@ -884,8 +932,30 @@ class SupervisorReview(SupervisorHour):
         alerts = [r for r in self.pushed() if r.get("name") == CONTROLLER_UNREADABLE]
         self.assertTrue(alerts, [r.get("name") for r in self.pushed()])
         self.assertEqual(alerts[0]["level"], "ATTENTION")
+        self.assertEqual(alerts[0]["text"], "state/controller.json unreadable (JSONDecodeError), kept as "
+                         "state/controller.json.unreadable; a fresh record starts, " + HOLD_NOTE)
         self.assertTrue(raises, self.decisions())
         self.assertGreaterEqual(raises[0], t0 + 15 * MIN, "one full hold from the detection time")
+
+    def test_the_fresh_record_and_a_non_object_file(self):
+        path = os.path.join(self.data, "state", "controller.json")
+        for text in ("[1, 2]", '"x"', "null"):
+            with self.subTest(text=text):
+                for f in (path, path + ".unreadable"):
+                    if os.path.exists(f):
+                        os.remove(f)
+                with open(path, "w") as fh:
+                    fh.write(text)
+                clock = {"t": NOW}
+                sup, _ = self.build(lambda now: 60.0, clock)
+                self.assertEqual(sup.state.get("controller", {}).get("raise_hold_since"), NOW)
+                self.assertEqual(open(path + ".unreadable").read(), text)
+
+    def test_a_missing_controller_json_is_a_fresh_start_without_hold(self):
+        clock = {"t": NOW}
+        sup, _ = self.build(lambda now: 60.0, clock)
+        self.assertNotIn("raise_hold_since", sup.state.get("controller") or {})
+        self.assertFalse(os.path.exists(os.path.join(self.data, "state", "controller.json.unreadable")))
 
     def test_an_unreadable_controller_json_still_steps_down(self):
         with open(os.path.join(self.data, "state", "controller.json"), "w") as f:
@@ -894,6 +964,18 @@ class SupervisorReview(SupervisorHour):
         sup, _ = self.build(lambda now: 49.0, clock)
         sup.tick()
         self.assertIn("WOULD slots 6 -> 5: AMBER", self.decisions())
+
+    def test_an_invalid_stored_time_gives_the_slot_state_alert(self):
+        mmcore.write_atomic(os.path.join(self.data, "state", "controller.json"),
+                            json.dumps({"controller": {"last_down": "broken", "last_change": NOW - 3600}}))
+        clock = {"t": NOW}
+        sup, _ = self.build(lambda now: 60.0, clock)
+        raises = self.tick_until(sup, clock, NOW + 20 * MIN)
+        alerts = [r for r in self.pushed() if r.get("name") == CONTROLLER_UNREADABLE]
+        self.assertTrue(alerts, [r.get("name") for r in self.pushed()])
+        self.assertEqual((alerts[0]["level"], alerts[0]["text"]),
+                         ("ATTENTION", "slot controller state invalid: last_down; " + HOLD_NOTE))
+        self.assertTrue(raises and raises[0] >= NOW + 15 * MIN, raises)
 
     def test_a_safe_mode_reduction_starts_the_hold(self):
         t0 = NOW
@@ -908,6 +990,7 @@ class SupervisorReview(SupervisorHour):
         self.assertTrue(raises, self.decisions())
         self.assertGreaterEqual(raises[0], t0 + 15 * MIN, "no raise for 15 minutes: %r" % raises)
         self.assertEqual(open(f).read().split()[0], str(5 + len(raises)))
+        self.assertIn("SET slots 8 -> 5: safe mode", self.decisions())
 
 
 del RecoveryBase
