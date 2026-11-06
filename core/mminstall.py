@@ -352,14 +352,20 @@ def check(profile_file=None, online=False):
 
 
 def own_files_problems(profile):
-    """E_PROFILE lines for own_files rules whose slot_dir or `files` names are not relative names inside the data
-    folder (mmdelete.own_name_problem; the delete pass refuses them on its own as well)."""
+    """E_PROFILE lines for own_files rules whose slot_dir, slot_pattern or `files` has the wrong type
+    (mmdelete.own_files_shape), or whose names are not relative names inside the data folder
+    (mmdelete.own_name_problem); the delete pass refuses them on its own as well."""
     import mmdelete
     out = []
     for r in (profile.get("deletes") or {}).get("rules", []):
         if not isinstance(r, dict) or r.get("type") != "own_files":
             continue
-        names = ([("slot_dir", r["slot_dir"])] if "slot_dir" in r else []) + [("files", n) for n in r.get("files") or []]
+        shape = mmdelete.own_files_shape(r)
+        for key in sorted(shape):
+            out.append("E_PROFILE deletes rule %s: %s; fix: correct its type (README.md, Profile)"
+                       % (mmcore.clean(str(r.get("id"))), shape[key]))
+        names = ([("slot_dir", r["slot_dir"])] if "slot_dir" in r and "slot_dir" not in shape else []) + \
+            [("files", n) for n in ([] if "files" in shape else r.get("files") or [])]
         for key, n in names:
             bad = mmdelete.own_name_problem(n)
             if bad:

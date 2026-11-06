@@ -263,7 +263,8 @@ cannot be read, a dangling link, invalid JSON, not an object, the flag missing o
 `"yes"` or `[]`) keeps automatic actions off. The ACTION alert `CONTROL_FILE_BROKEN:off.json` (or `:safe.json`)
 names the file and the problem, and `mm status` shows it (`broken=`; `--json`: `broken`, only then). The alert clears when the
 file is good again or removed. `mm on` removes both files without reading them; `mm restart --clear-safe` removes
-`safe.json` the same way. The supervisor never writes over a broken file.
+`safe.json` the same way. The supervisor never writes over a broken file. The launch gate is an automatic action
+too: a broken file opens it, as a real `mm off` or safe mode does, and `CONTROL_FILE_BROKEN` tells the owner.
 
 ## Self-recovery
 
@@ -351,7 +352,9 @@ An `own_files` rule (`slot_dir`, default `evidence`; `files`) names folders and 
 must be relative and stay inside the data folder (`state/decisions.log.1` is fine). An absolute or empty name, a
 `..` that leaves the data folder, a link at any part of the name below the data folder, or a real parent outside it
 is refused: one KEEP line in `deletes.log`, never a delete; the rule's other names still run, and a refused
-`slot_dir` gives no slot candidates. `mm check` shows the name problems as `E_PROFILE`.
+`slot_dir` gives no slot candidates. A value of the wrong type refuses all its names with one KEEP line: `files`
+that is not a list (one text is never read letter by letter), or `slot_dir` or `slot_pattern` that is not a text
+(then no slot candidates). `mm check` shows these problems as `E_PROFILE`.
 
 Clean-up list rule types (`deletes.cleanup`) are `git_worktrees`, `git_branches`, `stale_children` and `paths`.
 A `git_worktrees` rule may set `keep = ["journal-*"]`: case-sensitive `fnmatch` patterns on each tree folder's
