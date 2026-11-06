@@ -4,6 +4,9 @@ a broken safe.json or off.json writes no slot at all; a pid above 2**31-1 (or 0)
 user fields named "broken" or a non-text "reason" in a valid off.json / safe.json; `mm on` with a folder in place of a
 control file; `mm status` without status.json shows a broken file.
 
+Review rounds 2 and 3 (own_files): the data folder itself swapped, any ".." or "." part, NUL and unreadable names,
+a slot that holds or is a link, a slot gone during the listing, TOML dates in mm check, a surrogate in a logged name.
+
 Helpers come from test_live_risks (imported as a module, so its tests do not run twice). Every file lives in the test's
 temporary folder; no signal is sent to anything (SignalSpy)."""
 import json
@@ -603,6 +606,217 @@ class R9BadCharacters(lr.F2Base):
         self.assertEqual(lines, ['E_PROFILE deletes rule S1: files "bad\\u0000name" has a NUL character' + FIX],
                          r.stdout)
         self.assertEqual(r.returncode, 1)
+
+# ===================================================================================== review round 3 (own_files)
+# Decided as residual risk (no test expects a refusal): an opened parent folder moved outside during the delete, and a
+# file replaced after the age check.
+
+class _Override:
+    """A stand-in for os inside mmdelete: every name is the real one, except those in `calls`: {name: function(real,
+    *args, **kw)}."""
+
+    def __init__(self, real, calls):
+        self._real, self._calls = real, calls
+
+    def __getattr__(self, name):
+        attr = getattr(self._real, name)
+        if name not in self._calls:
+            return attr
+        return lambda *a, **kw: self._calls[name](attr, *a, **kw)
+
+
+class R10SlotLinks(lr.F2Base):
+    """An old slot that holds a link is refused with a KEEP line (nothing deleted, the target intact); a slot that is
+    itself a link gives a KEEP line too (never silent)."""
+
+    def test_slot_holding_a_link(self):
+        target = self.old_file(os.path.join(self.outside, "target.txt"), "outside target")
+        slot = os.path.join(self.data, "evidence", "01")
+        lr.make(slot)
+        os.symlink(target, os.path.join(slot, "link"))
+        lr.age(slot)
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": []}])
+        self.assertTrue(os.path.lexists(os.path.join(slot, "link")))
+        self.assertTrue(os.path.exists(os.path.join(slot, "a.o")))
+        self.assertEqual(open(target).read(), "outside target")
+        link = os.path.join(os.path.realpath(self.data), "evidence", "01", "link")
+        self.assertEqual([(x["verb"], x["guard"]) for x in self.recs(r)],
+                         [("KEEP", "refused: holds a link: %s" % link)], r.lines)
+
+    def test_slot_holding_a_link_deep_inside(self):
+        target = self.old_file(os.path.join(self.outside, "target.txt"), "outside target")
+        slot = os.path.join(self.data, "evidence", "01")
+        lr.make(os.path.join(slot, "sub", "deeper"))
+        os.symlink(target, os.path.join(slot, "sub", "deeper", "link"))
+        lr.age(slot)
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": []}])
+        self.assertTrue(os.path.lexists(os.path.join(slot, "sub", "deeper", "link")))
+        self.assertEqual(open(target).read(), "outside target")
+        link = os.path.join(os.path.realpath(self.data), "evidence", "01", "sub", "deeper", "link")
+        self.assertEqual([(x["verb"], x["guard"]) for x in self.recs(r)],
+                         [("KEEP", "refused: holds a link: %s" % link)], r.lines)
+
+    def test_slot_that_is_a_link(self):
+        outside_slot = lr.make(os.path.join(self.outside, "slot"))
+        os.makedirs(os.path.join(self.data, "evidence"))
+        os.symlink(outside_slot, os.path.join(self.data, "evidence", "02"))
+        good = lr.make(os.path.join(self.data, "evidence", "03"))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": []}])
+        self.assertTrue(os.path.exists(os.path.join(outside_slot, "a.o")))
+        self.assertFalse(os.path.lexists(good), "the other slot still runs: %s" % r.lines)
+        recs = {os.path.basename(x["path"]): (x["verb"], x["guard"]) for x in self.recs(r)}
+        self.assertEqual(recs.get("02"), ("KEEP", "refused: slot is a link"), r.lines)
+        self.assertEqual(recs.get("03", ("?",))[0], "DELETE")
+
+    def test_control_plain_slot_deletes(self):
+        slot = lr.make(os.path.join(self.data, "evidence", "01"))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": []}])
+        self.assertFalse(os.path.lexists(slot))
+        self.assertEqual([x["verb"] for x in self.recs(r)], ["DELETE"])
+
+
+class R11SlotGoneInTheListing(lr.F2Base):
+    """Slot 01 disappears between the listing and its stat: the other old slots (02, 03) are still deleted."""
+
+    def test_a_vanished_slot_does_not_stop_the_others(self):
+        import mmdelete
+        ev = os.path.join(self.data, "evidence")
+        for n in ("01", "02", "03"):
+            lr.make(os.path.join(ev, n))
+        state = {"gone": False}
+
+        def stat_hook(real, path, *a, **kw):
+            if path == "01" and kw.get("dir_fd") is not None and not state["gone"]:
+                state["gone"] = True
+                shutil.rmtree(os.path.join(ev, "01"))
+            return real(path, *a, **kw)
+        real_os = mmdelete.os
+        mmdelete.os = _Override(real_os, {"stat": stat_hook, "lstat": stat_hook})
+        self.addCleanup(setattr, mmdelete, "os", real_os)
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": []}])
+        self.assertTrue(state["gone"], "the hook ran: %s" % r.lines)
+        self.assertFalse(os.path.lexists(os.path.join(ev, "02")), r.lines)
+        self.assertFalse(os.path.lexists(os.path.join(ev, "03")), r.lines)
+        self.assertEqual(sorted((os.path.basename(x["path"]), x["verb"]) for x in self.recs(r)),
+                         [("02", "DELETE"), ("03", "DELETE")], "the vanished slot is skipped silently: %s" % r.lines)
+
+    def test_a_slot_that_cannot_be_checked_gives_a_keep_and_the_others_run(self):
+        import mmdelete
+        ev = os.path.join(self.data, "evidence")
+        for n in ("01", "02", "03"):
+            lr.make(os.path.join(ev, n))
+        state = {"done": False}
+
+        def stat_hook(real, path, *a, **kw):
+            if path == "02" and kw.get("dir_fd") is not None and not state["done"]:
+                state["done"] = True
+                raise PermissionError(13, "Permission denied")
+            return real(path, *a, **kw)
+        real_os = mmdelete.os
+        mmdelete.os = _Override(real_os, {"stat": stat_hook, "lstat": stat_hook})
+        self.addCleanup(setattr, mmdelete, "os", real_os)
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": []}])
+        self.assertTrue(state["done"])
+        got = sorted((os.path.basename(x["path"]), x["verb"], x["guard"]) for x in self.recs(r))
+        self.assertEqual(got, [("01", "DELETE", "pass: own file, age>7d"),
+                               ("02", "KEEP", "refused: slot cannot be checked (PermissionError)"),
+                               ("03", "DELETE", "pass: own file, age>7d")], r.lines)
+        self.assertTrue(os.path.exists(os.path.join(ev, "02")))
+
+
+class R12TomlValues(lr.F2Base):
+    """mm check with TOML dates and times in an own_files rule: no crash, one E_PROFILE per bad value."""
+
+    def test_dates_and_times(self):
+        prof = os.path.join(self.root, "profile.toml")
+        with open(mmtest.PROFILE) as f:
+            text = f.read()
+        with open(prof, "w") as f:
+            f.write(text + '\n[[deletes.rules]]\nid = "S1"\ntype = "own_files"\n'
+                    'files = [1979-05-27, 07:32:00, 1979-05-27T07:32:00Z, 1979-05-27T07:32:00, [1979-05-27], '
+                    '"good.log"]\n')
+        self.queue_dir()
+        r = self.mm("check", "--profile", prof)
+        self.assertNotIn("Traceback", r.stderr)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("E_PROFILE deletes rule S1: ")]
+        self.assertEqual(lines, ["E_PROFILE deletes rule S1: files %s is not a text name%s" % (v, FIX) for v in (
+            '"datetime.date(1979, 5, 27)"', '"datetime.time(7, 32)"',
+            '"datetime.datetime(1979, 5, 27, 7, 32, tzinfo=datetime.timezone.utc)"',
+            '"datetime.datetime(1979, 5, 27, 7, 32)"', '["datetime.date(1979, 5, 27)"]')], r.stdout + r.stderr)
+        self.assertEqual(r.returncode, 1)
+
+    def test_date_slot_dir_and_pattern(self):
+        prof = os.path.join(self.root, "profile.toml")
+        with open(mmtest.PROFILE) as f:
+            text = f.read()
+        with open(prof, "w") as f:
+            f.write(text + '\n[[deletes.rules]]\nid = "S1"\ntype = "own_files"\nslot_dir = 1979-05-27\n'
+                    'slot_pattern = 07:32:00\nfiles = []\n')
+        self.queue_dir()
+        r = self.mm("check", "--profile", prof)
+        self.assertNotIn("Traceback", r.stderr)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("E_PROFILE deletes rule S1: ")]
+        self.assertEqual(lines, ["E_PROFILE deletes rule S1: slot_dir is not a name; fix: correct its type (README.md, "
+                                 "Profile)", "E_PROFILE deletes rule S1: slot_pattern is not a text pattern; fix: "
+                                 "correct its type (README.md, Profile)"], r.stdout + r.stderr)
+        self.assertEqual(r.returncode, 1)
+
+    def test_delete_pass_with_a_date_name(self):
+        import datetime
+        good = self.old_file(os.path.join(self.data, "good.log"))
+        r = self.run_rules([{"id": "S1", "type": "own_files",
+                             "files": [datetime.date(1979, 5, 27), datetime.time(7, 32), [datetime.date(1979, 5, 27)],
+                                       "good.log"]}])
+        self.assertFalse(os.path.lexists(good), r.lines)
+        self.assertFalse([l for l in r.lines if "rule failed" in l], r.lines)
+        self.assertEqual(sorted(x["verb"] for x in self.recs(r)), ["DELETE", "KEEP", "KEEP", "KEEP"], r.lines)
+
+
+class R13SurrogateName(lr.F2Base):
+    """A slot name with a lone surrogate (Linux gives one for a 0xff byte; here os.listdir inside mmdelete adds it,
+    and its stat is that of a real old folder): the log line is written (escaped, valid UTF-8), no
+    UnicodeEncodeError, and the later candidates still run."""
+    NAME = "0\udcff"
+
+    def setUp(self):
+        super().setUp()
+        import mmdelete
+        self.ev = os.path.join(self.data, "evidence")
+        self.slot = lr.make(os.path.join(self.ev, "01"))
+        self.fake_like = lr.make(os.path.join(self.root, "fake-like"))
+        self.good = self.old_file(os.path.join(self.data, "old.log"))
+        name = self.NAME
+        fake_st = os.stat(self.fake_like)
+
+        def listdir(real, path=".", *a, **kw):
+            out = real(path, *a, **kw)
+            return out + [name] if "01" in out else out
+
+        def stat_hook(real, path, *a, **kw):
+            if path == name:
+                return fake_st
+            return real(path, *a, **kw)
+        real_os = mmdelete.os
+        mmdelete.os = _Override(real_os, {"listdir": listdir, "stat": stat_hook, "lstat": stat_hook})
+        self.addCleanup(setattr, mmdelete, "os", real_os)
+        self.log_file = os.path.join(self.data, "deletes.log")
+
+    def test_the_log_line_is_written_and_the_rule_goes_on(self):
+        r = self.run_rules([{"id": "S1", "type": "own_files", "slot_pattern": "0*", "files": ["old.log"]}])
+        self.assertFalse([l for l in r.lines if "rule failed" in l], r.lines)
+        self.assertFalse(os.path.lexists(self.slot), "slot 01 still deleted: %s" % r.lines)
+        self.assertFalse(os.path.lexists(self.good), "old.log (after the odd name) still deleted: %s" % r.lines)
+        with open(self.log_file, "rb") as f:
+            text = f.read().decode("utf-8")  # strict: the file is valid UTF-8
+        odd = [l for l in text.splitlines() if "evidence/0" in l and "evidence/01" not in l]
+        self.assertEqual(len(odd), 1, text)
+        self.assertNotIn("\udcff", odd[0])
+        self.assertIn("evidence/0\\udcff", odd[0], "escaped with a backslash")
+
+    def test_append_line_escapes_only_what_utf8_cannot_hold(self):
+        f = os.path.join(self.root, "x.log")
+        mmcore.append_line(f, "a\udcffb \u00e9 z")
+        self.assertEqual(lr.raw(f), "a\\udcffb \u00e9 z\n".encode("utf-8"))
 
 if __name__ == "__main__":
     unittest.main()
