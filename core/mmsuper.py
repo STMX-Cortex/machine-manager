@@ -28,6 +28,7 @@ import mmdecide
 import mmdelete
 import mmevidence
 import mmread
+import mmready
 import mmrecover
 
 KERNEL_PREDICATE = ('sender == "kernel" AND eventMessage CONTAINS "memorystatus" AND '
@@ -38,6 +39,7 @@ EXIT_RESTART = 75  # a self-check restart: launchd starts the supervisor again (
 STOP_DEADLINE_S = 8  # without settings: s from a SIGTERM to the forced end (under the plist's ExitTimeOut)
 HELD_REBOOT_S = 3600
 HELD_SELF_S = 1800
+READY_KEY_PREFIX = "READY_STALE:"  # every READY_WORK_STALE key (mmalerts._ready_work)
 
 
 class KernelStream:
@@ -527,6 +529,10 @@ class Supervisor:
         self.reading_problems = []
         self.ping = Worker(mmrecover.ping)
         self.facts = machine_facts()  # static: read once (status.json `facts`, mm resources)
+        # the IDLE_WITH_WORK timer: its start outlives a restart (mmready.load_since; an unreadable record is kept)
+        self.ready_since, self.ready_error = mmready.load_since()
+        self.ready_saved = self.ready_since  # the record's value (None: missing, or not read)
+        self.ready_last = None  # the last ready_work part (kept when a read fails unexpectedly)
         # every start: no process stays stopped by an earlier run (a crash or a kill during a pause)
         legacy = self.state.pop("paused", None)
         if mmrecover.read_paused() or legacy:
@@ -818,6 +824,11 @@ class Supervisor:
         if self.queue:
             self._control(now, s, mac_state, reasons, q, events, writes_on, safe)
 
+        # ready work: free slots (this tick's would - busy) while owners' ready units wait
+        rw = self._ready_work(now, s, q)
+        if rw is not None:
+            snap["ready_work"] = rw
+
         # alerts
         if self.settings.problem:
             store.raise_("SETTINGS_BAD", "SETTINGS_BAD", "ACTION", "settings invalid; the last good values stay: "
@@ -828,6 +839,7 @@ class Supervisor:
         for c in conds:
             store.raise_(c["key"], c["name"], c["level"], c["text"], value=c["value"], band=c["band"], worse=c["worse"],
                          command=c["command"], investigate=c["investigate"])
+        self._ready_clear(store, active_before, now)
         store.finish(scope_prefixes=None)
         for rec in store.pushed:
             if rec["level"] == "ACTION" and self.delivery:
@@ -846,7 +858,7 @@ class Supervisor:
         # files
         active = (mmcore.read_json(store.state_file, {}) or {}).get("active") or {}
         self._status(now, mac_state, reasons, q, sample, "ok", active, s, observe, off, safe,
-                     idle_minutes=snap.get("idle_minutes"))
+                     idle_minutes=snap.get("idle_minutes"), ready_work=snap.get("ready_work"))
         for pool in self.pools:
             read = self.pool_reads.get(pool.id) if pool.scoped else gh
             self._pool_status(now, s, read, active, pool)
@@ -856,6 +868,58 @@ class Supervisor:
             mmcore.write_atomic(mmcore.path("state", "counts.json"), json.dumps(self.counts, sort_keys=True))
         self.state["offsets"] = {"history": self.hist.offset, "kills": self.kills.offset, "events": self.events.offset}
         self.save_state()
+
+    def _ready_work(self, now, s, q):
+        """The snapshot's ready_work part (_ready_read), or None when the feature is off. Never raises out of the
+        tick: an unexpected error is logged and the last part stays (so its alerts neither flap nor clear)."""
+        try:
+            self.ready_last = self._ready_read(now, s, q)
+        except Exception as e:  # the feature is a reading; it must never stop a tick
+            self._ready_log(now, "ready-work %r" % (e,))
+        return self.ready_last
+
+    @staticmethod
+    def _ready_log(now, text):
+        """One errors.log line for the ready-work feature, best effort: a failed write (a full disk) is dropped, never
+        raised out of the tick."""
+        try:
+            mmcore.append_line(mmcore.path("state", "errors.log"), mmcore.mask("%s %s" % (mmcore.now_local(now), text)))
+        except Exception:  # noqa: BLE001 (the log is help only)
+            pass
+
+    def _ready_read(self, now, s, q):
+        """mmready.scan, mmdecide.ready_free and ready_since; None when the profile names no ready_work_dir or nothing
+        is at it. A reading only: the same in every mode. Before every write of the timer record it is read again: a
+        record that exists but does not read is kept unchanged (READY_STALE:_state), and the timer runs in memory."""
+        found = mmready.scan(mmready.folder(self.p), now, s["ready_work.stale_minutes"],
+                             self.p.get("ready_work_owners") or ())
+        free = mmdecide.ready_free(self.state.get("virtual_slots"), len((q or {}).get("busy") or []))
+        ready = sum(o["units"] for o in (found or {}).get("owners") or [] if o["state"] in ("ok", "stale"))
+        self.ready_since = mmdecide.ready_since(self.ready_since, free, ready, now) if found else None
+        if self.ready_error is not None or self.ready_since != self.ready_saved:
+            saved, self.ready_error = mmready.load_since()
+            if self.ready_error is None:
+                self.ready_saved = saved
+                if self.ready_since != saved:
+                    try:
+                        mmready.save_since(self.ready_since)
+                        self.ready_saved = self.ready_since
+                    except OSError as e:  # the timer still runs in memory; the next tick tries again
+                        self._ready_log(now, "ready-work state %r" % (e,))
+        if not found:
+            return None
+        return dict(found, free=free, ready=ready, state_error=self.ready_error,
+                    idle_minutes=None if self.ready_since is None else (now - self.ready_since) / 60)
+
+    def _ready_clear(self, store, active_before, now):
+        """IDLE_WITH_WORK and READY_WORK_STALE clear on the first tick their condition is false (not after
+        repeat.clear_after_minutes, like the other alerts): a free slot is taken, or a file is mended, at once."""
+        try:
+            for key in sorted(active_before):
+                if (key == "IDLE_WITH_WORK" or key.startswith(READY_KEY_PREFIX)) and key not in store.seen:
+                    store.clear(key)
+        except Exception as e:  # never stop a tick; the general clear rule still clears them later
+            self._ready_log(now, "ready-work clear %r" % (e,))
 
     def _recovery_conditions(self, now, s, safe):
         """Safe mode, held events (a reboot, a self restart), the watchdog's stamp and the dead-man ping."""
@@ -1150,10 +1214,11 @@ class Supervisor:
         self.hold(key, "PAUSE_MAX", "ATTENTION", text, now + HELD_SELF_S, command="mm status")
 
     def _status(self, now, mac_state, reasons, q, sample, note, active=None, s=None, observe=None, off=None, safe=None,
-                idle_minutes=None):
+                idle_minutes=None, ready_work=None):
         """status.json: the machine's status record and the heartbeat, every tick (schemas/status.schema.json).
         Optional parts for mm resources: facts (static, read at start), calls (distinct queue calls, as SLOT_CPU
-        counts them), idle_minutes (the IDLE_ROOM span; None when not idle), readings.cpu_pct."""
+        counts them), idle_minutes (the IDLE_ROOM span; None when not idle), readings.cpu_pct, ready_work (only when
+        the profile's ready_work_dir is on: mmready.status_part)."""
         gate = self.state.get("gate", {})
         sample = sample or {}
         counts = {"ACTION": 0, "ATTENTION": 0, "INFO": 0}
@@ -1174,6 +1239,8 @@ class Supervisor:
             "calls": len(mmalerts.queue_calls(q.get("busy") or [])) if isinstance(q, dict) else None,
             "idle_minutes": None if idle_minutes is None else round(idle_minutes, 1),
             "heartbeat": {"pid": os.getpid(), "tick": self.tick_n, "note": note}}, mid=self.mid)
+        if ready_work is not None:
+            rec["ready_work"] = mmready.status_part(ready_work)
         mmcore.write_atomic(mmcore.path("status.json"), json.dumps(rec, sort_keys=True))
 
     def _pool_status(self, now, s, gh, active, pool=None):

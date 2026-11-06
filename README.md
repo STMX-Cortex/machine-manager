@@ -159,6 +159,46 @@ Outside text (runner names and the like) shows cleaned and quoted as in "Agent-w
 machine status is fresh, 3 when status.json is missing or not fresh (the rows are still printed), 2 on a usage error. A
 supervisor that runs code older than `resources.json` writes none: until it restarts, only the machine row shows.
 
+## Ready work
+
+The machine should be in full use while work for it waits. The profile's `ready_work_dir` names a folder where each
+owner of queued work keeps one file, `<owner>.json`: `{"owner": "alpha", "updated": "2026-01-01T10:00:00+00:00",
+"ready_units": 120, "next": "build the docs"}`. The supervisor reads the folder every tick; it never writes there.
+
+1. Off: `ready_work_dir` is absent or `""`, or it is an absolute path with nothing at it while `ready_work_owners` is
+   empty. No alert, no error. A relative path is always `READY_WORK_STALE:_folder` ("is not an absolute path"); with
+   listed owners a missing folder is too ("does not exist"), and then every listed owner is missing. The path must be
+   absolute, and on a local disk: a read from a stalled network or FUSE file system blocks, and nothing can stop it.
+2. Only direct children named `[A-Za-z0-9][A-Za-z0-9._-]*.json` (at most 64 characters) count; other names are
+   ignored. No link is followed. `ready_work_dir` itself (normalized, so a trailing `/` or `/.` changes nothing) must
+   be a folder, not a link to one; it is opened once, and each file is opened by name in it, so under such a name a
+   link, a folder, a FIFO or anything but a regular file is a bad file. The listing looks at 4096 entries at most;
+   of the names not in `ready_work_owners`, the first 64 in sorted order are read.
+3. A file is bad when it cannot be read, is over 64 KiB, is not strict JSON (no duplicate keys, NaN or Infinity),
+   or `ready_units` is not a whole number from 0 to 10^9, `updated` is not an ISO-8601 time (no zone = local
+   time) or is over 5 minutes ahead, or `next` is not a text. A bad file's units count as 0. `owner` missing: the
+   file name.
+4. Free slots are `would - busy` (at least 0), the numbers `mm status` prints; ready units are the sum over the
+   files that are not bad. When both stay above 0 for longer than `ready_work.idle_minutes` (default 15), the
+   supervisor raises `IDLE_WITH_WORK` (ACTION). It clears on the next tick when no slot is free or no unit waits.
+5. The timer's start is kept in the data folder's `state/ready-work.json`, so a restart does not reset it. The record is
+   read again before every write; one that exists but does not read is kept (never overwritten):
+   `READY_WORK_STALE:_state`, and the timer runs in memory.
+6. `READY_WORK_STALE` (ATTENTION, one alert per file, id `READY_WORK_STALE:<file name without .json>`): a bad file,
+   or a file whose `updated` is older than `ready_work.stale_minutes` (default 90; its units still count). The
+   folder's own ids start with `_`: `_folder` (the path is not a folder, or is a link), `_list` (it cannot be opened
+   or listed), `_more` (over 64 files, or over 4096 entries: the listing stopped), `_state`. Each clears on the next tick its cause is gone.
+7. `ready_work_owners` (optional; default `[]`): up to 64 unique names, each a name rule 2 accepts without `.json`
+   (anything else is `E_PROFILE`). Each listed owner's `<name>.json` is opened by name, never through the listing or
+   its caps; when it is missing, `READY_WORK_STALE:<name>` (ATTENTION; 0 units) until the file is back and good. Files not listed
+   count as before.
+8. Readings only: the alerts are raised in every mode (act, observe, off, safe, dry run), and nothing acts on them.
+   Phone delivery follows `[notify]` `alert_levels` (NOTIFY.md); nothing rings unless the profile says so.
+
+`mm status --json` (and status.json) then has `ready_work`: `{"free", "ready", "idle_minutes", "owners": [{"owner",
+"file", "units", "age_min", "state": "ok"|"stale"|"bad"|"missing"}]}` (`schemas/status.schema.json`). `mm serve`'s
+`/status.json` does not publish it.
+
 ## Machines
 
 A profile can list remote machines whose own `mm` supervisors keep all safety decisions local. Give each remote
@@ -279,7 +319,8 @@ every one of these labels, as `runs-on` matches; the list needs admin access to 
 shows only as the `UNKNOWN` runner record `id=runners`, never a read error or an alert), `delivery` (adapter `claude-code-hook`), `trim` (the guarded cache trim), `deletes`
 (`rules`, `cleanup`, `forbidden_parts`, `protected_roots`), `recovery` (`expected_jobs`: `{name, match}` regular
 expressions over process command lines, checked after a Mac reboot), `text_line_max` (default 4096, from 256 to
-1048576: the longest line any pattern sees, "Agent-written files", item 7), `notify` (phone notifications, off unless
+1048576: the longest line any pattern sees, "Agent-written files", item 7), `ready_work_dir` (default `""` = off: the
+folder of ready-work files, "Ready work"), `ready_work_owners` (default `[]`: owners whose file must be there), `notify` (phone notifications, off unless
 `enabled = true`; [NOTIFY.md](NOTIFY.md)). Placeholders: `{data}`, `{user_tmp}`,
 `{claude_tmp}`, `~`. The schema is `schemas/profile.schema.json`.
 
@@ -427,6 +468,10 @@ a choice (`mode.slot_writes`) shows as its bare word; values are as written (`sl
 last good values, else the defaults), and the exit code is 1. `--json` gives one object, its keys sorted:
 `{"in_force": "current"|"last_good"|"none", "problem", "settings": {key: {"value", "default", "differs"}}}`. An
 unknown key or section is one `E_USAGE` line (exit 2).
+
+`ready_work.idle_minutes` (default 15, range 5-120) is how long free slots and ready work must last together before
+`IDLE_WITH_WORK`; `ready_work.stale_minutes` (default 90, range 15-720) is the age at which a ready-work file is
+stale (`READY_WORK_STALE`). Authority: the owner. See "Ready work".
 
 `deletes.cleanup_list_hours` controls how often the clean-up list is refreshed (default 24 h).
 `deletes.cleanup_attention_gb` makes `CLEANUP_LIST` ATTENTION when candidate bytes reach that many GB
@@ -605,7 +650,7 @@ that is not the queue's launcher, or by a read-only lock; `PAUSE_MAX` a paused c
 a link; `DELETES_FAILED` a delete rule, the cleanup list or the whole deletes pass failed; `QUEUE_FILE_UNREADABLE`
 queue slot or ticket files cannot be opened or read;
 `LONG_CALL` a call runs long; `REFUSED` the queue refused a call; `SLOT_CPU` a slot uses much CPU; `IDLE_ROOM` the
-queue is idle; `FSEV` the file-event daemon is large; `POWER` on battery; `RESUMED` the machine slept;
+queue is idle; `IDLE_WITH_WORK` free slots while ready work waits; `READY_WORK_STALE` a ready-work file is old or bad; `FSEV` the file-event daemon is large; `POWER` on battery; `RESUMED` the machine slept;
 `RECIPIENT_WAIT` the recipient waits on one tool call; `JOB_DEAD` a listed job died without a result;
 `SOURCE_STALE` a reading source is old; `READINGS_MISMATCH` fast readings disagree with the macOS commands;
 `OFF` the off switch is on; `SETTINGS_BAD` the settings file is invalid; `SUPERVISOR_ERROR` ticks fail;
