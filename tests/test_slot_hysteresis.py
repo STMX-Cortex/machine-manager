@@ -179,11 +179,20 @@ class RaiseMargin(unittest.TestCase):
         self.assertEqual(self.decide(45.0, s)["slots"], 6)
 
     def test_own_margin_value(self):
-        for margin, edge in ((0, 50.0), (1, 51.0), (10, 60.0), (50, 100.0)):
+        for margin, edge in ((1, 51.0), (10, 60.0), (50, 100.0)):
             with self.subTest(margin=margin):
                 s = settings(**{MARGIN: margin})
                 self.assertEqual(self.decide(edge, s)["slots"], 6)
                 self.assertIsNone(self.decide(edge - 0.1, s)["slots"])
+
+    def test_margin_0_has_no_free_check_of_its_own(self):
+        """Margin 0 = today's behaviour: slot_decide does not check free memory (classify alone decides GREEN), so a
+        GREEN input raises at any free value, also under slots.amber_free_pct."""
+        s = settings(**{MARGIN: 0})
+        for free in (49.9, 50.0, 20.0, None):
+            with self.subTest(free=free):
+                r = self.decide(free, s)
+                self.assertEqual((r["slots"], r["held"]), (6, None))
 
     def test_margin_0_is_the_old_rule(self):
         s = settings(**{MARGIN: 0, HOLD: 0})
@@ -225,6 +234,10 @@ class RaiseMargin(unittest.TestCase):
         self.assertEqual((r["slots"], r["held"]), (None, "raise held: free 52% < 55% (amber 50% + margin 5%)"))
         s = settings(**{MARGIN: 10})
         self.assertEqual(self.decide(51.0, s)["held"], "raise held: free 51% < 60% (amber 50% + margin 10%)")
+        self.assertEqual(self.decide(54.6)["held"], "raise held: free 54.6% < 55% (amber 50% + margin 5%)",
+                         "%g: a fraction is shown, never rounded up to the border")
+        s = settings(**{MARGIN: 2.5, "slots.amber_free_pct": 47.5, "slots.red_free_pct": 30})
+        self.assertEqual(self.decide(49.5, s)["held"], "raise held: free 49.5% < 50% (amber 47.5% + margin 2.5%)")
 
     def test_held_is_none_on_a_raise_and_when_an_old_rule_refuses(self):
         self.assertIsNone(self.decide(80.0)["held"])
@@ -593,8 +606,8 @@ class ClearRecord(RecoveryBase):
         mmcore.write_atomic(self.clear_file(), json.dumps({"cleared_at": now - 600, "why": "mm on"}))
         clock = {"t": now}
         sup = self.sup(clock=lambda: clock["t"])
-        sup.state["slot_changes"] = [now - 300 - k for k in range(13)]
-        self.assertEqual(sup.check_self(0.1, 0)["action"], "ok", "a good record: the old changes are before it")
+        sup.state["slot_changes"] = [now - 900 - k for k in range(13)]
+        self.assertEqual(sup.check_self(0.1, 0)["action"], "ok", "a good record: the 13 changes are before it")
         with open(self.clear_file(), "w") as f:
             f.write("{broken")
         for _ in range(3):
@@ -687,6 +700,214 @@ class SupervisorHour(RecoveryBase):
         self.assertIn("WOULD slots 6 -> 5: AMBER", log[0])
         self.assertIn("WOULD slots 5 -> 6: GREEN", log[1])
         self.assertEqual(sorted(sup.state["slot_changes"]), [NOW, NOW + 15 * 60])
+
+
+# ------------------------------------------------------------------------------------------- review round 1
+# Exact texts from the coder's "review fixes done" message.
+CONTROLLER_UNREADABLE = "CONTROLLER_STATE_UNREADABLE"  # bind: the ATTENTION alert name
+CLEAR_WRITE_ERROR = "E_"                                # bind: the `mm on` error line start
+
+
+class BadLastDown(unittest.TestCase):
+    """An invalid last_down in the controller state: no crash, no raise, a step down still works."""
+    BAD = ("broken", float("nan"), float("inf"), NOW + 10 ** 9, True, False, [NOW], {"t": NOW}, -float("inf"))
+
+    def test_no_crash_and_no_raise(self):
+        for bad in self.BAD:
+            with self.subTest(last_down=bad):
+                st = dict(calm_state(NOW), last_down=bad)
+                r = mmdecide.slot_decide(st, inp(NOW, free_pct=80.0), settings())
+                self.assertIsNone(r["slots"], r)
+
+    def test_step_down_still_works(self):
+        for bad in self.BAD:
+            with self.subTest(last_down=bad):
+                st = dict(calm_state(NOW), last_down=bad)
+                r = mmdecide.slot_decide(st, inp(NOW, "AMBER", 49.0, slots=6), settings())
+                self.assertEqual(r["slots"], 5, r)
+                self.assertEqual(r["state"]["last_down"], NOW, "a valid time replaces the bad value")
+
+    def test_red_still_goes_to_the_floor(self):
+        for bad in self.BAD:
+            with self.subTest(last_down=bad):
+                st = dict(calm_state(NOW), last_down=bad)
+                self.assertEqual(mmdecide.slot_decide(st, inp(NOW, "RED", 30.0, slots=7), settings())["slots"], 3)
+
+
+class ClockBack(unittest.TestCase):
+    def test_a_clock_that_goes_back_gives_no_crash_and_no_early_raise(self):
+        s = settings()
+        r = mmdecide.slot_decide(calm_state(NOW), inp(NOW, "AMBER", 49.0, slots=6), s)
+        self.assertEqual(r["slots"], 5)
+        st = r["state"]
+        back = NOW - 3600  # the clock goes back one hour after the step down
+        for k in range(15):
+            r = mmdecide.slot_decide(st, inp(back + k * MIN, free_pct=80.0, slots=5), s)
+            st = r["state"]
+            self.assertIsNone(r["slots"], "minute %d after the clock went back: %r" % (k, r))
+
+    def test_a_step_down_still_works_after_the_clock_goes_back(self):
+        s = settings()
+        st = dict(calm_state(NOW), last_down=NOW, last_change=NOW)
+        r = mmdecide.slot_decide(st, inp(NOW - 3600, "AMBER", 49.0, slots=6), s)
+        self.assertEqual(r["slots"], 5, "an AMBER step down is never blocked by a last_down in the future")
+
+
+class ReadClearLimits(RecoveryBase):
+    def clear_file(self):
+        return os.path.join(self.data, "state", "self-check-clear.json")
+
+    def test_huge_and_deep_records_are_a_problem_not_an_exception(self):
+        texts = ['{"cleared_at": %d}' % 10 ** 400, "[" * 1500 + "]" * 1500,
+                 '{"cleared_at": ' + "[" * 1500 + "]" * 1500 + "}", '{"cleared_at": 1e400}']
+        for text in texts:
+            with self.subTest(text=text[:30]):
+                with open(self.clear_file(), "w") as f:
+                    f.write(text)
+                cleared, problem = mmrecover.read_clear()
+                self.assertIsNone(cleared)
+                self.assertTrue(problem)
+                self.assertEqual(open(self.clear_file()).read(), text, "the file is kept")
+
+    def test_the_supervisor_counts_every_change_with_such_a_record(self):
+        with open(self.clear_file(), "w") as f:
+            f.write("[" * 1500 + "]" * 1500)
+        now = time.time()
+        sup = self.sup(clock=lambda: now)
+        sup.state["slot_changes"] = [now - 60 * k for k in range(13)]
+        self.assertEqual(sup.check_self(0.1, 0)["action"], "safe")
+
+
+class ClearWriteFails(RecoveryBase):
+    def test_clear_safe_reports_the_error_and_keeps_safe_mode(self):
+        mmrecover.enter_safe("test", NOW)
+        starts = os.path.join(self.data, "state", "starts.json")
+        mmcore.write_atomic(starts, json.dumps([NOW - 60]))
+        real = mmcore.write_atomic
+
+        def refuse(path, *a, **k):
+            if os.path.basename(path).startswith("self-check-clear"):
+                raise PermissionError(13, "Permission denied", path)
+            return real(path, *a, **k)
+
+        with mock.patch.object(mmcore, "write_atomic", refuse), mock.patch.object(mmrecover.mmcore, "write_atomic",
+                                                                                  refuse):
+            try:
+                result = mmrecover.clear_safe("unit test", now=NOW + 5)
+            except OSError:
+                result = "raised"
+        self.assertTrue(result == "raised" or (isinstance(result, dict) and result.get("error"))
+                        or (isinstance(result, tuple) and result[-1]), "an error: %r" % (result,))
+        self.assertIsNotNone(mmcore.safe_state(), "safe mode stays")
+        self.assertEqual(json.load(open(starts)), [NOW - 60], "the crash history stays")
+
+    def test_mm_on_reports_the_error_and_keeps_safe_mode(self):
+        mmrecover.enter_safe("test", time.time())
+        state = os.path.join(self.data, "state")
+        starts = os.path.join(state, "starts.json")
+        mmcore.write_atomic(starts, json.dumps([time.time() - 60]))
+        before = open(starts).read()
+        os.chmod(state, 0o500)
+        self.addCleanup(os.chmod, state, 0o700)
+        rc, out, err = self.run_mm("on")
+        os.chmod(state, 0o700)
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(out and out[-1].startswith(CLEAR_WRITE_ERROR), out + [err])
+        self.assertIsNotNone(mmcore.safe_state(), "safe mode stays")
+        self.assertEqual(open(starts).read(), before, "the crash history stays")
+        self.assertFalse(os.path.exists(os.path.join(state, "self-check-clear.json")))
+
+
+class SupervisorReview(SupervisorHour):
+    """The supervisor across a restart, with a bad controller.json, and after a safe-mode reduction."""
+
+    def build(self, free_at, clock, mode="off", slots=6, **over):
+        f = os.path.join(self.root, "test-slots")
+        extra = {"mode.observe": False, "mode.slot_writes": "test", "mode.slots_file": f} if mode == "test" else {}
+        self.write_settings(**dict({"slots.cores": 10, "slots.floor": 3, "slots.ceiling": 10,
+                                    "slots.green_free_pct": 50, "slots.raise_green_minutes": 5}, **extra, **over))
+        mmcore.write_slots(os.path.join(self.q, "slots"), slots)
+        mmcore.write_slots(f, slots)
+
+        def sampler(now, ticks):
+            d, _ = sampler_of(free_pct=free_at(now), load1=2, load5=2)(now, ticks)
+            return d, ticks
+
+        sup = self.sup(sampler, clock=lambda: clock["t"])
+        read = sup.queue.read
+        busy = [{"slot": ".slot.%d" % i, "mode": "S", "pid": None, "label": "S fixture %d" % i, "since": NOW - 60,
+                 "kind": None} for i in range(10)]
+        tickets = [{"name": "t%d" % i, "mode": "S", "age_s": 60, "label": "S waiting %d" % i, "kind": None}
+                   for i in range(3)]
+        sup.queue.read = lambda now: dict(read(now), busy=list(busy), tickets=list(tickets))
+        return sup, f
+
+    def tick_until(self, sup, clock, end, step=60):
+        """Ticks every `step` seconds up to `end`; returns the times with a raise in the decisions log."""
+        raises = []
+        while clock["t"] <= end:
+            n = self.decisions().count(": GREEN")
+            sup.tick()
+            if self.decisions().count(": GREEN") > n:
+                raises.append(clock["t"])
+            clock["t"] += step
+        return raises
+
+    def test_last_down_survives_a_restart_and_the_hold_still_applies(self):
+        t0 = NOW
+        clock = {"t": t0}
+        free = lambda now: 49.0 if now < t0 + 30 else 60.0
+        sup, _ = self.build(free, clock)
+        sup.tick()  # AMBER: 6 -> 5
+        self.assertIn("WOULD slots 6 -> 5: AMBER", self.decisions())
+        saved = json.load(open(os.path.join(self.data, "state", "controller.json")))
+        self.assertEqual(saved["controller"]["last_down"], t0)
+        clock["t"] += 60
+        self.tick_until(sup, clock, t0 + 5 * MIN)
+        sup2, _ = self.build(free, clock, slots=5)  # a supervisor restart on the same data folder
+        self.assertEqual(sup2.state["controller"]["last_down"], t0)
+        raises = self.tick_until(sup2, clock, t0 + 20 * MIN)
+        self.assertTrue(raises, self.decisions())
+        self.assertGreaterEqual(raises[0], t0 + 15 * MIN, "the hold holds after the restart")
+
+    def test_an_unreadable_controller_json_is_kept_alerted_and_holds(self):
+        path = os.path.join(self.data, "state", "controller.json")
+        with open(path, "w") as f:
+            f.write("{broken controller")
+        t0 = NOW
+        clock = {"t": t0}
+        sup, _ = self.build(lambda now: 60.0, clock)
+        raises = self.tick_until(sup, clock, t0 + 20 * MIN)
+        kept = path + ".unreadable"
+        self.assertTrue(os.path.exists(kept))
+        self.assertEqual(open(kept).read(), "{broken controller", "the bad file is kept as it was")
+        alerts = [r for r in self.pushed() if r.get("name") == CONTROLLER_UNREADABLE]
+        self.assertTrue(alerts, [r.get("name") for r in self.pushed()])
+        self.assertEqual(alerts[0]["level"], "ATTENTION")
+        self.assertTrue(raises, self.decisions())
+        self.assertGreaterEqual(raises[0], t0 + 15 * MIN, "one full hold from the detection time")
+
+    def test_an_unreadable_controller_json_still_steps_down(self):
+        with open(os.path.join(self.data, "state", "controller.json"), "w") as f:
+            f.write("not json at all")
+        clock = {"t": NOW}
+        sup, _ = self.build(lambda now: 49.0, clock)
+        sup.tick()
+        self.assertIn("WOULD slots 6 -> 5: AMBER", self.decisions())
+
+    def test_a_safe_mode_reduction_starts_the_hold(self):
+        t0 = NOW
+        clock = {"t": t0}
+        sup, f = self.build(lambda now: 60.0, clock, mode="test", slots=8)
+        mmrecover.enter_safe("test", t0)
+        sup.tick()
+        self.assertEqual(open(f).read().split()[0], "5", "safe mode: at most 5")
+        mmrecover.clear_safe("unit test", now=t0 + 30)
+        clock["t"] += 60
+        raises = self.tick_until(sup, clock, t0 + 25 * MIN)
+        self.assertTrue(raises, self.decisions())
+        self.assertGreaterEqual(raises[0], t0 + 15 * MIN, "no raise for 15 minutes: %r" % raises)
+        self.assertEqual(open(f).read().split()[0], str(5 + len(raises)))
 
 
 del RecoveryBase
