@@ -19,7 +19,8 @@ import mmcore
 import mmfleet
 
 FILE_MAX = 64 << 10  # bytes of one owner file; a larger file is bad
-FILES_MAX = 64  # owner files read per scan (by sorted name); more is one alert
+FILES_MAX = 64  # owner files read per scan (by sorted name), besides the listed owners; more is one alert
+LIST_MAX = 4096  # directory entries of any kind looked at per scan; more is one alert (the listing stopped)
 FUTURE_S = 300  # an `updated` time further ahead than this is bad
 UNITS_MAX = 10 ** 9
 OWNER_MAX = 40
@@ -38,6 +39,7 @@ def folder(profile):
 
 
 LINK_WHY = "is a link (links are not followed)"
+MISSING_WHY = "is missing"
 
 
 def _read_bytes(p, limit, dir_fd=None):
@@ -48,6 +50,8 @@ def _read_bytes(p, limit, dir_fd=None):
     except OSError as e:
         if e.errno == errno.ELOOP:
             return None, LINK_WHY
+        if e.errno == errno.ENOENT:
+            return None, MISSING_WHY
         return None, "cannot be opened (%s)" % (e.strerror or e.__class__.__name__)
     try:
         regular = stat.S_ISREG(os.fstat(fd).st_mode)
@@ -133,52 +137,95 @@ def _bad_folder(why):
 
 def _missing(name):
     return {"file": name + ".json", "stem": name, "owner": name, "units": 0, "age_min": None, "state": "missing",
-            "why": "is missing", "next": ""}
+            "why": MISSING_WHY, "next": ""}
+
+
+def _open_folder(path):
+    """(fd, None) for the folder at the normalized absolute path, or (None, (not_folder, why)). The path is lstat-ed
+    and refused when it is a link (O_NOFOLLOW alone misses a trailing "/" or "/."); the opened descriptor must be
+    the same file (st_dev, st_ino) as the lstat, so a swap between the two is refused too."""
+    try:
+        st = os.lstat(path)
+    except OSError as e:
+        return None, (False, "the folder cannot be opened (%s)" % (e.strerror or "error"))
+    if stat.S_ISLNK(st.st_mode):
+        return None, (True, LINK_WHY)
+    if not stat.S_ISDIR(st.st_mode):
+        return None, (True, "is not a folder")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            return None, (True, LINK_WHY)
+        if e.errno == errno.ENOTDIR:
+            return None, (True, "is not a folder")
+        return None, (False, "the folder cannot be opened (%s)" % (e.strerror or "error"))
+    try:
+        got = os.fstat(fd)
+        same = (got.st_dev, got.st_ino) == (st.st_dev, st.st_ino)
+    except OSError:
+        same = False
+    if not same:
+        os.close(fd)
+        return None, (True, "changed while it was opened")
+    return fd, None
 
 
 def scan(path, now, stale_minutes, expected=()):
-    """None when the feature is off (no path, or nothing at it). Else {folder, not_folder, folder_why, owners, more}.
-    The folder is opened once (never through a link at its last part) and listed through that descriptor; each direct
-    child named like NAME is opened by name in it, never through a link. The FILES_MAX smallest names are read (only
-    those are held), and every file of an `expected` owner (the profile's ready_work_owners) on top; `more` counts
-    the other matching names. An expected owner with no file is a record in state "missing". A link, a folder, a
-    FIFO or another type under such a name is a bad file. Owners come sorted by file name. Never raises."""
-    if not path or not os.path.lexists(path):
+    """None when the feature is off (no path, or nothing at it). Else {folder, not_folder, folder_why, owners, more,
+    truncated}. The path is normalized and must be absolute; the folder is opened once and never through a link
+    (_open_folder). Every `expected` owner (the profile's ready_work_owners) is opened directly by name through the
+    folder's descriptor: no file is a record in state "missing". The listing (through the same descriptor) stops
+    after LIST_MAX entries of any kind (`truncated`); of the other names that match NAME, the FILES_MAX smallest are
+    read (only those are held) and `more` counts the rest. Each file is opened by name in the folder, never through
+    a link: a link, a folder, a FIFO or another type is a bad file. Owners come sorted by file name. Never raises.
+    Read only from a local disk: a read on a stalled network file system blocks (README.md, "Ready work")."""
+    if not path:
         return None
-    out = {"folder": path, "not_folder": False, "folder_why": None, "owners": [], "more": 0}
-    try:
-        dfd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    except OSError as e:
-        if e.errno == errno.ELOOP or os.path.islink(path):
-            out.update(not_folder=True, folder_why=LINK_WHY)
-        elif e.errno == errno.ENOTDIR:
-            out.update(not_folder=True, folder_why="is not a folder")
+    norm = os.path.normpath(path)
+    if not os.path.lexists(norm):
+        return None
+    out = {"folder": path, "not_folder": False, "folder_why": None, "owners": [], "more": 0, "truncated": False}
+    if not os.path.isabs(norm):
+        out.update(not_folder=True, folder_why="is not an absolute path")
+        return out
+    dfd, why = _open_folder(norm)
+    if dfd is None:
+        if why[0]:
+            out.update(not_folder=True, folder_why=why[1])
         else:
-            out["owners"].append(_bad_folder("the folder cannot be opened (%s)" % (e.strerror or "error")))
+            out["owners"].append(_bad_folder(why[1]))
         return out
     try:
-        count = [0]
-        want = {n + ".json" for n in expected}
-        present = set()  # the expected owners' file names found (at most OWNERS_MAX)
+        want = sorted({n + ".json" for n in expected})
+        skip = set(want)
+        seen, count = [0], [0]
 
         def names(it):
             for entry in it:
-                if NAME.fullmatch(entry.name):
+                seen[0] += 1
+                if seen[0] > LIST_MAX:
+                    out["truncated"] = True
+                    return
+                if entry.name not in skip and NAME.fullmatch(entry.name):
                     count[0] += 1
-                    if entry.name in want:
-                        present.add(entry.name)
                     yield entry.name
         try:
             with os.scandir(dfd) as it:
                 picked = heapq.nsmallest(FILES_MAX, names(it))
         except OSError as e:
             out["owners"].append(_bad_folder("the folder cannot be listed (%s)" % (e.strerror or "error")))
-            return out
-        read = sorted(set(picked) | present)
-        out["more"] = max(0, count[0] - len(read))
-        recs = [read_file(n, n, now, stale_minutes, dir_fd=dfd) for n in read]
-        recs += [_missing(n[:-5]) for n in want - present]
-        out["owners"] = sorted(recs, key=lambda o: o["file"])
+            picked = []
+        out["more"] = max(0, count[0] - len(picked))
+        recs = []
+        for n in picked:
+            rec = read_file(n, n, now, stale_minutes, dir_fd=dfd)
+            if rec["why"] != MISSING_WHY:  # gone since the listing: not a file any more
+                recs.append(rec)
+        for n in want:
+            rec = read_file(n, n, now, stale_minutes, dir_fd=dfd)
+            recs.append(_missing(n[:-5]) if rec["why"] == MISSING_WHY else rec)
+        out["owners"] += sorted(recs, key=lambda o: o["file"])
         return out
     finally:
         os.close(dfd)
@@ -195,6 +242,8 @@ def load_since():
     if not os.path.lexists(p):
         return None, None
     raw, why = _read_bytes(p, STATE_MAX)
+    if why == MISSING_WHY:  # gone since the lexists: no record
+        return None, None
     doc = None
     if why is None:
         doc, why = _strict(raw, STATE_MAX)

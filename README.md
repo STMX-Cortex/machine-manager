@@ -165,11 +165,13 @@ The machine should be in full use while work for it waits. The profile's `ready_
 owner of queued work keeps one file, `<owner>.json`: `{"owner": "alpha", "updated": "2026-01-01T10:00:00+00:00",
 "ready_units": 120, "next": "build the docs"}`. The supervisor reads the folder every tick; it never writes there.
 
-1. Off: `ready_work_dir` is absent or `""`, or nothing is at the path. No alert, no error.
+1. Off: `ready_work_dir` is absent or `""`, or nothing is at the path. No alert, no error. The path must be
+   absolute, and on a local disk: a read from a stalled network or FUSE file system blocks, and nothing can stop it.
 2. Only direct children named `[A-Za-z0-9][A-Za-z0-9._-]*.json` (at most 64 characters) count; other names are
-   ignored. No link is followed: the folder is opened once and each file is opened by name in it, so under such a
-   name a link, a folder, a FIFO or anything but a regular file is a bad file. `ready_work_dir` itself must be a
-   folder, not a link to one. The first 64 names in sorted order are read.
+   ignored. No link is followed. `ready_work_dir` itself (normalized, so a trailing `/` or `/.` changes nothing) must
+   be a folder, not a link to one; it is opened once, and each file is opened by name in it, so under such a name a
+   link, a folder, a FIFO or anything but a regular file is a bad file. The listing looks at 4096 entries at most;
+   of the names not in `ready_work_owners`, the first 64 in sorted order are read.
 3. A file is bad when it cannot be read, is over 64 KiB, is not strict JSON (no duplicate keys, NaN or Infinity),
    or `ready_units` is not a whole number from 0 to 10^9, `updated` is not an ISO-8601 time (no zone = local
    time) or is over 5 minutes ahead, or `next` is not a text. A bad file's units count as 0. `owner` missing: the
@@ -183,10 +185,10 @@ owner of queued work keeps one file, `<owner>.json`: `{"owner": "alpha", "update
 6. `READY_WORK_STALE` (ATTENTION, one alert per file, id `READY_WORK_STALE:<file name without .json>`): a bad file,
    or a file whose `updated` is older than `ready_work.stale_minutes` (default 90; its units still count). The
    folder's own ids start with `_`: `_folder` (the path is not a folder, or is a link), `_list` (it cannot be opened
-   or listed), `_more` (over 64 files), `_state`. Each clears on the next tick its cause is gone.
+   or listed), `_more` (over 64 files, or over 4096 entries: the listing stopped), `_state`. Each clears on the next tick its cause is gone.
 7. `ready_work_owners` (optional; default `[]`): up to 64 unique names, each a name rule 2 accepts without `.json`
-   (anything else is `E_PROFILE`). Each listed owner's `<name>.json` is always read, even past the 64-file cap; when
-   it is missing, `READY_WORK_STALE:<name>` (ATTENTION; 0 units) until the file is back and good. Files not listed
+   (anything else is `E_PROFILE`). Each listed owner's `<name>.json` is opened by name, never through the listing or
+   its caps; when it is missing, `READY_WORK_STALE:<name>` (ATTENTION; 0 units) until the file is back and good. Files not listed
    count as before.
 8. Readings only: the alerts are raised in every mode (act, observe, off, safe, dry run), and nothing acts on them.
    Phone delivery follows `[notify]` `alert_levels` (NOTIFY.md); nothing rings unless the profile says so.
