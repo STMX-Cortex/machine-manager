@@ -21,7 +21,7 @@ def replay(samples, start_slots, s, kernel_times=(), wx_waiting=False):
         state, reasons, _ = mmdecide.classify(window, s, kernel_event=bool(kev))
         r = mmdecide.slot_decide(ctl, {"now": now, "mac_state": state, "reasons": reasons, "slots": slots,
                                        "busy": min(x.get("busy", 0), slots), "waiting": x.get("waiting", 0),
-                                       "wx_waiting": wx_waiting}, s)
+                                       "wx_waiting": wx_waiting, "free_pct": x.get("free_pct")}, s)
         ctl = r["state"]
         if r["slots"] is not None:
             slots = r["slots"]

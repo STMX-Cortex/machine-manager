@@ -8,12 +8,15 @@ reboot_check); this module gathers their facts and keeps their files in the data
   state/run.json       {pid, started, clean}: clean is set only when a run ends by itself (SIGTERM, ticks done)
   state/starts.json    the times of unclean starts (for the crash-loop guard)
   safe.json            safe mode: {safe, since, reason, slot_write}
+  state/self-check-clear.json  the last `mm on` / `mm restart --clear-safe`: {cleared_at, why, was_safe}; the
+                       self-check counts only the slot changes after cleared_at
   state/boot.json      the boot time, the last tick, state and slots, the panic report names
   state/watchdog.stamp the watchdog's last run (its time as text)
   state/recovery.log   one line per recovery step
 The tool never reboots the machine and never signals a process it did not pause itself.
 """
 import json
+import math
 import os
 import re
 import signal
@@ -196,10 +199,21 @@ def mark_safe_slot_write(text):
         mmcore.write_atomic(f, json.dumps(rec, sort_keys=True))
 
 
-def clear_safe(why):
-    """End safe mode and forget the unclean starts (so the next start does not enter it again at once).
+CLEAR_FILE = ("state", "self-check-clear.json")
+
+
+def clear_safe(why, now=None):
+    """End safe mode and forget the unclean starts (so the next start does not enter it again at once). It also writes
+    the clear record (CLEAR_FILE: cleared_at, why, was_safe), also when safe mode was not on: the self-check then
+    counts only the slot changes after it, so the changes that tripped safe mode do not trip it again at once.
     Returns the record that was on, or None."""
     cur = mmcore.safe_state()
+    now = time.time() if now is None else now
+    try:
+        mmcore.write_atomic(mmcore.path(*CLEAR_FILE), json.dumps(
+            mmcore.stamp({"cleared_at": now, "why": str(why)[:200], "was_safe": bool(cur)}), sort_keys=True))
+    except OSError as e:
+        log("SELF-CHECK clear record not written: %s" % e, now)
     for f in (mmcore.path("safe.json"), mmcore.path("state", "starts.json")):
         try:
             os.remove(f)
@@ -208,6 +222,24 @@ def clear_safe(why):
     if cur:
         log("SAFE MODE off: %s" % why)
     return cur
+
+
+def read_clear():
+    """The clear record (clear_safe): (cleared_at, problem). No file: (None, None). A record that cannot be read or
+    is not valid is not "no record" (the control-reader rule): (None, the problem's text); the caller then counts every
+    slot change of the hour and shows the problem."""
+    f = mmcore.path(*CLEAR_FILE)
+    try:
+        with open(f) as fh:
+            rec = json.load(fh)
+    except FileNotFoundError:
+        return None, None
+    except (OSError, ValueError) as e:
+        return None, "%s: %s" % (os.path.basename(f), e.__class__.__name__)
+    t = rec.get("cleared_at") if isinstance(rec, dict) else None
+    if not isinstance(t, (int, float)) or isinstance(t, bool) or not math.isfinite(t):
+        return None, "%s: no valid cleared_at" % os.path.basename(f)
+    return t, None
 
 
 # ------------------------------------------------------------------------------------------- the machine reboot

@@ -107,7 +107,9 @@
   "slots.green_sys_pct",
   "slots.hold_after_red_minutes",
   "slots.hold_after_trim_minutes",
+  "slots.raise_free_margin_pct",
   "slots.raise_green_minutes",
+  "slots.raise_hold_after_down_minutes",
   "slots.raise_requires_waiting",
   "slots.red_comp_growth_mb_60s",
   "slots.red_comp_mb",
@@ -640,9 +642,19 @@
    "minimum": 0,
    "maximum": 600
   },
+  "slots.raise_free_margin_pct": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 50
+  },
   "slots.raise_green_minutes": {
    "type": "number",
    "minimum": 1,
+   "maximum": 240
+  },
+  "slots.raise_hold_after_down_minutes": {
+   "type": "number",
+   "minimum": 0,
    "maximum": 240
   },
   "slots.raise_requires_waiting": {
