@@ -29,6 +29,9 @@ def fresh_alerts(data):
         pass
 
 
+FIX = "; fix: use a name relative to the data folder, inside it"
+
+
 class _Proxy:
     """A stand-in for a module inside mmdelete: every name is the real one, except the calls in `hooked`, which first
     run `before(path)`."""
@@ -416,8 +419,10 @@ class R7DataFolderSwap(lr.F2Base):
                         % r.lines)
         self.assertEqual(open(self.victim).read(), "outside: never deleted")
         recs = self.recs(r)
-        self.assertTrue([x for x in recs if x["verb"] == "KEEP"], r.lines)
-        self.assertFalse([x for x in recs if x["verb"] == "DELETE"], r.lines)
+        self.assertEqual([(x["verb"], x["path"]) for x in recs], [("KEEP", self.data_real)], r.lines)
+        # O_DIRECTORY | O_NOFOLLOW on a link: ENOTDIR on macOS, ELOOP (OSError) on Linux
+        self.assertRegex(recs[0]["guard"], r"^refused: the data folder cannot be opened without following a link "
+                         r"\((NotADirectoryError|OSError)\)$")
 
     def test_control_no_swap_deletes(self):
         self.no_swap = True
@@ -425,6 +430,55 @@ class R7DataFolderSwap(lr.F2Base):
         self.assertFalse(os.path.lexists(self.inside), r.lines)
         self.assertTrue(os.path.exists(self.victim))
         self.assertEqual([x["verb"] for x in self.recs(r)], ["DELETE"])
+
+
+class R7DataFolderSwapAfterOpen(lr.F2Base):
+    """The data folder swapped for a link AFTER its one open: at the identity check (lstat of the real path) the rule
+    is refused; later (at the first name check) every check and delete still goes through the fd, so the delete
+    happens in the REAL folder and the outside file stays."""
+
+    def setUp(self):
+        super().setUp()
+        import mmdelete
+        self.data_real = os.path.realpath(self.data)
+        self.old_file(os.path.join(self.data_real, "old.log"), "inside")
+        self.other = os.path.realpath(os.path.join(self.root, "outside2"))
+        os.makedirs(self.other)
+        self.victim = self.old_file(os.path.join(self.other, "old.log"), "outside: never deleted")
+        self.swapped = False
+        self.real_os = mmdelete.os
+        self.mmdelete = mmdelete
+        self.addCleanup(setattr, mmdelete, "os", self.real_os)
+
+    def swap(self, *_):
+        if not self.swapped:
+            self.swapped = True
+            os.rename(self.data_real, self.data_real + ".real")
+            os.symlink(self.other, self.data_real)
+
+    def test_swap_at_the_identity_check_refuses(self):
+        def before(path):
+            if isinstance(path, str) and path.rstrip(os.sep) == self.data_real:
+                self.swap()
+        self.mmdelete.os = _Proxy(self.real_os, ("lstat",), before)
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": ["old.log"]}])
+        self.assertTrue(self.swapped, r.lines)
+        self.assertTrue(os.path.exists(self.victim))
+        self.assertTrue(os.path.exists(os.path.join(self.data_real + ".real", "old.log")))
+        self.assertEqual([(x["verb"], x["guard"]) for x in self.recs(r)],
+                         [("KEEP", "refused: the data folder changed while it was opened")], r.lines)
+
+    def test_swap_after_the_identity_check_deletes_only_inside_the_real_folder(self):
+        def before(path):
+            if path == "old.log":  # the first name check, at the data folder's fd
+                self.swap()
+        self.mmdelete.os = _Proxy(self.real_os, ("stat",), before)
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": ["old.log"]}])
+        self.assertTrue(self.swapped, r.lines)
+        self.assertEqual(open(self.victim).read(), "outside: never deleted")
+        self.assertFalse(os.path.lexists(os.path.join(self.data_real + ".real", "old.log")),
+                         "deleted through the fd, in the real folder: %s" % r.lines)
+        self.assertEqual([x["verb"] for x in self.recs(r)], ["DELETE"], r.lines)
 
 
 class R8DotDotParts(lr.F2Base):
@@ -437,10 +491,8 @@ class R8DotDotParts(lr.F2Base):
         r = self.run_rules([{"id": "S1", "type": "own_files", "files": ["linked/../old.log"]}])
         self.assertTrue(os.path.exists(good), r.lines)
         self.assertTrue(os.path.exists(os.path.join(self.outside, "old.log")))
-        recs = self.recs(r)
-        self.assertEqual(len(recs), 1, r.lines)
-        self.assertEqual(recs[0]["verb"], "KEEP")
-        self.assertTrue(recs[0]["guard"].startswith("refused: files name"), r.lines)
+        self.assertEqual([(x["verb"], x["guard"]) for x in self.recs(r)],
+                         [("KEEP", "refused: files name has a .. part")], r.lines)
 
     def test_dotdot_back_into_the_same_folder(self):
         os.makedirs(os.path.join(self.data, "a"))
@@ -449,17 +501,28 @@ class R8DotDotParts(lr.F2Base):
                 x = self.old_file(os.path.join(self.data, "state", "x"))
                 r = self.run_rules([{"id": "S1", "type": "own_files", "files": [name]}])
                 self.assertTrue(os.path.exists(x), r.lines)
-                recs = self.recs(r)
-                self.assertEqual([x_["verb"] for x_ in recs], ["KEEP"], r.lines)
-                self.assertTrue(recs[0]["guard"].startswith("refused: files name"), r.lines)
+                self.assertEqual([(x_["verb"], x_["guard"]) for x_ in self.recs(r)],
+                                 [("KEEP", "refused: files name has a .. part")], r.lines)
 
     def test_dotdot_slot_dir_back_inside(self):
         ev = lr.make(os.path.join(self.data, "evidence", "01"))
         r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": "state/../evidence", "files": []}])
         self.assertTrue(os.path.exists(ev), r.lines)
-        recs = self.recs(r)
-        self.assertEqual([x["verb"] for x in recs], ["KEEP"], r.lines)
-        self.assertTrue(recs[0]["guard"].startswith("refused: slot_dir"), r.lines)
+        self.assertEqual([(x["verb"], x["guard"]) for x in self.recs(r)],
+                         [("KEEP", "refused: slot_dir has a .. part")], r.lines)
+
+    def test_dot_or_empty_parts_are_refused(self):
+        """Decided: "state/./x" and "a//b" (and "." / "x/") are refused too, one KEEP each, nothing deleted."""
+        x = self.old_file(os.path.join(self.data, "state", "x"))
+        b = self.old_file(os.path.join(self.data, "a", "b"))
+        for name in ("state/./x", "a//b", "./state/x", "a/b/", "."):
+            with self.subTest(name=name):
+                r = self.run_rules([{"id": "S1", "type": "own_files", "files": [name]}])
+                self.assertEqual([(x_["verb"], x_["guard"]) for x_ in self.recs(r)],
+                                 [("KEEP", "refused: files name has a . or empty part")], r.lines)
+                self.assertTrue(os.path.exists(x) and os.path.exists(b))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": "./evidence", "files": []}])
+        self.assertEqual([x_["guard"] for x_ in self.recs(r)], ["refused: slot_dir has a . or empty part"])
 
     def test_dots_inside_a_name_stay_allowed(self):
         """Only a ".." PART is refused: "a..b", "..x" and "x.." are ordinary names."""
@@ -481,10 +544,9 @@ class R8DotDotParts(lr.F2Base):
         self.queue_dir()
         r = self.mm("check", "--profile", prof)
         lines = [l for l in r.stdout.splitlines() if l.startswith("E_PROFILE deletes rule")]
-        self.assertEqual([l.split(" is ", 1)[0] if " is " in l else l.split(" has ", 1)[0] for l in lines],
-                         ['E_PROFILE deletes rule S1: slot_dir "state/../evidence"',
-                          'E_PROFILE deletes rule S1: files "linked/../old.log"',
-                          'E_PROFILE deletes rule S1: files "state/../state/x"'], lines)
+        self.assertEqual(lines, ['E_PROFILE deletes rule S1: slot_dir "state/../evidence" has a .. part%s' % FIX,
+                                 'E_PROFILE deletes rule S1: files "linked/../old.log" has a .. part%s' % FIX,
+                                 'E_PROFILE deletes rule S1: files "state/../state/x" has a .. part%s' % FIX])
         self.assertEqual(r.returncode, 1)
 
 
@@ -498,13 +560,14 @@ class R9BadCharacters(lr.F2Base):
         recs = self.recs(r)
         self.assertEqual(sorted(x["verb"] for x in recs), ["DELETE", "KEEP"], r.lines)
         keep = [x for x in recs if x["verb"] == "KEEP"][0]
-        self.assertTrue(keep["guard"].startswith("refused: files name"), r.lines)
+        self.assertEqual(keep["guard"], "refused: files name has a NUL character")
         self.assertFalse([l for l in r.lines if "rule failed" in l], r.lines)
 
     def test_nul_in_a_folder_part(self):
         good = self.old_file(os.path.join(self.data, "old.log"))
         r = self.run_rules([{"id": "S1", "type": "own_files", "files": ["state\x00/x", "old.log"]}])
         self.assertFalse(os.path.lexists(good), r.lines)
+        self.assertIn("refused: files name has a NUL character", [x["guard"] for x in self.recs(r)])
         self.assertFalse([l for l in r.lines if "rule failed" in l], r.lines)
 
     def test_nul_slot_dir_refuses_only_the_slots(self):
@@ -512,7 +575,7 @@ class R9BadCharacters(lr.F2Base):
         r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": "evi\x00dence", "files": ["old.log"]}])
         self.assertFalse(os.path.lexists(good), r.lines)
         self.assertFalse([l for l in r.lines if "rule failed" in l], r.lines)
-        self.assertTrue([x for x in self.recs(r) if x["guard"].startswith("refused: slot_dir")], r.lines)
+        self.assertIn("refused: slot_dir has a NUL character", [x["guard"] for x in self.recs(r)], r.lines)
 
     def test_a_name_too_long_refuses_only_itself(self):
         good = self.old_file(os.path.join(self.data, "old.log"))
@@ -521,6 +584,9 @@ class R9BadCharacters(lr.F2Base):
                 r = self.run_rules([{"id": "S1", "type": "own_files", "files": [name, "old.log"]}])
                 self.assertFalse([l for l in r.lines if "rule failed" in l], r.lines)
                 self.assertFalse([x for x in self.recs(r) if x["verb"] == "DELETE" and x["path"].endswith(name)])
+                self.assertEqual([x["guard"] for x in self.recs(r) if x["verb"] == "KEEP"],
+                                 ["refused: files name cannot be checked (OSError)"], r.lines)
+                self.assertFalse(os.path.lexists(good), "old.log still deleted")
                 self.old_file(good)
 
     def test_mm_check_nul_name(self):
@@ -534,7 +600,8 @@ class R9BadCharacters(lr.F2Base):
         r = self.mm("check", "--profile", prof)
         self.assertNotIn("Traceback", r.stderr)
         lines = [l for l in r.stdout.splitlines() if l.startswith("E_PROFILE deletes rule S1: files ")]
-        self.assertEqual(len(lines), 1, r.stdout)
+        self.assertEqual(lines, ['E_PROFILE deletes rule S1: files "bad\\u0000name" has a NUL character' + FIX],
+                         r.stdout)
         self.assertEqual(r.returncode, 1)
 
 if __name__ == "__main__":

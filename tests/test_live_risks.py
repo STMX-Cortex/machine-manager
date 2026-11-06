@@ -1258,11 +1258,11 @@ class F2Pinned(F2Base):
         os.symlink(self.outside, os.path.join(self.data, "linkdir"))
         os.symlink(victim, os.path.join(self.data, "metrics.csv.1"))
         cases = [(victim, "refused: files name is an absolute name"),
-                 ("../outside/victim.log", "refused: files name is a name that leaves the data folder"),
-                 ("a/../../outside/victim.log", "refused: files name is a name that leaves the data folder"),
+                 ("../outside/victim.log", "refused: files name has a .. part"),
+                 ("a/../../outside/victim.log", "refused: files name has a .. part"),
                  ("", "refused: files name is an empty name"),
-                 (".", "refused: files name is a name that leaves the data folder"),
-                 ("state/..", "refused: files name is a name that leaves the data folder"),
+                 (".", "refused: files name has a . or empty part"),
+                 ("state/..", "refused: files name has a .. part"),
                  ("linkdir/old.log", "refused: files name is a link inside the data folder: %s"
                   % os.path.join(os.path.realpath(self.data), "linkdir")),
                  ("metrics.csv.1", "refused: files name is a link inside the data folder: %s"
@@ -1272,7 +1272,7 @@ class F2Pinned(F2Base):
                 r = self.run_rules([{"id": "S1", "type": "own_files", "files": [name]}])
                 self.assertEqual(self.guards(r), [guard], r.lines)
         for slot_dir, guard in ((self.outside, "refused: slot_dir is an absolute name"),
-                                ("../outside", "refused: slot_dir is a name that leaves the data folder"),
+                                ("../outside", "refused: slot_dir has a .. part"),
                                 ("", "refused: slot_dir is an empty name")):
             with self.subTest(slot_dir=slot_dir):
                 r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": slot_dir, "files": []}])
@@ -1362,7 +1362,7 @@ class F2Pinned(F2Base):
         fix = "; fix: use a name relative to the data folder, inside it"
         self.assertEqual(lines, ['E_PROFILE deletes rule S1: slot_dir "/abs" is an absolute name' + fix,
                                  'E_PROFILE deletes rule S1: files "/abs/x" is an absolute name' + fix,
-                                 'E_PROFILE deletes rule S1: files "../y" is a name that leaves the data folder' + fix,
+                                 'E_PROFILE deletes rule S1: files "../y" has a .. part' + fix,
                                  'E_PROFILE deletes rule S1: files "" is an empty name' + fix])
         self.assertEqual(rc, 1)
 
