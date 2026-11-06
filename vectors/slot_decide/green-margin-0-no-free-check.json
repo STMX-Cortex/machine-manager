@@ -2,6 +2,7 @@
  "case": "green-margin-0-no-free-check",
  "expected": {
   "held": null,
+  "problem": null,
   "slots": 6,
   "state": {
    "demand_since": 1799996400.0,

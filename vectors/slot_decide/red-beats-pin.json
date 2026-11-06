@@ -2,6 +2,7 @@
  "case": "red-beats-pin",
  "expected": {
   "held": null,
+  "problem": null,
   "slots": 3,
   "state": {
    "demand_since": 1800000000.0,

@@ -1,7 +1,8 @@
 {
  "case": "green-held-free-under-margin",
  "expected": {
-  "held": "raise held: free 52.0% < 55% (amber 50% + margin 5%)",
+  "held": "raise held: free 52% < 55% (amber 50% + margin 5%)",
+  "problem": null,
   "slots": null,
   "state": {
    "demand_since": 1799996400.0,

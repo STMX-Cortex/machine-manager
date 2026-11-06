@@ -2,6 +2,7 @@
  "case": "green-held-after-down",
  "expected": {
   "held": "raise held: 10 min since the last step down < 15 min",
+  "problem": null,
   "slots": null,
   "state": {
    "demand_since": 1799996400.0,

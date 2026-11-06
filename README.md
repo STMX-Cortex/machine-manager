@@ -229,7 +229,9 @@ setting (`[self]`, `[safe_mode]`, `[heartbeat]`); every decision is a pure funct
    than `self.min_free_mb` free, or more than `self.max_slot_changes_per_hour` slot changes in an hour. Only the
    changes after the last `mm on` or `mm restart --clear-safe` count, so the changes that tripped safe mode do not
    trip it again at once (the clear record `state/self-check-clear.json`: `cleared_at`, `why`, `was_safe`; written at
-   each of the two, also when safe mode was off). A clear record that cannot be read, or holds no valid `cleared_at`,
+   each of the two, also when safe mode was off). The record is written first: when it cannot be written, `mm on` and
+   `mm restart --clear-safe` print one `E_CLEAR` line, exit 2 and change nothing (safe mode, the unclean starts and
+   the off switch stay; `mm restart` does not restart). A clear record that cannot be read, or holds no valid `cleared_at`,
    is not used: every change of the hour counts, and one `SELF-CHECK clear record unreadable` line goes to
    `decisions.log` and `state/recovery.log`, at most once per 10 min. A `cleared_at` later than now is not used.
 2. **Crash-loop guard** (`crash_loop`). A start after a run that did not end by itself (a crash, a kill, a self
@@ -460,7 +462,18 @@ free memory is unknown; with a margin, unknown free memory gives no raise), and 
 (default 15, range 0-240; 0 = off) since the last step down. Every hold must pass, so the longest one wins. A raise
 that only these two rules refuse writes one `HOLD slots N: raise held: ...` line to `decisions.log` (the free margin,
 unknown free memory, or the time since the step down), at most once per 10 min while the same kind of hold lasts.
-Steps down, RED, a pin and `mm event` events are not changed by them. GREEN also needs free disk of at least `slots.green_disk_gb` (default 0 = follow `disk.recover_gb`; else at
+Steps down, RED, a pin and `mm event` events are not changed by them. The count's last step down and last change
+follow the tick's final count, also when safe mode lowers it. The controller's saved times (in
+`state/controller.json`) must be finite numbers at most 60 s in the future: an invalid one is repaired on the tick it
+is read (an invalid last step down is dropped, so a step down never waits; the GREEN and demand spans restart; any
+other time becomes now), no raise follows for one full `slots.raise_hold_after_down_minutes` from then ("raise held:
+N min since the controller state was repaired < 15 min"), and `SLOT_STATE` (ATTENTION, held 30 min) says
+`slot controller state invalid: <keys>; no raise for one full hold (slots.raise_hold_after_down_minutes)`. A
+`state/controller.json` that exists but cannot be read, or is not a JSON object, is copied once to
+`state/controller.json.unreadable` (kept, never deleted), a fresh record starts with the same full hold before a
+raise, and `SLOT_STATE` says `state/controller.json unreadable (<error>), kept as state/controller.json.unreadable; a
+fresh record starts, no raise for one full hold (slots.raise_hold_after_down_minutes)`. No file at all is a first
+start, with no hold. GREEN also needs free disk of at least `slots.green_disk_gb` (default 0 = follow `disk.recover_gb`; else at
 least `slots.red_disk_gb`). `queue.slot_cpu_cores` is the CPU cap per held slot: each call's process tree is counted
 once, with one alert per call after two readings over its cap.
 
@@ -621,13 +634,13 @@ queue is idle; `FSEV` the file-event daemon is large; `POWER` on battery; `RESUM
 `SOURCE_STALE` a reading source is old; `READINGS_MISMATCH` fast readings disagree with the macOS commands;
 `OFF` the off switch is on; `SETTINGS_BAD` the settings file is invalid; `SUPERVISOR_ERROR` ticks fail;
 `SELF_STALE` the supervisor is not writing; `SELF_RESTART` the tool restarted itself; `SAFE_MODE` safe mode is on;
-`SELF_CHECK` a self-check fault in safe mode; `WATCHDOG_STALE` the watchdog does not run; `MAC_REBOOTED` the Mac
+`SELF_CHECK` a self-check fault in safe mode; `SLOT_STATE` the slot controller's saved state was invalid or unreadable and was repaired; `WATCHDOG_STALE` the watchdog does not run; `MAC_REBOOTED` the Mac
 restarted; `STOPPED` stopped by hand; `GH_FAIL`, `GH_STUCK`, `GH_DONE`, `GH_PACE`
 the CI pool; `GUARD_NEAR`, `GUARD_STOP` the CI budget.
 
 Exit codes: 0 ok; 1 nothing found or problems listed; 2 error (one `E_` line); 3 stale; 10 `POOL`; 20 `WAIT`;
 75 the supervisor restarts itself (`mm run` only).
-Error codes: `E_PYTHON`, `E_RESTART`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFILE`, `E_NO_PROFILE`, `E_SETTINGS`, `E_HOOKS`, `E_READINGS`,
+Error codes: `E_PYTHON`, `E_RESTART`, `E_CLEAR`, `E_USAGE`, `E_RANGE`, `E_EXISTS`, `E_PROFILE`, `E_NO_PROFILE`, `E_SETTINGS`, `E_HOOKS`, `E_READINGS`,
 `E_RECIPIENT`, `E_STALE`, `E_NO_STATUS`, `E_GATE_RED`, `E_DRILL`, `E_NOT_CACHE`, `E_PLATFORM`, `E_SERVE`, `E_STORAGE`,
 `E_NOTIFY_*` ([NOTIFY.md](NOTIFY.md)).
 

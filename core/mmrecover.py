@@ -206,14 +206,19 @@ def clear_safe(why, now=None):
     """End safe mode and forget the unclean starts (so the next start does not enter it again at once). It also writes
     the clear record (CLEAR_FILE: cleared_at, why, was_safe), also when safe mode was not on: the self-check then
     counts only the slot changes after it, so the changes that tripped safe mode do not trip it again at once.
-    Returns the record that was on, or None."""
+    The clear record is written FIRST: when that fails, nothing is cleared (safe mode and the unclean starts stay) and
+    MMError E_CLEAR is raised. Returns the record that was on, or None."""
     cur = mmcore.safe_state()
     now = time.time() if now is None else now
     try:
         mmcore.write_atomic(mmcore.path(*CLEAR_FILE), json.dumps(
             mmcore.stamp({"cleared_at": now, "why": str(why)[:200], "was_safe": bool(cur)}), sort_keys=True))
     except OSError as e:
-        log("SELF-CHECK clear record not written: %s" % e, now)
+        log("SELF-CHECK clear record not written (%s); safe mode and the unclean starts are kept" % e.__class__.__name__,
+            now)
+        raise mmcore.MMError("E_CLEAR", "the clear record state/self-check-clear.json was not written (%s); safe mode "
+                             "and the unclean starts are kept" % e.__class__.__name__,
+                             "make the data folder's state/ writable, then run it again")
     for f in (mmcore.path("safe.json"), mmcore.path("state", "starts.json")):
         try:
             os.remove(f)
@@ -234,10 +239,14 @@ def read_clear():
             rec = json.load(fh)
     except FileNotFoundError:
         return None, None
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:  # RecursionError: deeply nested arrays; the file is kept
         return None, "%s: %s" % (os.path.basename(f), e.__class__.__name__)
     t = rec.get("cleared_at") if isinstance(rec, dict) else None
-    if not isinstance(t, (int, float)) or isinstance(t, bool) or not math.isfinite(t):
+    try:
+        ok = isinstance(t, (int, float)) and not isinstance(t, bool) and math.isfinite(float(t))
+    except OverflowError:  # an int too large for a float (10**400)
+        ok = False
+    if not ok:
         return None, "%s: no valid cleared_at" % os.path.basename(f)
     return t, None
 

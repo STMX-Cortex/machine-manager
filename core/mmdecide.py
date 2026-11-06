@@ -149,9 +149,10 @@ def slot_decide(state, inp, s):
     inp: now, mac_state, reasons, slots, busy, waiting, wx_waiting, override ({slots, until, reason} or null),
     events (list of 'timing-failure', 'guard-kill', 'trim'), free_pct (free memory %, None = unknown; raise_hold).
     Returns {"slots": new or None, "why": text or None, "held": the text of a GREEN raise that raise_hold refused, or
-    None, "state": the new state}."""
-    st = dict(state or {})
+    None, "problem": "slot controller state invalid: <keys>" on the tick slot_state_clean repaired it, or None,
+    "state": the new state}."""
     now, mac_state, reasons, slots = inp["now"], inp["mac_state"], inp.get("reasons", []), inp["slots"]
+    st, bad = slot_state_clean(state, now)
     events = inp.get("events") or []
     override = inp.get("override")
     floor, ceiling = s["slots.floor"], s["slots.ceiling"]
@@ -189,7 +190,7 @@ def slot_decide(state, inp, s):
         no_red = now - st.get("last_red", FAR_PAST) >= s["slots.hold_after_red_minutes"] * 60
         no_trim = now - st.get("last_trim", FAR_PAST) >= s["slots.hold_after_trim_minutes"] * 60
         if held and calm and no_red and no_trim and demand and not inp.get("wx_waiting") and slots < ceiling:
-            hold = raise_hold(st, inp, now, s)
+            hold = raise_hold(st, inp, now, s, bad)
             if hold:
                 hold_why = hold
             else:
@@ -197,32 +198,90 @@ def slot_decide(state, inp, s):
                     (now - since) / 60, inp["waiting"], slots)
     if target is not None and pin is not None and target > pin:
         target = pin
+    problem = "slot controller state invalid: %s" % ", ".join(bad) if bad else None
     if target is None or target == slots:
-        return {"slots": None, "why": None, "held": hold_why, "state": st}
-    if target < slots:
-        st["last_down"] = now
-    st["last_change"] = now
-    return {"slots": target, "why": why, "held": None, "state": st}
+        return {"slots": None, "why": None, "held": hold_why, "problem": problem, "state": st}
+    return {"slots": target, "why": why, "held": None, "problem": problem, "state": slot_mark(st, slots, target, now)}
 
 
-def raise_hold(st, inp, now, s):
-    """The hysteresis of a GREEN raise: None when it may go on, else the text of the refusal. Free memory must stand
-    slots.raise_free_margin_pct above the AMBER border (0: not checked, an unknown value too), and the last step down
-    must be slots.raise_hold_after_down_minutes old (0: off)."""
+# The controller state's times (epoch s, or None where the key allows it).
+SLOT_STAMPS = ("last_change", "green_since", "demand_since", "last_red", "last_trim", "last_down", "raise_hold_since")
+STAMP_FUTURE_S = 60  # a stored time later than now by more than this is invalid (a clock that went back, a bad file)
+
+
+def stamp_ok(v, now):
+    """A stored time: a finite number (not a bool), at most STAMP_FUTURE_S after now."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return False
+    try:
+        return math.isfinite(float(v)) and v <= now + STAMP_FUTURE_S
+    except OverflowError:
+        return False
+
+
+def slot_state_clean(state, now):
+    """The controller state with every invalid time repaired, and the names of the invalid ones. A repair never delays
+    a step down and never allows a raise: an invalid last_down is dropped (the AMBER step interval then does not wait),
+    green_since and demand_since restart (None), any other time becomes now, and raise_hold_since becomes now (one full
+    slots.raise_hold_after_down_minutes before a raise, as after a step down). A state that is not a dict counts as
+    invalid ("state") and starts empty."""
+    if state is None:
+        return {}, []
+    if not isinstance(state, dict):
+        return {"raise_hold_since": now}, ["state"]
+    st, bad = dict(state), []
+    for k in SLOT_STAMPS:
+        v = st.get(k)
+        if v is None or stamp_ok(v, now):
+            continue
+        bad.append(k)
+        if k == "last_down":
+            st.pop(k)
+        elif k in ("green_since", "demand_since"):
+            st[k] = None
+        else:
+            st[k] = now
+    if bad:
+        st["raise_hold_since"] = now
+    return st, bad
+
+
+def slot_mark(state, cur, final, now):
+    """The controller state after the tick's FINAL slot count (from cur to final; None = unchanged): a change sets
+    last_change, a lower count also last_down. The supervisor calls it again when safe mode changes the target."""
+    st = dict(state)
+    st.setdefault("last_change", now)
+    if final is not None and final != cur:
+        st["last_change"] = now
+        if final < cur:
+            st["last_down"] = now
+    return st
+
+
+def raise_hold(st, inp, now, s, bad=()):
+    """The hysteresis of a GREEN raise: None when it may go on, else the text of the refusal. An invalid stored time
+    (slot_state_clean) refuses it; free memory must stand slots.raise_free_margin_pct above the AMBER border (0: not
+    checked, an unknown value too); the last step down, or the repair of an invalid state (raise_hold_since), must be
+    slots.raise_hold_after_down_minutes old (0: off)."""
+    if bad:
+        return "raise held: controller state invalid (%s)" % ", ".join(bad)
     margin = s["slots.raise_free_margin_pct"]
     if margin:
         free = inp.get("free_pct")
-        if not isinstance(free, (int, float)) or isinstance(free, bool) or not math.isfinite(free):
+        if not stamp_ok(free, float("inf")):
             return "raise held: free memory unknown"
         border = s["slots.amber_free_pct"] + margin
         if free < border:
-            return "raise held: free %.1f%% < %g%% (amber %g%% + margin %g%%)" % (
-                free, border, s["slots.amber_free_pct"], margin)
+            return "raise held: free %g%% < %g%% (amber %g%% + margin %g%%)" % (
+                round(free, 1), border, s["slots.amber_free_pct"], margin)
     hold = s["slots.raise_hold_after_down_minutes"] * 60
-    down = st.get("last_down")
-    if hold and down is not None and now - down < hold:
+    down, fixed = st.get("last_down"), st.get("raise_hold_since")
+    if hold and down is not None and now - down < hold and (fixed is None or down >= fixed):
         return "raise held: %.0f min since the last step down < %g min" % (
             max(0, now - down) / 60, s["slots.raise_hold_after_down_minutes"])
+    if hold and fixed is not None and now - fixed < hold:
+        return "raise held: %.0f min since the controller state was repaired < %g min" % (
+            max(0, now - fixed) / 60, s["slots.raise_hold_after_down_minutes"])
     return None
 
 

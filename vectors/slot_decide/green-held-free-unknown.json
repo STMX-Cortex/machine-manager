@@ -2,6 +2,7 @@
  "case": "green-held-free-unknown",
  "expected": {
   "held": "raise held: free memory unknown",
+  "problem": null,
   "slots": null,
   "state": {
    "demand_since": 1799996400.0,

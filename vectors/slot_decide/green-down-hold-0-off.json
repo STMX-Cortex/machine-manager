@@ -2,6 +2,7 @@
  "case": "green-down-hold-0-off",
  "expected": {
   "held": null,
+  "problem": null,
   "slots": 6,
   "state": {
    "demand_since": 1799996400.0,

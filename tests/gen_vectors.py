@@ -152,14 +152,25 @@ case("slot_decide", "red-beats-pin", {"state": st0, "inp": dict(base_inp, mac_st
 # from a state whose demand has lasted as long as its GREEN (as in vectors/slot_decide/green-raise-one-step.json)
 st_up = dict(st0, demand_since=NOW - 3600)
 case("slot_decide", "green-held-free-under-margin", {"state": st_up, "inp": dict(base_inp, free_pct=52.0)},
-     expected={"slots": None, "why": None, "held": "raise held: free 52.0% < 55% (amber 50% + margin 5%)",
-               "state": st_up})
+     expected={"slots": None, "why": None, "held": "raise held: free 52% < 55% (amber 50% + margin 5%)",
+               "problem": None, "state": st_up})
 case("slot_decide", "green-raise-at-margin", {"state": st_up, "inp": dict(base_inp, free_pct=55.0)})
 case("slot_decide", "green-held-free-unknown", {"state": st_up, "inp": dict(base_inp, free_pct=None)})
 case("slot_decide", "green-margin-0-no-free-check", {"state": st_up, "inp": dict(base_inp, free_pct=None)},
      {"slots.raise_free_margin_pct": 0})
 case("slot_decide", "green-held-after-down", {"state": dict(st_up, last_down=NOW - 600), "inp": base_inp})
 case("slot_decide", "green-raise-after-down-hold", {"state": dict(st_up, last_down=NOW - 900), "inp": base_inp})
+# an invalid stored time: repaired, no raise, a problem text; a step down never waits for it
+case("slot_decide", "green-bad-last-down-no-raise", {"state": dict(st_up, last_down="broken"), "inp": base_inp})
+case("slot_decide", "green-future-last-red-no-raise", {"state": dict(st_up, last_red=NOW + 3600), "inp": base_inp})
+case("slot_decide", "green-huge-last-change-no-raise", {"state": dict(st_up, last_change=10 ** 400), "inp": base_inp})
+case("slot_decide", "green-held-after-repair", {"state": dict(st_up, raise_hold_since=NOW - 600), "inp": base_inp})
+case("slot_decide", "green-raise-after-repair-hold", {"state": dict(st_up, raise_hold_since=NOW - 900), "inp": base_inp})
+case("slot_decide", "amber-step-with-bad-last-down", {"state": dict(st0, last_down="broken"),
+                                                      "inp": dict(base_inp, mac_state="AMBER", reasons=["free 49% < 50%"])})
+case("slot_decide", "amber-step-with-future-last-down", {"state": dict(st0, last_down=NOW + 3600),
+                                                         "inp": dict(base_inp, mac_state="AMBER", reasons=["free 49% < 50%"])})
+case("slot_decide", "state-not-a-dict", {"state": ["x"], "inp": base_inp})
 case("slot_decide", "green-down-hold-0-off", {"state": dict(st_up, last_down=NOW - 60), "inp": base_inp},
      {"slots.raise_hold_after_down_minutes": 0})
 
