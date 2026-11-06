@@ -141,10 +141,10 @@ def own_name_problem(name):
     return None
 
 
-def open_dir_at(dfd, parts):
+def open_dir_at(dfd, parts, show=""):
     """Open the folder parts[0]/parts[1]/... below the folder fd `dfd`, each part checked with lstat at its parent's fd
     and opened with O_NOFOLLOW | O_DIRECTORY (never by path). Returns (fd, None): a NEW fd the caller closes (a dup of
-    dfd for no parts); (None, why) for a part that is a link ("is a link inside the data folder: <part path>");
+    dfd for no parts); (None, why) for a part that is a link ("is a link inside the data folder: <show>/<part path>");
     (None, None) when a part is missing or not a folder (nothing there). Other OSErrors pass to the caller."""
     fd = os.dup(dfd)
     done = []
@@ -156,7 +156,7 @@ def open_dir_at(dfd, parts):
                 return None, None
             done.append(part)
             if stat.S_ISLNK(st.st_mode):
-                return None, "is a link inside the data folder: %s" % "/".join(done)
+                return None, "is a link inside the data folder: %s" % os.path.join(show, *done)
             if not stat.S_ISDIR(st.st_mode):
                 return None, None
             nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
@@ -169,17 +169,17 @@ def open_dir_at(dfd, parts):
             os.close(fd)
 
 
-def remove_at(dfd, parts):
+def remove_at(dfd, parts, show=""):
     """Delete parts[-1] below the data folder fd `dfd` through folder fds (open_dir_at; the parts are walked again,
     so a part swapped for a link after the checks is refused): lstat at its folder's fd, then unlink there (a folder:
     shutil.rmtree with dir_fd, which never follows a link). Returns None when deleted, or why it was refused."""
-    fd, why = open_dir_at(dfd, parts[:-1])
+    fd, why = open_dir_at(dfd, parts[:-1], show)
     if fd is None:
         return why or "a folder part is gone (re-check)"
     try:
         st = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
         if stat.S_ISLNK(st.st_mode):
-            return "is a link inside the data folder: %s (swapped in after the checks)" % "/".join(parts)
+            return "is a link inside the data folder: %s (swapped in after the checks)" % os.path.join(show, *parts)
         if stat.S_ISDIR(st.st_mode):
             shutil.rmtree(parts[-1], dir_fd=fd)
         else:
@@ -189,12 +189,12 @@ def remove_at(dfd, parts):
         os.close(fd)
 
 
-def untouched_at(dfd, parts, now, minutes, forbidden_parts):
+def untouched_at(dfd, parts, now, minutes, forbidden_parts, show=""):
     """Run.untouched for parts below the data folder fd `dfd`, read through folder fds only (never by path):
     (True, bytes, None) when nothing under it changed within `minutes`; a link, a forbidden folder inside or an
     unreadable entry counts as touched."""
     limit = now - minutes * 60
-    pfd, why = open_dir_at(dfd, parts[:-1])
+    pfd, why = open_dir_at(dfd, parts[:-1], show)
     if pfd is None:
         return False, 0, why or "gone"
     try:
@@ -456,7 +456,7 @@ class Run:
             sfd = None
             if not bad:
                 try:
-                    sfd, bad = open_dir_at(dfd, name.split("/"))
+                    sfd, bad = open_dir_at(dfd, name.split("/"), data)
                 except (OSError, ValueError) as e:
                     bad = "cannot be checked (%s)" % e.__class__.__name__
             if bad:
@@ -478,12 +478,12 @@ class Run:
             if not bad:
                 try:
                     parts = n.split("/")
-                    pfd, bad = open_dir_at(dfd, parts[:-1])
+                    pfd, bad = open_dir_at(dfd, parts[:-1], data)
                     if pfd is not None:
                         try:
                             st = os.stat(parts[-1], dir_fd=pfd, follow_symlinks=False)
                             if stat.S_ISLNK(st.st_mode):
-                                bad = "is a link inside the data folder: %s" % n
+                                bad = "is a link inside the data folder: %s" % os.path.join(data, *parts)
                             else:
                                 cands.append(parts)
                         except (FileNotFoundError, NotADirectoryError):
@@ -498,7 +498,7 @@ class Run:
         for parts in cands:
             p = os.path.join(data, *parts)
             try:
-                ok, nbytes, why = untouched_at(dfd, parts, self.now, days * 1440, self.c.forbidden_parts)
+                ok, nbytes, why = untouched_at(dfd, parts, self.now, days * 1440, self.c.forbidden_parts, data)
                 if not ok:
                     self.log("KEEP", r["id"], p, guard=why)
                     continue
@@ -506,7 +506,7 @@ class Run:
                     self.would += nbytes
                     self.log("WOULD-DELETE", r["id"], p, nbytes, guard)
                     continue
-                bad = remove_at(dfd, parts)
+                bad = remove_at(dfd, parts, data)
             except (OSError, ValueError) as e:
                 self.log("KEEP", r["id"], p, guard="delete failed: %s" % str(e)[:80])
                 continue
