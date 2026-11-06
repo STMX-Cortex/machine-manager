@@ -143,10 +143,12 @@ class Oscillation(unittest.TestCase):
         self.assertTrue(all(c[2] < c[1] for c in only_margin), only_margin)
         self.assertLessEqual(len(only_margin), 3)
         only_hold, _, _ = simulate(border_cycle, settings(**{MARGIN: 0}))
-        ups = [c for c in only_hold if c[2] > c[1]]
-        downs = [c for c in only_hold if c[2] < c[1]]
-        self.assertEqual(ups, [], "a down every 7 minutes keeps the 15-minute hold on: %r" % only_hold)
-        self.assertEqual(len(downs), 3)
+        # At the floor (3) an AMBER minute is no step down, so the hold runs from the last real step down:
+        # downs at 0, 7, 14 (floor); raise at 34 (hold 14+15=29, GREEN since 29 + 5 min); down at 35; raise at 55
+        # (hold 35+15=50, GREEN since 50 + 5 min); down at 56.
+        self.assertEqual([(c[0] / MIN, c[1], c[2]) for c in only_hold],
+                         [(0, 6, 5), (7, 5, 4), (14, 4, 3), (34, 3, 4), (35, 4, 3), (55, 3, 4), (56, 4, 3)])
+        self.assertLessEqual(len(only_hold), settings()["self.max_slot_changes_per_hour"])
 
     def test_a_slower_cycle_with_margin_0_raises_only_after_the_hold(self):
         """One AMBER minute every 20 minutes, 51% between: with margin 0 the hold alone decides the raise time."""
@@ -338,8 +340,9 @@ class HoldAfterDown(unittest.TestCase):
         r = mmdecide.slot_decide(st, inp(NOW + 10 * MIN, "AMBER", 49.0, slots=5), s)
         self.assertEqual(r["slots"], 4)
         st = r["state"]
-        for m, want in ((15.0, None), (24.9, None), (25.0, 5)):
+        for m, want in ((15.0, None), (20.0, None), (24.9, None), (25.0, 5)):
             got = mmdecide.slot_decide(st, inp(NOW + m * MIN, free_pct=60.0, slots=4), s)
+            st = got["state"]
             self.assertEqual(got["slots"], want, m)
 
     def test_a_raise_does_not_start_a_hold(self):
@@ -726,7 +729,7 @@ class BadLastDown(unittest.TestCase):
             with self.subTest(last_down=bad):
                 r = mmdecide.slot_decide(dict(calm_state(NOW), last_down=bad), inp(NOW, free_pct=80.0), settings())
                 self.assertEqual(r["held"], "raise held: controller state invalid (last_down)")
-                self.assertEqual(r["problem"], "slot controller state invalid: last_down; " + HOLD_NOTE)
+                self.assertEqual(r["problem"], "slot controller state invalid: last_down")
                 self.assertNotIn("last_down", r["state"], "an invalid last_down is dropped")
                 self.assertEqual(r["state"]["raise_hold_since"], NOW)
 
@@ -843,9 +846,10 @@ class ClearWriteFails(RecoveryBase):
         mmcore.write_atomic(starts, json.dumps([time.time() - 60]))
         before = open(starts).read()
         os.chmod(state, 0o500)
-        self.addCleanup(os.chmod, state, 0o700)
-        rc, out, err = self.run_mm("on")
-        os.chmod(state, 0o700)
+        try:
+            rc, out, err = self.run_mm("on")
+        finally:
+            os.chmod(state, 0o700)
         self.assertEqual((rc, out), (2, [CLEAR_WRITE_ERROR]), err)
         self.assertIsNotNone(mmcore.safe_state(), "safe mode stays")
         self.assertEqual(open(starts).read(), before, "the crash history stays")
@@ -858,9 +862,10 @@ class ClearWriteFailsWithOff(RecoveryBase):
         mmcore.write_atomic(os.path.join(self.data, "off.json"), json.dumps({"off": True, "since": "x", "reason": "t"}))
         state = os.path.join(self.data, "state")
         os.chmod(state, 0o500)
-        self.addCleanup(os.chmod, state, 0o700)
-        rc, out, err = self.run_mm("on")
-        os.chmod(state, 0o700)
+        try:
+            rc, out, err = self.run_mm("on")
+        finally:
+            os.chmod(state, 0o700)
         self.assertEqual((rc, out), (2, [CLEAR_WRITE_ERROR]), err)
         self.assertIsNotNone(mmcore.off_state(), "a failed clear changes nothing: off stays")
         self.assertIsNotNone(mmcore.safe_state())
