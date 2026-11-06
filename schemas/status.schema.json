@@ -200,6 +200,72 @@
     "null"
    ],
    "description": "machine: minutes the queue has been idle (the IDLE_ROOM span), or null when it is not idle"
+  },
+  "ready_work": {
+   "type": "object",
+   "description": "machine, only when the profile's ready_work_dir is on: free slots (slots_would - busy, at least 0), the ready units of the good owner files, the IDLE_WITH_WORK span (minutes, or null), and one entry per owner file",
+   "required": [
+    "free",
+    "ready",
+    "idle_minutes",
+    "owners"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "free": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "ready": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "idle_minutes": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "owners": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "required": [
+       "owner",
+       "file",
+       "units",
+       "age_min",
+       "state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "owner": {
+        "type": "string"
+       },
+       "file": {
+        "type": "string"
+       },
+       "units": {
+        "type": "integer",
+        "minimum": 0
+       },
+       "age_min": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "state": {
+        "enum": [
+         "ok",
+         "stale",
+         "bad"
+        ]
+       }
+      }
+     }
+    }
+   }
   }
  },
  "additionalProperties": false

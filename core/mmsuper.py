@@ -28,6 +28,7 @@ import mmdecide
 import mmdelete
 import mmevidence
 import mmread
+import mmready
 import mmrecover
 
 KERNEL_PREDICATE = ('sender == "kernel" AND eventMessage CONTAINS "memorystatus" AND '
@@ -527,6 +528,9 @@ class Supervisor:
         self.reading_problems = []
         self.ping = Worker(mmrecover.ping)
         self.facts = machine_facts()  # static: read once (status.json `facts`, mm resources)
+        # the IDLE_WITH_WORK timer: its start outlives a restart (mmready.load_since; an unreadable record is kept)
+        self.ready_since, self.ready_error = mmready.load_since()
+        self.ready_saved = self.ready_since  # the record's value (None: missing, or not read)
         # every start: no process stays stopped by an earlier run (a crash or a kill during a pause)
         legacy = self.state.pop("paused", None)
         if mmrecover.read_paused() or legacy:
@@ -818,6 +822,11 @@ class Supervisor:
         if self.queue:
             self._control(now, s, mac_state, reasons, q, events, writes_on, safe)
 
+        # ready work: free slots (this tick's would - busy) while owners' ready units wait
+        rw = self._ready_work(now, s, q)
+        if rw is not None:
+            snap["ready_work"] = rw
+
         # alerts
         if self.settings.problem:
             store.raise_("SETTINGS_BAD", "SETTINGS_BAD", "ACTION", "settings invalid; the last good values stay: "
@@ -846,7 +855,7 @@ class Supervisor:
         # files
         active = (mmcore.read_json(store.state_file, {}) or {}).get("active") or {}
         self._status(now, mac_state, reasons, q, sample, "ok", active, s, observe, off, safe,
-                     idle_minutes=snap.get("idle_minutes"))
+                     idle_minutes=snap.get("idle_minutes"), ready_work=snap.get("ready_work"))
         for pool in self.pools:
             read = self.pool_reads.get(pool.id) if pool.scoped else gh
             self._pool_status(now, s, read, active, pool)
@@ -856,6 +865,31 @@ class Supervisor:
             mmcore.write_atomic(mmcore.path("state", "counts.json"), json.dumps(self.counts, sort_keys=True))
         self.state["offsets"] = {"history": self.hist.offset, "kills": self.kills.offset, "events": self.events.offset}
         self.save_state()
+
+    def _ready_work(self, now, s, q):
+        """The snapshot's ready_work part (mmready.scan, mmdecide.ready_free and ready_since), or None when the
+        profile names no ready_work_dir or nothing is at it. A reading only: the same in every mode. The timer's
+        start is saved when it differs from the record, never over a record that does not read (the timer then runs
+        in memory; the record is read again each tick until it reads or is gone)."""
+        if self.ready_error:
+            saved, self.ready_error = mmready.load_since()
+            if self.ready_error is None:
+                self.ready_saved = saved
+        found = mmready.scan(mmready.folder(self.p), now, s["ready_work.stale_minutes"])
+        free = mmdecide.ready_free(self.state.get("virtual_slots"), len((q or {}).get("busy") or []))
+        ready = sum(o["units"] for o in (found or {}).get("owners") or [] if o["state"] != "bad")
+        self.ready_since = mmdecide.ready_since(self.ready_since, free, ready, now) if found else None
+        if self.ready_error is None and self.ready_since != self.ready_saved:
+            try:
+                mmready.save_since(self.ready_since)
+                self.ready_saved = self.ready_since
+            except OSError as e:  # the timer still runs in memory; the next tick tries again
+                mmcore.append_line(mmcore.path("state", "errors.log"),
+                                   mmcore.mask("%s ready-work state %r" % (mmcore.now_local(now), e)))
+        if not found:
+            return None
+        return dict(found, free=free, ready=ready, state_error=self.ready_error,
+                    idle_minutes=None if self.ready_since is None else (now - self.ready_since) / 60)
 
     def _recovery_conditions(self, now, s, safe):
         """Safe mode, held events (a reboot, a self restart), the watchdog's stamp and the dead-man ping."""
@@ -1150,10 +1184,11 @@ class Supervisor:
         self.hold(key, "PAUSE_MAX", "ATTENTION", text, now + HELD_SELF_S, command="mm status")
 
     def _status(self, now, mac_state, reasons, q, sample, note, active=None, s=None, observe=None, off=None, safe=None,
-                idle_minutes=None):
+                idle_minutes=None, ready_work=None):
         """status.json: the machine's status record and the heartbeat, every tick (schemas/status.schema.json).
         Optional parts for mm resources: facts (static, read at start), calls (distinct queue calls, as SLOT_CPU
-        counts them), idle_minutes (the IDLE_ROOM span; None when not idle), readings.cpu_pct."""
+        counts them), idle_minutes (the IDLE_ROOM span; None when not idle), readings.cpu_pct, ready_work (only when
+        the profile's ready_work_dir is on: mmready.status_part)."""
         gate = self.state.get("gate", {})
         sample = sample or {}
         counts = {"ACTION": 0, "ATTENTION": 0, "INFO": 0}
@@ -1174,6 +1209,8 @@ class Supervisor:
             "calls": len(mmalerts.queue_calls(q.get("busy") or [])) if isinstance(q, dict) else None,
             "idle_minutes": None if idle_minutes is None else round(idle_minutes, 1),
             "heartbeat": {"pid": os.getpid(), "tick": self.tick_n, "note": note}}, mid=self.mid)
+        if ready_work is not None:
+            rec["ready_work"] = mmready.status_part(ready_work)
         mmcore.write_atomic(mmcore.path("status.json"), json.dumps(rec, sort_keys=True))
 
     def _pool_status(self, now, s, gh, active, pool=None):

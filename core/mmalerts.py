@@ -13,6 +13,8 @@ from mmtext import quoted as _q  # an agent value in a text: cleaned, quoted unl
 # Paths QUEUE_FILE_UNREADABLE names (design C-14, C-15): exactly this many when more files cannot be read; the count in
 # its text covers the rest, so one alert stays short however many files an agent makes.
 UNREADABLE_NAMED = 5
+# IDLE_WITH_WORK names at most this many owners (most units first).
+READY_OWNERS_NAMED = 5
 
 
 def _c(key, name, level, text, value=None, band=None, worse="up", command=None, investigate=None):
@@ -42,6 +44,46 @@ def queue_calls(busy):
             call = "%s:%s" % (pid, float(min(starts)))
             calls[call] = (pid, {b["slot"] for b in held})
     return calls
+
+
+def _ready_work(rw, s):
+    """IDLE_WITH_WORK and READY_WORK_STALE from the snapshot's ready_work part (mmready, mmsuper._ready_work).
+    Owner keys are READY_STALE:<file stem> (mmready.NAME); the folder's own keys start with "_", which no stem does."""
+    out = []
+    if not rw:
+        return out
+    if rw.get("not_folder"):
+        out.append(_c("READY_STALE:_folder", "READY_WORK_STALE", "ATTENTION",
+                      "ready_work_dir is not a folder: %s" % _q(rw.get("folder") or "")))
+    for o in rw.get("owners") or []:
+        if o["state"] == "bad":
+            out.append(_c("READY_STALE:" + o["stem"], "READY_WORK_STALE", "ATTENTION",
+                          "ready-work file %s is bad: %s; its units count as 0" % (_q(o["file"]), o["why"])))
+        elif o["state"] == "stale":
+            out.append(_c("READY_STALE:" + o["stem"], "READY_WORK_STALE", "ATTENTION",
+                          "%s ready-work file is %.0f min old (limit %g)"
+                          % (_q(o["owner"]), o["age_min"], s["ready_work.stale_minutes"])))
+    if rw.get("more"):
+        out.append(_c("READY_STALE:_more", "READY_WORK_STALE", "ATTENTION",
+                      "%d more ready-work files than the %d read; only the first %d by name count"
+                      % (rw["more"], len(rw.get("owners") or []), len(rw.get("owners") or []))))
+    if rw.get("state_error"):
+        out.append(_c("READY_STALE:_state", "READY_WORK_STALE", "ATTENTION",
+                      "the idle timer record cannot be read (%s); the timer runs in memory from this start; "
+                      "move the file away" % rw["state_error"]))
+    free, ready, idle = rw.get("free") or 0, rw.get("ready") or 0, rw.get("idle_minutes")
+    if free > 0 and ready > 0 and idle is not None and idle > s["ready_work.idle_minutes"]:
+        busy = sorted((o for o in rw.get("owners") or [] if o["state"] != "bad" and o["units"] > 0),
+                      key=lambda o: (-o["units"], o["owner"], o["file"]))
+        who = ", ".join("%s %d" % (_q(o["owner"]), o["units"]) for o in busy[:READY_OWNERS_NAMED])
+        if len(busy) > READY_OWNERS_NAMED:
+            who += ", and %d more" % (len(busy) - READY_OWNERS_NAMED)
+        nxt = next((o["next"] for o in busy if o["next"]), "")
+        out.append(_c("IDLE_WITH_WORK", "IDLE_WITH_WORK", "ACTION",
+                      "%d free slot%s while %d ready units wait for %.0f min: %s%s"
+                      % (free, "" if free == 1 else "s", ready, idle, who,
+                         " (next: %s)" % _q(nxt[:120]) if nxt else ""), command="mm status"))
+    return out
 
 
 def evaluate(snap, s, now, active=frozenset(), names=None):
@@ -175,6 +217,7 @@ def evaluate(snap, s, now, active=frozenset(), names=None):
     idle = g("idle_minutes")
     if idle is not None and idle >= s["queue.idle_room_minutes"]:
         out.append(_c("IDLE_ROOM", "IDLE_ROOM", "INFO", "slots idle %.0f min, nothing waiting, machine GREEN" % idle))
+    out += _ready_work(g("ready_work"), s)
 
     # --- other sources
     fsev = g("fsev_mb")
