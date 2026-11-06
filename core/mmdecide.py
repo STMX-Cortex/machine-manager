@@ -147,8 +147,9 @@ def slot_decide(state, inp, s):
     """One step of the slot controller. One step up at a time after a long GREEN with demand; down at once.
     state: the controller's own dict (returned updated, never changed in place).
     inp: now, mac_state, reasons, slots, busy, waiting, wx_waiting, override ({slots, until, reason} or null),
-    events (list of 'timing-failure', 'guard-kill', 'trim').
-    Returns {"slots": new or None, "why": text or None, "state": the new state}."""
+    events (list of 'timing-failure', 'guard-kill', 'trim'), free_pct (free memory %, None = unknown; raise_hold).
+    Returns {"slots": new or None, "why": text or None, "held": the text of a GREEN raise that raise_hold refused, or
+    None, "state": the new state}."""
     st = dict(state or {})
     now, mac_state, reasons, slots = inp["now"], inp["mac_state"], inp.get("reasons", []), inp["slots"]
     events = inp.get("events") or []
@@ -169,7 +170,7 @@ def slot_decide(state, inp, s):
     pin = None
     if override and override.get("until", 0) > now:
         pin = max(1, min(16, int(override["slots"])))
-    target = why = None
+    target = why = hold_why = None
     amber_events = [e for e in events if e in ("timing-failure", "guard-kill")]
     if mac_state == "RED":
         if slots > floor:
@@ -188,16 +189,41 @@ def slot_decide(state, inp, s):
         no_red = now - st.get("last_red", FAR_PAST) >= s["slots.hold_after_red_minutes"] * 60
         no_trim = now - st.get("last_trim", FAR_PAST) >= s["slots.hold_after_trim_minutes"] * 60
         if held and calm and no_red and no_trim and demand and not inp.get("wx_waiting") and slots < ceiling:
-            target, why = slots + 1, "GREEN %.0f min, %d waiting, all %d slots busy" % (
-                (now - since) / 60, inp["waiting"], slots)
+            hold = raise_hold(st, inp, now, s)
+            if hold:
+                hold_why = hold
+            else:
+                target, why = slots + 1, "GREEN %.0f min, %d waiting, all %d slots busy" % (
+                    (now - since) / 60, inp["waiting"], slots)
     if target is not None and pin is not None and target > pin:
         target = pin
     if target is None or target == slots:
-        return {"slots": None, "why": None, "state": st}
+        return {"slots": None, "why": None, "held": hold_why, "state": st}
     if target < slots:
         st["last_down"] = now
     st["last_change"] = now
-    return {"slots": target, "why": why, "state": st}
+    return {"slots": target, "why": why, "held": None, "state": st}
+
+
+def raise_hold(st, inp, now, s):
+    """The hysteresis of a GREEN raise: None when it may go on, else the text of the refusal. Free memory must stand
+    slots.raise_free_margin_pct above the AMBER border (0: not checked, an unknown value too), and the last step down
+    must be slots.raise_hold_after_down_minutes old (0: off)."""
+    margin = s["slots.raise_free_margin_pct"]
+    if margin:
+        free = inp.get("free_pct")
+        if not isinstance(free, (int, float)) or isinstance(free, bool) or not math.isfinite(free):
+            return "raise held: free memory unknown"
+        border = s["slots.amber_free_pct"] + margin
+        if free < border:
+            return "raise held: free %.1f%% < %g%% (amber %g%% + margin %g%%)" % (
+                free, border, s["slots.amber_free_pct"], margin)
+    hold = s["slots.raise_hold_after_down_minutes"] * 60
+    down = st.get("last_down")
+    if hold and down is not None and now - down < hold:
+        return "raise held: %.0f min since the last step down < %g min" % (
+            max(0, now - down) / 60, s["slots.raise_hold_after_down_minutes"])
+    return None
 
 
 # ------------------------------------------------------------------------------------------- alert dedupe and repeat
@@ -576,7 +602,8 @@ def sample_problems(sample):
 def self_check(state, inp, s):
     """The supervisor's check of itself, once per tick. state: {"slow": n, "bad": n} (consecutive counts, kept by the
     caller). inp: now, rss_mb (None = not read this tick), tick_s, tick_errors (failed ticks in a row),
-    reading_problems (list), data_writable, data_free_mb, slot_changes (times), safe (in safe mode now).
+    reading_problems (list), data_writable, data_free_mb, slot_changes (times), safe (in safe mode now), cleared_at
+    (the last `mm on` or `mm restart --clear-safe`, or None: only the slot changes after it count).
     Returns {"state", "action": "ok"|"restart"|"safe"|"alert", "reasons"}. A fault of the tool itself (memory, slow or
     failing ticks) asks for a restart; a fault a restart cannot fix (wrong readings, the data folder, a slot count
     that keeps changing) asks for safe mode. In safe mode the answer is never restart or safe, only alert."""
@@ -599,7 +626,10 @@ def self_check(state, inp, s):
     if free is not None and free < s["self.min_free_mb"]:
         safe.append("the data folder's disk has %.0f MB free, below %g MB" % (free, s["self.min_free_mb"]))
     now = inp.get("now", 0)
-    changes = [t for t in inp.get("slot_changes", []) if now - t < 3600]
+    cleared = inp.get("cleared_at")
+    if not isinstance(cleared, (int, float)) or isinstance(cleared, bool) or not cleared <= now:
+        cleared = None  # no clear, or one later than now (the clock went back): every change of the hour counts
+    changes = [t for t in inp.get("slot_changes", []) if now - t < 3600 and (cleared is None or t > cleared)]
     if len(changes) > s["self.max_slot_changes_per_hour"]:
         safe.append("the slot count changed %d times in the last hour (limit %d)"
                     % (len(changes), s["self.max_slot_changes_per_hour"]))

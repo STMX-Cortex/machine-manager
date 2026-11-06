@@ -581,10 +581,16 @@ class Supervisor:
                 rss = p["rss_mb"]
         writable, free = mmrecover.data_facts()
         safe = mmcore.safe_state()
+        cleared, problem = mmrecover.read_clear()
+        if problem and now - self.state.get("clear_unreadable_at", 0) >= 600:
+            self.state["clear_unreadable_at"] = now
+            line = "SELF-CHECK clear record unreadable (%s); every slot change of the hour counts" % problem
+            mmrecover.log(line, now)
+            self.log_decision("%s %s" % (mmcore.now_local(now), line))
         r = mmdecide.self_check(self.self_state, {
             "now": now, "rss_mb": rss, "tick_s": tick_s, "tick_errors": tick_errors,
             "reading_problems": self.reading_problems, "data_writable": writable, "data_free_mb": free,
-            "slot_changes": self.state.get("slot_changes", []), "safe": bool(safe)}, s)
+            "slot_changes": self.state.get("slot_changes", []), "safe": bool(safe), "cleared_at": cleared}, s)
         self.self_state = r["state"]
         why = "; ".join(r["reasons"])
         if r["action"] == "restart":
@@ -1022,8 +1028,10 @@ class Supervisor:
         r = mmdecide.slot_decide(self.state.get("controller") or {}, {
             "now": now, "mac_state": mac_state, "reasons": list(reasons), "slots": cur,
             "busy": len((q or {}).get("busy", [])), "waiting": len(tickets),
-            "wx_waiting": any(t["mode"] in ("W", "X") for t in tickets), "override": override, "events": events}, s)
+            "wx_waiting": any(t["mode"] in ("W", "X") for t in tickets), "override": override, "events": events,
+            "free_pct": self.free_pct}, s)
         self.state["controller"] = r["state"]
+        self._log_hold(now, cur, r.get("held"))
         if safe and safe.get("slot_write") is None:
             to = min(cur, s["safe_mode.slots"])
             r = {"slots": to, "why": "safe mode: at most %d slots" % s["safe_mode.slots"]} if to < cur else {"slots": None}
@@ -1046,6 +1054,19 @@ class Supervisor:
                 line += " (write failed: %s)" % e
         self.state["virtual_slots"] = r["slots"]
         self.log_decision(line)
+
+    def _log_hold(self, now, cur, held):
+        """A GREEN raise the hysteresis refused (mmdecide.raise_hold): one HOLD decision line, at most once per 10 min
+        while the same kind of hold lasts; a new kind logs at once."""
+        if not held:
+            self.state.pop("raise_held", None)
+            return
+        kind = "unknown" if "unknown" in held else ("free" if "free" in held else "down")
+        last = self.state.get("raise_held") or {}
+        if last.get("kind") == kind and now - last.get("at", 0) < 600:
+            return
+        self.state["raise_held"] = {"kind": kind, "at": now}
+        self.log_decision("%s HOLD slots %d: %s" % (mmcore.now_local(now), cur, held))
 
     def _gate_and_pause(self, now, s, mac_state, reasons, actions_on, safe=None, readings_ok=False):
         """`readings_ok`: every memory reading is present throughout classify's growth window; without it neither
