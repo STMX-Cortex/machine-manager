@@ -823,6 +823,23 @@ def queue_idle(slots, busy, waiting, state):
     return bool(slots) and busy is not None and busy < slots and waiting == 0 and state == "GREEN"
 
 
+def ready_free(would, busy):
+    """Free slots for IDLE_WITH_WORK: max(0, would - busy), from the numbers `mm status` prints (slots_would, busy).
+    0 when either is not a count (no queue, or the slot file did not read)."""
+    def n(v):
+        return v if isinstance(v, int) and not isinstance(v, bool) else None
+    would, busy = n(would), n(busy)
+    return 0 if would is None or busy is None else max(0, would - busy)
+
+
+def ready_since(since, free, ready, now):
+    """The IDLE_WITH_WORK timer for one tick: None when no slot is free or no ready unit waits; else the start kept
+    (since), or now when it starts on this tick."""
+    if not free or not ready or free <= 0 or ready <= 0:
+        return None
+    return now if since is None else since
+
+
 STATES = ("GREEN", "STEADY", "AMBER", "RED", "UNKNOWN")
 RECORDS_MAX = 1000  # records read per resources.json and per `mm resources` (reader caps, schemas/resource.schema.json)
 VALUES_MAX = 64  # raw `values` entries read per record
