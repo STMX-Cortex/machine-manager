@@ -284,34 +284,71 @@ class R4UserFields(lr.SupBase):
 # ===================================================================================== 5: `mm on` with a folder
 
 class R5MmOnFolder(lr.SupBase):
-    """A folder in place of safe.json or off.json: `mm on` cannot end it; it says so (an E_ line, exit not 0), the guard
-    stays set and the folder is not deleted."""
+    """A folder in place of safe.json or off.json: `mm on` cannot end it; it says so (E_CLEAR, exit 2), the guard stays
+    set and the folder is not deleted (never a recursive delete)."""
+    # removing a folder with os.remove: EPERM on macOS, EISDIR on Linux
+    WHY = r"(PermissionError|IsADirectoryError)"
+    SAFE = (r"E_CLEAR safe\.json was not removed \(%s\); safe mode and the unclean starts stay; fix: remove it by hand "
+            r"\(mm on never deletes a folder\), then run it again" % WHY)
+    OFF = (r"E_CLEAR off\.json was not removed \(%s\); actions stay off; fix: remove it by hand \(mm on never deletes "
+           r"a folder\), then run mm on again" % WHY)
 
-    def check_folder(self, name, fn):
+    def check_folder(self, name, fn, line):
         folder = os.path.join(self.data, name)
         os.makedirs(folder)
         lr.write_raw(os.path.join(folder, "keep.txt"), "the owner's file")
         r = self.mm("on")
-        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertTrue(r.stdout.strip().startswith("E_"), r.stdout + r.stderr)
-        self.assertNotIn("actions=on", r.stdout)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertRegex(r.stdout.strip(), "^" + line + "$")
+        self.assertEqual(len(r.stdout.splitlines()), 1, r.stdout)
         self.assertNotIn("Traceback", r.stderr)
         self.assertTrue(os.path.isdir(folder))
         self.assertEqual(open(os.path.join(folder, "keep.txt")).read(), "the owner's file")
         self.assertTrue(fn(), "the guard stays set")
 
     def test_safe_json_folder(self):
-        self.check_folder("safe.json", mmcore.safe_state)
+        lr.write_raw(os.path.join(self.data, "state", "starts.json"), "[1, 2, 3]")
+        self.check_folder("safe.json", mmcore.safe_state, self.SAFE)
+        self.assertEqual(lr.raw(os.path.join(self.data, "state", "starts.json")), b"[1, 2, 3]",
+                         "the unclean starts stay")
+        self.assertIn("SAFE MODE not cleared: safe.json was not removed (",
+                      open(os.path.join(self.data, "state", "recovery.log")).read())
 
     def test_off_json_folder(self):
-        self.check_folder("off.json", mmcore.off_state)
+        self.check_folder("off.json", mmcore.off_state, self.OFF)
+
+    def test_off_json_folder_after_a_cleared_safe_mode_says_so(self):
+        mmrecover.enter_safe("test", time.time())
+        line = self.OFF.replace("; actions stay off;", "; actions stay off; safe mode was cleared;")
+        self.check_folder("off.json", mmcore.off_state, line)
+        self.assertIsNone(mmcore.safe_state())
 
     def test_empty_folder_too(self):
         os.makedirs(os.path.join(self.data, "safe.json"))
         r = self.mm("on")
-        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertRegex(r.stdout.strip(), "^" + self.SAFE + "$")
         self.assertTrue(os.path.isdir(os.path.join(self.data, "safe.json")))
         self.assertTrue(mmcore.safe_state())
+
+    def test_clear_safe_raises_e_clear(self):
+        os.makedirs(os.path.join(self.data, "safe.json"))
+        with self.assertRaises(mmcore.MMError) as cm:
+            mmrecover.clear_safe("test")
+        self.assertRegex(str(cm.exception), "^" + self.SAFE + "$")
+        self.assertTrue(os.path.isdir(os.path.join(self.data, "safe.json")))
+
+
+class R5RestartClearSafeFolder(lr._RecoveryBase):
+    @mmtest.darwin_only
+    def test_restart_clear_safe_with_a_folder_stops_nothing(self):
+        os.makedirs(os.path.join(self.data, "safe.json"))
+        rc, out, err = self.run_mm("restart", "--clear-safe", FAKE_HEARTBEAT_PID="4343")
+        self.assertEqual(rc, 2, out + [err])
+        self.assertEqual(len(out), 1, out)
+        self.assertRegex(out[0], "^" + R5MmOnFolder.SAFE + "$")
+        self.assertEqual(self.launchctl(), [], "E_CLEAR comes first: the service is not stopped")
+        self.assertTrue(os.path.isdir(os.path.join(self.data, "safe.json")))
 
 
 # ===================================================================================== 6: no status.json
