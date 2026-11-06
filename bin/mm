@@ -447,11 +447,11 @@ def cmd_off(args, as_json, on, profile):
     f = mmcore.path("off.json")
     if on:
         import mmrecover
+        was = mmrecover.clear_safe("mm on")  # first: E_CLEAR (nothing changed) when its record cannot be written
         try:
             os.remove(f)
         except FileNotFoundError:
             pass
-        was = mmrecover.clear_safe("mm on")
         print("actions=on" + (" safe=cleared" if was else ""))
         return 0
     reason = opt(args, "--reason", "mm off")

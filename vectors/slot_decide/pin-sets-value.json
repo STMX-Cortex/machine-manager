@@ -2,6 +2,7 @@
  "case": "pin-sets-value",
  "expected": {
   "held": null,
+  "problem": null,
   "slots": 7,
   "state": {
    "demand_since": 1800000000.0,

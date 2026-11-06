@@ -2,6 +2,7 @@
  "case": "pin-expired",
  "expected": {
   "held": null,
+  "problem": null,
   "slots": null,
   "state": {
    "demand_since": 1800000000.0,

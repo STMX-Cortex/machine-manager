@@ -1,0 +1,36 @@
+{
+ "case": "green-raise-after-repair-hold",
+ "expected": {
+  "held": null,
+  "problem": null,
+  "slots": 6,
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": 1799996400.0,
+   "last_change": 1800000000.0,
+   "raise_hold_since": 1799999100.0
+  },
+  "why": "GREEN 60 min, 2 waiting, all 5 slots busy"
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 5,
+   "free_pct": 80.0,
+   "mac_state": "GREEN",
+   "now": 1800000000.0,
+   "reasons": [],
+   "slots": 5,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0,
+   "raise_hold_since": 1799999100.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

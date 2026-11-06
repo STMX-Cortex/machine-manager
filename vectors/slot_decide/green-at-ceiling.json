@@ -2,6 +2,7 @@
  "case": "green-at-ceiling",
  "expected": {
   "held": null,
+  "problem": null,
   "slots": null,
   "state": {
    "demand_since": 1799996400.0,
