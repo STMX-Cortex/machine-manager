@@ -351,14 +351,17 @@ folder of ready-work files, "Ready work"), `ready_work_owners` (default `[]`: ow
 `{claude_tmp}`, `~`. The schema is `schemas/profile.schema.json`.
 
 An `own_files` rule (`slot_dir`, default `evidence`; `files`) names folders and files in the data folder. Each name
-must be relative and stay inside the data folder (`state/decisions.log.1` is fine). An absolute or empty name, a
-`..` that leaves the data folder, a link at any part of the name below the data folder, or a real parent outside it
-is refused: one KEEP line in `deletes.log`, never a delete; the rule's other names still run, and a refused
-`slot_dir` gives no slot candidates. A value of the wrong type refuses all its names with one KEEP line: `files`
-that is not a list (one text is never read letter by letter), or `slot_dir` or `slot_pattern` that is not a text
-(then no slot candidates). The delete itself goes through folder descriptors from the real data folder, each folder
-part opened without following a link, so a part swapped for a link after the checks is refused (a KEEP line).
-`mm check` shows these problems as `E_PROFILE`.
+is used as written, never normalized, and must be made of plain relative parts (`state/decisions.log.1` is fine). An
+absolute or empty name, a name with a NUL character, a `..` part (also one that stays inside), a `.` or empty part,
+or a link at any part below the data folder is refused: one KEEP line in `deletes.log`, never a delete. The rule's
+other names still run, also when one name cannot be checked (a KEEP line for it), and a refused `slot_dir` gives no
+slot candidates. A value of the wrong type refuses all its names with one KEEP line: `files` that is not a list (one
+text is never read letter by letter), or `slot_dir` or `slot_pattern` that is not a text (then no slot candidates).
+The real data folder is opened once per rule without following a link (a link there, or a folder that changed while
+it was opened, refuses the whole rule), and every check and delete goes through folder descriptors from it, each
+part opened without following a link, so a part swapped for a link after the checks is refused. The data folder and
+every folder above it must belong to the owner: those are not checked. `mm check` shows the name and type problems
+as `E_PROFILE`.
 
 Clean-up list rule types (`deletes.cleanup`) are `git_worktrees`, `git_branches`, `stale_children` and `paths`.
 A `git_worktrees` rule may set `keep = ["journal-*"]`: case-sensitive `fnmatch` patterns on each tree folder's
