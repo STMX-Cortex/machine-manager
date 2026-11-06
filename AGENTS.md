@@ -50,10 +50,10 @@ Levels: INFO, ATTENTION, ACTION. Alert names: README.md, Glossary.
 ## Never
 
 1. Never edit the profile, `settings.toml`, `off.json`, `override.json` or the queue's slot file by hand
-   unless the owner asks; use `mm off`, `mm slots pin`, `mm on`.
+   unless the owner asks; use `mm off`, `mm slots pin`, `mm on`. Profile `own_files` names stay relative, inside the data folder.
 2. Never delete what `mm cleanup` lists; it is a list for the owner, with exact commands.
 3. Never start a heavy job when `mm place` says WAIT, or many agents at RED.
-4. Never kill, stop or resume a process the tool paused; tell the owner (also at `PAUSED_FILE_BROKEN`).
+4. Never kill, stop or resume a process the tool paused; tell the owner (also at `PAUSED_FILE_BROKEN`: a broken `state/paused.json` is never written over).
 5. Never run `mm drill`, `mm install`, `mm rollback`, `mm stop`, `mm restart` or `mm on` without the owner's word.
    `SAFE_MODE` and `CONTROL_FILE_BROKEN` mean automatic actions are off until the owner ends them.
 6. Never put secrets in `--note` or `--reason` text (they are masked, but still).

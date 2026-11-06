@@ -71,6 +71,7 @@ class PausedBroken(dict):
 
 
 PID_KEY = re.compile(r"[1-9][0-9]{0,9}\Z")
+PID_MAX = 2 ** 31 - 1  # a larger pid cannot exist (os.kill raises OverflowError): the record is PausedBroken
 
 
 def paused_problem(d):
@@ -86,8 +87,9 @@ def paused_broken_alert(problem):
 
 def read_paused():
     """{pid text: start time} of every process the pause stopped. Missing: {}. Anything else that is not an object of
-    pid -> start-time text (a read error, a dangling link, invalid JSON, not an object, a key that is not a pid, a
-    value that is not a non-empty text) is PausedBroken (fail closed: "maybe paused", never "nothing paused")."""
+    pid -> start-time text (a read error, a dangling link, invalid JSON, not an object, a key that is not a pid in
+    1..2**31-1, a value that is not a non-empty text) is PausedBroken (fail closed: "maybe paused", never "nothing
+    paused")."""
     f = paused_file()
     try:
         with open(f) as fh:
@@ -99,7 +101,7 @@ def read_paused():
     if not isinstance(d, dict):
         return PausedBroken("state/paused.json: not a JSON object")
     for k, v in d.items():
-        if not PID_KEY.match(k) or not isinstance(v, str) or not v:
+        if not PID_KEY.match(k) or int(k) > PID_MAX or not isinstance(v, str) or not v:
             return PausedBroken("state/paused.json: an entry is not pid -> start time")
     return {str(k): v for k, v in d.items()}
 
@@ -247,8 +249,8 @@ def enter_safe(reason, now, mid=None):
     cannot be used already counts as safe mode on: it is kept as it is (never written over), and the trip is logged."""
     cur = mmcore.safe_state()
     if cur:
-        if cur.get("broken"):
-            log("SAFE MODE trip (%s): %s is kept as it is; safe mode stays on" % (reason, cur["broken"]), now)
+        if mmcore.record_problem(cur):
+            log("SAFE MODE trip (%s): %s is kept as it is; safe mode stays on" % (reason, mmcore.record_problem(cur)), now)
         return cur
     rec = mmcore.stamp({"safe": True, "since": now, "reason": reason[:300], "slot_write": None}, mid=mid)
     mmcore.write_atomic(mmcore.path("safe.json"), json.dumps(rec, sort_keys=True))
@@ -272,7 +274,9 @@ def clear_safe(why, now=None):
     the clear record (CLEAR_FILE: cleared_at, why, was_safe), also when safe mode was not on: the self-check then
     counts only the slot changes after it, so the changes that tripped safe mode do not trip it again at once.
     The clear record is written FIRST: when that fails, nothing is cleared (safe mode and the unclean starts stay) and
-    MMError E_CLEAR is raised. Returns the record that was on, or None."""
+    MMError E_CLEAR is raised. safe.json is removed without reading it (never recursively); when the guard is still
+    set after that (a folder there, a new file), E_CLEAR is raised too and the unclean starts stay. Returns the record
+    that was on, or None."""
     cur = mmcore.safe_state()
     now = time.time() if now is None else now
     try:
@@ -287,11 +291,22 @@ def clear_safe(why, now=None):
         raise mmcore.MMError("E_CLEAR", "the clear record state/self-check-clear.json was not written (%s); safe mode "
                              "and the unclean starts are kept" % e.__class__.__name__,
                              "make the data folder's state/ writable, then run it again")
-    for f in (mmcore.path("safe.json"), mmcore.path("state", "starts.json")):
-        try:
-            os.remove(f)
-        except OSError:
-            pass
+    failed = None
+    try:
+        os.remove(mmcore.path("safe.json"))  # never a recursive delete: a folder there stays, and the check says so
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        failed = e.__class__.__name__
+    if mmcore.safe_state() is not None:  # the guard is checked again: E_CLEAR while it is still set
+        log("SAFE MODE not cleared: safe.json was not removed (%s); the unclean starts are kept"
+            % (failed or "it is back"), now)
+        raise mmcore.MMError("E_CLEAR", "safe.json was not removed (%s); safe mode and the unclean starts stay"
+                             % (failed or "it is back"), "remove it by hand (mm on never deletes a folder), then run it again")
+    try:
+        os.remove(mmcore.path("state", "starts.json"))
+    except OSError:
+        pass
     if cur:
         log("SAFE MODE off: %s" % why)
     return cur

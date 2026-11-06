@@ -12,6 +12,7 @@ import collections
 import errno
 import json
 import hashlib
+import math
 import os
 import queue as queue_mod
 import re
@@ -765,7 +766,8 @@ class Supervisor:
         off = mmcore.off_state()
         safe = mmcore.safe_state()
         observe = s["mode.observe"]
-        writes_on = not observe and not off and not self.dry
+        # a control file that cannot be used (mmcore.record_problem): no slot write at all, as for the off switch
+        writes_on = not observe and not off and not self.dry and not mmcore.record_problem(safe)
         actions_on = writes_on and not safe
         snap["off"] = off
         # sleep detection: the wall clock moved more than the monotonic clock
@@ -1053,17 +1055,21 @@ class Supervisor:
         """Safe mode, a control file or the pause record that cannot be used (CONTROL_FILE_BROKEN, PAUSED_FILE_BROKEN:
         fail closed), held events (a reboot, a self restart), the watchdog's stamp and the dead-man ping."""
         out = []
-        if safe and safe.get("broken"):
-            out.append(mmalerts._c("SAFE_MODE", "SAFE_MODE", "ACTION", "safe mode: %s" % safe["reason"], command="mm on"))
+        if mmcore.record_problem(safe):
+            out.append(mmalerts._c("SAFE_MODE", "SAFE_MODE", "ACTION", "safe mode: %s; automatic actions stay off"
+                                   % mmcore.record_problem(safe), command="mm on"))
         elif safe:
+            since = safe.get("since")  # a field of the file: shown only when it is a time
+            since = mmcore.now_local(since)[11:16] if isinstance(since, (int, float)) and not isinstance(since, bool) \
+                and math.isfinite(since) and abs(since) < 1e11 else "?"
             out.append(mmalerts._c("SAFE_MODE", "SAFE_MODE", "ACTION", "safe mode since %s: %s; automatic actions off"
-                                   % (mmcore.now_local(safe.get("since"))[11:16], safe.get("reason", "?")), command="mm on"))
-        for rec in (off, safe):
-            if rec and rec.get("broken"):
-                name = rec["broken"].split(":", 1)[0]
+                                   % (since, safe.get("reason", "?")), command="mm on"))
+        for name, rec in (("off.json", off), ("safe.json", safe)):
+            problem = mmcore.record_problem(rec)  # the reader's text, never a field of the user's file
+            if problem:
                 out.append(mmalerts._c("CONTROL_FILE_BROKEN:" + name, "CONTROL_FILE_BROKEN", "ACTION",
                                        "%s; automatic actions stay off until the file is good again or removed "
-                                       "(mm on removes it)" % rec["broken"], command="mm on"))
+                                       "(mm on removes it)" % problem, command="mm on"))
         problem = mmrecover.paused_problem(mmrecover.read_paused())
         if problem:
             text, command = mmrecover.paused_broken_alert(problem)

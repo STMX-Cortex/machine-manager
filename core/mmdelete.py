@@ -135,6 +135,36 @@ def own_name_problem(name):
     return None
 
 
+def remove_below(data, rel):
+    """Delete the entry `rel` (a normalized relative name) of the real folder `data` through folder descriptors: from
+    an fd of data, each folder part is opened with O_NOFOLLOW | O_DIRECTORY (a part swapped for a link after the
+    checks is never followed), the last name is checked with lstat at its folder's fd, then unlinked there (a folder:
+    shutil.rmtree with dir_fd, which never follows a link). Returns None when deleted, or why it was refused (a link,
+    a part that cannot be opened); other OSErrors pass to the caller."""
+    parts = rel.split(os.sep)
+    if not parts or any(x in ("", os.curdir, os.pardir) for x in parts):
+        return "not a name inside the data folder"
+    fd = os.open(data, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            try:
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as e:  # ELOOP / ENOTDIR: a link or not a folder; any other error: not entered
+                return "the folder part %s cannot be opened without following a link (%s)" % (part, e.__class__.__name__)
+            os.close(fd)
+            fd = nfd
+        st = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+        if stat.S_ISLNK(st.st_mode):
+            return "a link (swapped in after the checks)"
+        if stat.S_ISDIR(st.st_mode):
+            shutil.rmtree(parts[-1], dir_fd=fd)
+        else:
+            os.unlink(parts[-1], dir_fd=fd)
+        return None
+    finally:
+        os.close(fd)
+
+
 def own_files_shape(r):
     """{key: problem} for an own_files rule's values of the wrong type: `slot_dir` not a text, `slot_pattern` not a
     text, `files` not a list (each name in the list is checked by own_name_problem). `mm check` shows them too."""
@@ -380,11 +410,15 @@ class Run:
                 self.log("KEEP", r["id"], p, guard="re-check: not an own rotated file or evidence slot")
                 continue
             try:
-                shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
-                self.freed += nbytes
-                self.log("DELETE", r["id"], p, nbytes, "pass: own file, age>%gd" % days)
+                bad = remove_below(data, os.path.relpath(p, data))
             except OSError as e:
                 self.log("KEEP", r["id"], p, guard="delete failed: %s" % str(e)[:80])
+                continue
+            if bad:
+                self.log("KEEP", r["id"], p, guard="refused: %s" % bad)
+                continue
+            self.freed += nbytes
+            self.log("DELETE", r["id"], p, nbytes, "pass: own file, age>%gd" % days)
 
     def folders(self, r):
         """Top-level entries matching patterns directly inside the roots, untouched age_minutes, not held."""

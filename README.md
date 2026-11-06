@@ -263,7 +263,9 @@ cannot be read, a dangling link, invalid JSON, not an object, the flag missing o
 `"yes"` or `[]`) keeps automatic actions off. The ACTION alert `CONTROL_FILE_BROKEN:off.json` (or `:safe.json`)
 names the file and the problem, and `mm status` shows it (`broken=`; `--json`: `broken`, only then). The alert clears when the
 file is good again or removed. `mm on` removes both files without reading them; `mm restart --clear-safe` removes
-`safe.json` the same way. The supervisor never writes over a broken file. The launch gate is an automatic action
+`safe.json` the same way, and both check the guard again: when it is still set (a folder there; it is never deleted
+recursively), they print one `E_CLEAR` line and exit 2. The supervisor never writes over a broken file, and a broken
+file means no slot write at all, as for `mm off`. The launch gate is an automatic action
 too: a broken file opens it, as a real `mm off` or safe mode does, and `CONTROL_FILE_BROKEN` tells the owner.
 
 ## Self-recovery
@@ -289,7 +291,7 @@ setting (`[self]`, `[safe_mode]`, `[heartbeat]`); every decision is a pure funct
    open. The slot count is lowered once to at most `safe_mode.slots` (a WOULD line in observe mode); it may still go
    down after that. Readings, alerts and hooks go on. An ACTION alert `SAFE_MODE` names the reason. In safe mode the
    self-check never exits (it raises `SELF_CHECK`). Only `mm on` or `mm restart --clear-safe` ends it. A `safe.json`
-   that cannot be used is safe mode on ("Fail closed", above), without the slot step down; a new safe-mode trip keeps
+   that cannot be used is safe mode on ("Fail closed", above), with no slot write at all; a new safe-mode trip keeps
    that file as it is and writes a `SAFE MODE trip` line to `state/recovery.log`.
 4. **Paused processes** (`resume_targets`). The pause writes each pid and its start time to `state/paused.json`
    before its SIGSTOP. Every start, safe mode, turning `pause_newest_call.enabled` off, `mm stop`, `mm rollback` and
@@ -304,8 +306,8 @@ setting (`[self]`, `[safe_mode]`, `[heartbeat]`); every decision is a pure funct
    for retry and sends no signal to that pid. It writes a `RESUME` line with the reason, and each capped pause raises
    its own `PAUSE_MAX` naming the call (or saying the call was gone). If a call continued but its updated record could
    not be written, the alert says both. A `state/paused.json` that cannot be used (it cannot be read, invalid JSON,
-   not an object, a key that is not a pid or a value that is not a start-time text) names no pid, so nothing is
-   continued from it and it is never written over. It counts as "maybe paused": no new pause starts (one
+   not an object, a key that is not a pid in 1..2**31-1 or a value that is not a start-time text) names no pid, so
+   nothing is continued from it and it is never written over. It counts as "maybe paused": no new pause starts (one
    `PAUSE-REFUSED` line in `decisions.log`), `mm recover-paused` exits 1 with `broken=`, and the ACTION alert
    `PAUSED_FILE_BROKEN` names the problem (from the watchdog while the supervisor is stale or stopped:
    `PAUSED_FILE_BROKEN:paused-file`). The processes it listed may still be stopped: inspect the file, continue them
@@ -354,7 +356,9 @@ must be relative and stay inside the data folder (`state/decisions.log.1` is fin
 is refused: one KEEP line in `deletes.log`, never a delete; the rule's other names still run, and a refused
 `slot_dir` gives no slot candidates. A value of the wrong type refuses all its names with one KEEP line: `files`
 that is not a list (one text is never read letter by letter), or `slot_dir` or `slot_pattern` that is not a text
-(then no slot candidates). `mm check` shows these problems as `E_PROFILE`.
+(then no slot candidates). The delete itself goes through folder descriptors from the real data folder, each folder
+part opened without following a link, so a part swapped for a link after the checks is refused (a KEEP line).
+`mm check` shows these problems as `E_PROFILE`.
 
 Clean-up list rule types (`deletes.cleanup`) are `git_worktrees`, `git_branches`, `stale_children` and `paths`.
 A `git_worktrees` rule may set `keep = ["journal-*"]`: case-sensitive `fnmatch` patterns on each tree folder's

@@ -157,6 +157,10 @@ hook; the endpoint above publishes only their counts (`alerts` in `/status.json`
 They are off unless the profile sets `ready_work_dir` (README.md, "Ready work"). They are readings only: no mode
 turns them off and nothing acts on them. `ready_work` in status.json is not on the `/status.json` allowlist.
 
+Two fail-closed alerts come from the local supervisor in the same way (README.md, "Fail closed"):
+`CONTROL_FILE_BROKEN:<file>` (`off.json` or `safe.json` cannot be used, so automatic actions stay off) and
+`PAUSED_FILE_BROKEN` (`state/paused.json` cannot be used: no pause, and no resume from it). Both are ACTION.
+
 ## Optional persistent services: owner installation
 
 The examples under [monitoring/systemd](monitoring/systemd) and [monitoring/launchd](monitoring/launchd) are separate
