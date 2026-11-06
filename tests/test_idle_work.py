@@ -1351,6 +1351,13 @@ class ListedOwnersNeedTheFolder(Base):
         self.tick()
         self.check("is not an absolute path")
 
+    def test_an_unset_folder_with_listed_owners_stays_off(self):
+        self.profile_with("", ["alpha", "beta"])
+        self.tick()
+        self.advance(20 * MIN)
+        self.assertEqual((self.idle(), self.stale()), (None, {}))
+        self.assertNotIn("ready_work", self.status())
+
     def test_a_missing_folder_without_listed_owners_stays_off(self):
         missing = os.path.join(self.root, "not-made-yet")
         for names in (None, []):
