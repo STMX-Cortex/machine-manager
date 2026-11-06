@@ -499,6 +499,14 @@
    "type": "string",
    "description": "a folder with one JSON file per owner of ready work ({owner, updated, ready_units, next}); ~, {code} and {data} expand; \"\" (the default), or a path that does not exist, turns IDLE_WITH_WORK and READY_WORK_STALE off"
   },
+  "ready_work_owners": {
+   "type": "array",
+   "items": {
+    "type": "string",
+    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+   },
+   "description": "at most 64 unique owner names whose <name>.json must be in ready_work_dir; a missing one is READY_WORK_STALE:<name>; [] (the default) expects none"
+  },
   "pools": {
    "type": "array",
    "items": {

@@ -184,11 +184,15 @@ owner of queued work keeps one file, `<owner>.json`: `{"owner": "alpha", "update
    or a file whose `updated` is older than `ready_work.stale_minutes` (default 90; its units still count). The
    folder's own ids start with `_`: `_folder` (the path is not a folder, or is a link), `_list` (it cannot be opened
    or listed), `_more` (over 64 files), `_state`. Each clears on the next tick its cause is gone.
-7. Readings only: the alerts are raised in every mode (act, observe, off, safe, dry run), and nothing acts on them.
+7. `ready_work_owners` (optional; default `[]`): up to 64 unique names, each a name rule 2 accepts without `.json`
+   (anything else is `E_PROFILE`). Each listed owner's `<name>.json` is always read, even past the 64-file cap; when
+   it is missing, `READY_WORK_STALE:<name>` (ATTENTION; 0 units) until the file is back and good. Files not listed
+   count as before.
+8. Readings only: the alerts are raised in every mode (act, observe, off, safe, dry run), and nothing acts on them.
    Phone delivery follows `[notify]` `alert_levels` (NOTIFY.md); nothing rings unless the profile says so.
 
 `mm status --json` (and status.json) then has `ready_work`: `{"free", "ready", "idle_minutes", "owners": [{"owner",
-"file", "units", "age_min", "state": "ok"|"stale"|"bad"}]}` (`schemas/status.schema.json`). `mm serve`'s
+"file", "units", "age_min", "state": "ok"|"stale"|"bad"|"missing"}]}` (`schemas/status.schema.json`). `mm serve`'s
 `/status.json` does not publish it.
 
 ## Machines
@@ -312,7 +316,7 @@ shows only as the `UNKNOWN` runner record `id=runners`, never a read error or an
 (`rules`, `cleanup`, `forbidden_parts`, `protected_roots`), `recovery` (`expected_jobs`: `{name, match}` regular
 expressions over process command lines, checked after a Mac reboot), `text_line_max` (default 4096, from 256 to
 1048576: the longest line any pattern sees, "Agent-written files", item 7), `ready_work_dir` (default `""` = off: the
-folder of ready-work files, "Ready work"), `notify` (phone notifications, off unless
+folder of ready-work files, "Ready work"), `ready_work_owners` (default `[]`: owners whose file must be there), `notify` (phone notifications, off unless
 `enabled = true`; [NOTIFY.md](NOTIFY.md)). Placeholders: `{data}`, `{user_tmp}`,
 `{claude_tmp}`, `~`. The schema is `schemas/profile.schema.json`.
 

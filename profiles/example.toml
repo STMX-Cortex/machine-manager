@@ -5,6 +5,7 @@
 name = "example"
 # machine_id = "build-mac-1"         # default: the host name
 # ready_work_dir = "/opt/example/ready-work"   # one <owner>.json per owner of waiting work; IDLE_WITH_WORK (README.md, "Ready work"); default "" = off
+# ready_work_owners = ["builder-a", "builder-b"]   # their <name>.json must be there: a missing one is READY_WORK_STALE (default [])
 
 [names]                              # words used in alert texts
 owner = "the owner"

@@ -883,9 +883,10 @@ class Supervisor:
         """mmready.scan, mmdecide.ready_free and ready_since; None when the profile names no ready_work_dir or nothing
         is at it. A reading only: the same in every mode. Before every write of the timer record it is read again: a
         record that exists but does not read is kept unchanged (READY_STALE:_state), and the timer runs in memory."""
-        found = mmready.scan(mmready.folder(self.p), now, s["ready_work.stale_minutes"])
+        found = mmready.scan(mmready.folder(self.p), now, s["ready_work.stale_minutes"],
+                             self.p.get("ready_work_owners") or ())
         free = mmdecide.ready_free(self.state.get("virtual_slots"), len((q or {}).get("busy") or []))
-        ready = sum(o["units"] for o in (found or {}).get("owners") or [] if o["state"] != "bad")
+        ready = sum(o["units"] for o in (found or {}).get("owners") or [] if o["state"] in ("ok", "stale"))
         self.ready_since = mmdecide.ready_since(self.ready_since, free, ready, now) if found else None
         if self.ready_error is not None or self.ready_since != self.ready_saved:
             saved, self.ready_error = mmready.load_since()

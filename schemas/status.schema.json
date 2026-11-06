@@ -259,7 +259,8 @@
         "enum": [
          "ok",
          "stale",
-         "bad"
+         "bad",
+         "missing"
         ]
        }
       }
