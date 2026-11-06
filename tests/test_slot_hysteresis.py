@@ -1022,7 +1022,11 @@ class NullTimes(unittest.TestCase):
                     self.assertIn(key, r["problem"] or "", r)
                     self.assertEqual(r["state"]["raise_hold_since"], NOW)
                     st = r["state"]
-                    for m, want in ((14.9, None), (15.0, 6)):
+                    # A repaired last_red / last_trim becomes now, so its own 30-minute hold (the longer) also applies.
+                    edge = {"last_red": s["slots.hold_after_red_minutes"],
+                            "last_trim": s["slots.hold_after_trim_minutes"]}.get(key, 15.0)
+                    edge = max(edge, 15.0)
+                    for m, want in ((14.9, None), (edge - 0.1, None), (edge, 6)):
                         got = mmdecide.slot_decide(st, inp(NOW + m * MIN, free_pct=80.0), s)
                         st = got["state"]
                         self.assertEqual(got["slots"], want, (key, m, got))
