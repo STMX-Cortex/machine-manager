@@ -1299,25 +1299,48 @@ class F2Pinned(F2Base):
                 r = self.run_rules([{"id": "S1", "type": "own_files", "files": files}])
                 for n in ("a", "b", "c", "abc"):
                     self.assertTrue(os.path.exists(os.path.join(self.data, n)), (files, n, r.lines))
-                self.assertEqual([x for x in self.recs(r) if x["verb"] != "KEEP"], [], r.lines)
-                self.assertIn("refused: files is not a list of names", self.guards(r), r.lines)
+                recs = self.recs(r)
+                self.assertEqual([(x["verb"], x["guard"], x["path"]) for x in recs],
+                                 [("KEEP", "refused: files is not a list of names", os.path.realpath(self.data))],
+                                 r.lines)
+
+    def test_wrong_type_files_keeps_the_evidence_slots_running(self):
+        make(os.path.join(self.data, "evidence", "01"))
+        self.old_file(os.path.join(self.data, "a"))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": "abc"}])
+        self.assertFalse(os.path.lexists(os.path.join(self.data, "evidence", "01")), "the slots still run")
+        self.assertTrue(os.path.exists(os.path.join(self.data, "a")))
+        self.assertEqual(sorted(x["verb"] for x in self.recs(r)), ["DELETE", "KEEP"], r.lines)
 
     def test_wrong_type_name_inside_files_is_refused(self):
         good = self.old_file(os.path.join(self.data, "metrics.csv.1"))
         r = self.run_rules([{"id": "S1", "type": "own_files", "files": [5, None, ["x"], "metrics.csv.1"]}])
         self.assertFalse(os.path.lexists(good), "the good name still runs")
         self.assertEqual(sorted(x["verb"] for x in self.recs(r)), ["DELETE", "KEEP", "KEEP", "KEEP"], r.lines)
+        self.assertEqual(self.guards(r).count("refused: files name is not a text name"), 3, r.lines)
+        a = self.old_file(os.path.join(self.data, "a"))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "files": ["a", 7]}])
+        self.assertFalse(os.path.lexists(a), "files [\"a\", 7]: a is deleted")
+        self.assertEqual(sorted((x["verb"], x["guard"]) for x in self.recs(r)),
+                         [("DELETE", "pass: own file, age>7d"), ("KEEP", "refused: files name is not a text name")])
 
     def test_wrong_type_slot_dir_or_pattern_gives_no_slot_candidates(self):
         """done2: slot_dir or slot_pattern of the wrong type: no slot is deleted (the default evidence slots too)."""
         ev = make(os.path.join(self.data, "evidence", "01"))
-        for key, value in (("slot_dir", 5), ("slot_dir", ["evidence"]), ("slot_dir", None),
-                           ("slot_pattern", 5), ("slot_pattern", ["[0-9][0-9]"]), ("slot_pattern", None)):
+        texts = {"slot_dir": "refused: slot_dir is not a name", "slot_pattern": "refused: slot_pattern is not a text pattern"}
+        for key, value in (("slot_dir", 7), ("slot_dir", ["evidence"]), ("slot_dir", None),
+                           ("slot_pattern", 5), ("slot_pattern", []), ("slot_pattern", ["[0-9][0-9]"]),
+                           ("slot_pattern", None)):
             with self.subTest(key=key, value=value):
                 r = self.run_rules([{"id": "S1", "type": "own_files", key: value, "files": []}])
                 self.assertTrue(os.path.exists(ev), r.lines)
-                self.assertEqual([x for x in self.recs(r) if x["verb"] != "KEEP"], [], r.lines)
-                self.assertTrue([g for g in self.guards(r) if g.startswith("refused: %s" % key)], r.lines)
+                self.assertEqual(self.guards(r), [texts[key]], r.lines)
+
+    def test_wrong_type_slot_dir_leaves_the_files_running(self):
+        good = self.old_file(os.path.join(self.data, "metrics.csv.1"))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": 7, "files": ["metrics.csv.1"]}])
+        self.assertFalse(os.path.lexists(good))
+        self.assertEqual(sorted(x["verb"] for x in self.recs(r)), ["DELETE", "KEEP"], r.lines)
 
     def profile_with(self, rule_toml):
         prof = os.path.join(self.root, "profile.toml")
@@ -1350,11 +1373,16 @@ class F2Pinned(F2Base):
 
     def test_mm_check_wrong_types(self):
         """done2: files, slot_dir or slot_pattern of the wrong type is an E_PROFILE line each."""
-        for key, value in (("files", '"abc"'), ("slot_dir", "5"), ("slot_pattern", "5")):
-            with self.subTest(key=key):
+        fix = "; fix: correct its type (README.md, Profile)"
+        for key, value, line in (("files", '"abc"', "files is not a list of names" + fix),
+                                 ("slot_dir", "7", "slot_dir is not a name" + fix),
+                                 ("slot_pattern", "[]", "slot_pattern is not a text pattern" + fix),
+                                 ("files", '["a", 7]', "files 7 is not a text name; fix: use a name relative to the "
+                                  "data folder, inside it")):
+            with self.subTest(key=key, value=value):
                 prof = self.profile_with('id = "S1"\ntype = "own_files"\n%s = %s\n' % (key, value))
                 rc, lines = self.check_lines(prof)
-                self.assertTrue([l for l in lines if l.startswith("E_PROFILE deletes rule S1: %s" % key)], lines)
+                self.assertEqual(lines, ["E_PROFILE deletes rule S1: " + line])
                 self.assertEqual(rc, 1)
 
     def test_refused_file_names_have_refused_guards(self):
