@@ -875,9 +875,17 @@ class Supervisor:
         try:
             self.ready_last = self._ready_read(now, s, q)
         except Exception as e:  # the feature is a reading; it must never stop a tick
-            mmcore.append_line(mmcore.path("state", "errors.log"),
-                               mmcore.mask("%s ready-work %r" % (mmcore.now_local(now), e)))
+            self._ready_log(now, "ready-work %r" % (e,))
         return self.ready_last
+
+    @staticmethod
+    def _ready_log(now, text):
+        """One errors.log line for the ready-work feature, best effort: a failed write (a full disk) is dropped, never
+        raised out of the tick."""
+        try:
+            mmcore.append_line(mmcore.path("state", "errors.log"), mmcore.mask("%s %s" % (mmcore.now_local(now), text)))
+        except Exception:  # noqa: BLE001 (the log is help only)
+            pass
 
     def _ready_read(self, now, s, q):
         """mmready.scan, mmdecide.ready_free and ready_since; None when the profile names no ready_work_dir or nothing
@@ -897,8 +905,7 @@ class Supervisor:
                         mmready.save_since(self.ready_since)
                         self.ready_saved = self.ready_since
                     except OSError as e:  # the timer still runs in memory; the next tick tries again
-                        mmcore.append_line(mmcore.path("state", "errors.log"),
-                                           mmcore.mask("%s ready-work state %r" % (mmcore.now_local(now), e)))
+                        self._ready_log(now, "ready-work state %r" % (e,))
         if not found:
             return None
         return dict(found, free=free, ready=ready, state_error=self.ready_error,
@@ -912,8 +919,7 @@ class Supervisor:
                 if (key == "IDLE_WITH_WORK" or key.startswith(READY_KEY_PREFIX)) and key not in store.seen:
                     store.clear(key)
         except Exception as e:  # never stop a tick; the general clear rule still clears them later
-            mmcore.append_line(mmcore.path("state", "errors.log"),
-                               mmcore.mask("%s ready-work clear %r" % (mmcore.now_local(now), e)))
+            self._ready_log(now, "ready-work clear %r" % (e,))
 
     def _recovery_conditions(self, now, s, safe):
         """Safe mode, held events (a reboot, a self restart), the watchdog's stamp and the dead-man ping."""

@@ -54,7 +54,8 @@ def _ready_work(rw, s):
         return out
     if rw.get("not_folder"):
         out.append(_c("READY_STALE:_folder", "READY_WORK_STALE", "ATTENTION",
-                      "ready_work_dir %s: %s" % (rw.get("folder_why") or "is not a folder", _q(rw.get("folder") or ""))))
+                      "ready_work_dir %s: %s"
+                      % (rw.get("folder_why") or "is not a folder", _q(rw.get("folder") or ""))))
     for o in rw.get("owners") or []:
         if o["state"] == "bad":
             out.append(_c("READY_STALE:" + o["stem"], "READY_WORK_STALE", "ATTENTION",
@@ -67,10 +68,15 @@ def _ready_work(rw, s):
             out.append(_c("READY_STALE:" + o["stem"], "READY_WORK_STALE", "ATTENTION",
                           "%s ready-work file is %.0f min old (limit %g)"
                           % (_q(o["owner"]), o["age_min"], s["ready_work.stale_minutes"])))
-    if rw.get("more"):
-        out.append(_c("READY_STALE:_more", "READY_WORK_STALE", "ATTENTION",
-                      "%d more ready-work files than the %d read (the first 64 by name, and every listed owner); "
-                      "their units do not count" % (rw["more"], sum(o["state"] != "missing" for o in rw.get("owners") or []))))
+    if rw.get("more") or rw.get("truncated"):
+        read = sum(o["state"] != "missing" and o["stem"] != "_list" for o in rw.get("owners") or [])
+        if rw.get("truncated"):
+            text = ("the folder listing stopped after 4096 entries: files past them are not read; %d read (the first "
+                    "64 by name, and every listed owner), %d more seen not counted" % (read, rw.get("more") or 0))
+        else:
+            text = ("%d more ready-work files than the %d read (the first 64 by name, and every listed owner); "
+                    "their units do not count" % (rw["more"], read))
+        out.append(_c("READY_STALE:_more", "READY_WORK_STALE", "ATTENTION", text))
     if rw.get("state_error"):
         out.append(_c("READY_STALE:_state", "READY_WORK_STALE", "ATTENTION",
                       "the idle timer record cannot be read (%s); the timer runs in memory from this start; "
