@@ -370,7 +370,7 @@ def own_files_problems(profile):
             bad = mmdelete.own_name_problem(n)
             if bad:
                 out.append("E_PROFILE deletes rule %s: %s %s %s; fix: use a name relative to the data folder, "
-                           "inside it" % (mmcore.clean(str(r.get("id"))), key, json.dumps(n), bad))
+                           "inside it" % (mmcore.clean(str(r.get("id"))), key, json.dumps(n, default=repr), bad))
     return out
 
 

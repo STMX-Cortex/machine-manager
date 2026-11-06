@@ -213,7 +213,9 @@ def append_line(path, line, max_bytes=LOG_MAX_BYTES):
             os.replace(path, path + ".1")
     except OSError:
         pass
-    with open(path, "a") as f:
+    # backslashreplace: a name that is not valid UTF-8 (a Linux file name byte such as 0xff, kept as a surrogate)
+    # is written escaped, never an error that stops the writer after its action
+    with open(path, "a", errors="backslashreplace") as f:
         f.write(mmtext.clean(line.rstrip("\n")) + "\n")  # C-17's replacement: one record per line for all (C-23)
 
 
