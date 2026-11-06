@@ -26,6 +26,7 @@ OWNER_MAX = 40
 NEXT_MAX = 120
 WHY_MAX = 120
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.json")
+OWNER_NAME, OWNERS_MAX = mmcore.READY_OWNER_NAME, mmcore.READY_OWNERS_MAX  # ready_work_owners (mmcore checks it)
 STATE_NAME = "ready-work.json"
 STATE_MAX = 4096
 
@@ -130,12 +131,18 @@ def _bad_folder(why):
             "why": why, "next": ""}
 
 
-def scan(path, now, stale_minutes):
+def _missing(name):
+    return {"file": name + ".json", "stem": name, "owner": name, "units": 0, "age_min": None, "state": "missing",
+            "why": "is missing", "next": ""}
+
+
+def scan(path, now, stale_minutes, expected=()):
     """None when the feature is off (no path, or nothing at it). Else {folder, not_folder, folder_why, owners, more}.
     The folder is opened once (never through a link at its last part) and listed through that descriptor; each direct
     child named like NAME is opened by name in it, never through a link. The FILES_MAX smallest names are read (only
-    those are held); `more` counts the other matching names. A link, a folder, a FIFO or another type under such a
-    name is a bad file. Never raises."""
+    those are held), and every file of an `expected` owner (the profile's ready_work_owners) on top; `more` counts
+    the other matching names. An expected owner with no file is a record in state "missing". A link, a folder, a
+    FIFO or another type under such a name is a bad file. Owners come sorted by file name. Never raises."""
     if not path or not os.path.lexists(path):
         return None
     out = {"folder": path, "not_folder": False, "folder_why": None, "owners": [], "more": 0}
@@ -151,11 +158,15 @@ def scan(path, now, stale_minutes):
         return out
     try:
         count = [0]
+        want = {n + ".json" for n in expected}
+        present = set()  # the expected owners' file names found (at most OWNERS_MAX)
 
         def names(it):
             for entry in it:
                 if NAME.fullmatch(entry.name):
                     count[0] += 1
+                    if entry.name in want:
+                        present.add(entry.name)
                     yield entry.name
         try:
             with os.scandir(dfd) as it:
@@ -163,8 +174,11 @@ def scan(path, now, stale_minutes):
         except OSError as e:
             out["owners"].append(_bad_folder("the folder cannot be listed (%s)" % (e.strerror or "error")))
             return out
-        out["more"] = max(0, count[0] - len(picked))
-        out["owners"] = [read_file(n, n, now, stale_minutes, dir_fd=dfd) for n in picked]
+        read = sorted(set(picked) | present)
+        out["more"] = max(0, count[0] - len(read))
+        recs = [read_file(n, n, now, stale_minutes, dir_fd=dfd) for n in read]
+        recs += [_missing(n[:-5]) for n in want - present]
+        out["owners"] = sorted(recs, key=lambda o: o["file"])
         return out
     finally:
         os.close(dfd)

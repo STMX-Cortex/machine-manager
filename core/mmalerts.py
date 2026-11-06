@@ -59,21 +59,25 @@ def _ready_work(rw, s):
         if o["state"] == "bad":
             out.append(_c("READY_STALE:" + o["stem"], "READY_WORK_STALE", "ATTENTION",
                           "ready-work file %s is bad: %s; its units count as 0" % (_q(o["file"]), o["why"])))
+        elif o["state"] == "missing":
+            out.append(_c("READY_STALE:" + o["stem"], "READY_WORK_STALE", "ATTENTION",
+                          "ready-work file %s of listed owner %s is missing; its units count as 0"
+                          % (_q(o["file"]), _q(o["stem"]))))
         elif o["state"] == "stale":
             out.append(_c("READY_STALE:" + o["stem"], "READY_WORK_STALE", "ATTENTION",
                           "%s ready-work file is %.0f min old (limit %g)"
                           % (_q(o["owner"]), o["age_min"], s["ready_work.stale_minutes"])))
     if rw.get("more"):
         out.append(_c("READY_STALE:_more", "READY_WORK_STALE", "ATTENTION",
-                      "%d more ready-work files than the %d read; only the first %d by name count"
-                      % (rw["more"], len(rw.get("owners") or []), len(rw.get("owners") or []))))
+                      "%d more ready-work files than the %d read (the first 64 by name, and every listed owner); "
+                      "their units do not count" % (rw["more"], sum(o["state"] != "missing" for o in rw.get("owners") or []))))
     if rw.get("state_error"):
         out.append(_c("READY_STALE:_state", "READY_WORK_STALE", "ATTENTION",
                       "the idle timer record cannot be read (%s); the timer runs in memory from this start; "
                       "move the file away" % rw["state_error"]))
     free, ready, idle = rw.get("free") or 0, rw.get("ready") or 0, rw.get("idle_minutes")
     if free > 0 and ready > 0 and idle is not None and idle > s["ready_work.idle_minutes"]:
-        busy = sorted((o for o in rw.get("owners") or [] if o["state"] != "bad" and o["units"] > 0),
+        busy = sorted((o for o in rw.get("owners") or [] if o["state"] in ("ok", "stale") and o["units"] > 0),
                       key=lambda o: (-o["units"], o["owner"], o["file"]))
         who = ", ".join("%s %d" % (_q(o["owner"]), o["units"]) for o in busy[:READY_OWNERS_NAMED])
         if len(busy) > READY_OWNERS_NAMED:
