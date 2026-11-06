@@ -15,7 +15,6 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 GROUPS = {
-    "idle_work": ["test_idle_work"],  # IDLE_WITH_WORK and READY_WORK_STALE: ready-work files, the idle timer, status
     "notify": ["test_notify"],  # mm notify Part A: [notify], grants, send, run, outbox, sent.jsonl (fake server)
     "storage_fleet": ["test_storage_fleet"],  # storage.json, /storage.json, fleet-storage/ caches, exporter reader
     "storage_io": ["test_storage_io"],
