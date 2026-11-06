@@ -1310,5 +1310,61 @@ class OwnersSchema(unittest.TestCase):
         self.assertTrue(mmschema.validate(["n%02d" % i for i in range(65)], prop))
 
 
+# ------------------------------------------------------------------------------------------------ Addendum 2
+# With listed owners, a set ready_work_dir that is missing or relative is not "feature off": READY_STALE:_folder and
+# READY_STALE:<name> "is missing" (0 units) for every listed owner. With no listed owners a missing folder stays off.
+
+class ListedOwnersNeedTheFolder(Base):
+    def profile_with(self, path, names):
+        self.set_profile(path, "ready_work_owners = %s\n" % json.dumps(names))
+
+    def check(self, want_folder_text):
+        got = self.stale()
+        self.assertEqual(sorted(got), ["READY_STALE:_folder", "READY_STALE:alpha", "READY_STALE:beta"], got)
+        self.assertIn(want_folder_text, got["READY_STALE:_folder"]["text"])
+        for n in ("alpha", "beta"):
+            self.assertEqual(got["READY_STALE:" + n]["level"], "ATTENTION")
+            self.assertIn("is missing", got["READY_STALE:" + n]["text"])
+        rw = self.status().get("ready_work")
+        self.assertIsNotNone(rw, "the feature is on")
+        self.assertEqual(rw["ready"], 0, "missing owners count 0 units")
+        self.assertIsNone(self.idle())
+
+    def test_a_missing_folder_with_listed_owners(self):
+        missing = os.path.join(self.root, "not-made-yet")
+        self.profile_with(missing, ["alpha", "beta"])
+        self.tick()
+        self.check("does not exist")
+        self.advance(20 * MIN)
+        self.check("does not exist")
+        os.makedirs(missing)
+        for n in ("alpha", "beta"):
+            with open(os.path.join(missing, n + ".json"), "w") as f:
+                f.write(json.dumps({"owner": n, "updated": iso(self.t + MIN), "ready_units": 2, "next": "n"}))
+        self.advance(MIN)
+        self.assertEqual(self.stale(), {}, "all clear on the next tick once the folder and files are there")
+        self.assertEqual(self.status()["ready_work"]["ready"], 4)
+
+    def test_a_relative_folder_with_listed_owners(self):
+        os.makedirs(os.path.join(self.root, "rel"), exist_ok=True)
+        self.profile_with("rel", ["alpha", "beta"])
+        self.tick()
+        self.check("is not an absolute path")
+
+    def test_a_missing_folder_without_listed_owners_stays_off(self):
+        missing = os.path.join(self.root, "not-made-yet")
+        for names in (None, []):
+            with self.subTest(names=names):
+                if names is None:
+                    self.set_profile(missing)
+                else:
+                    self.profile_with(missing, names)
+                self.sup = None
+                self.tick()
+                self.advance(20 * MIN)
+                self.assertEqual((self.idle(), self.stale()), (None, {}))
+                self.assertNotIn("ready_work", self.status())
+
+
 if __name__ == "__main__":
     unittest.main()
