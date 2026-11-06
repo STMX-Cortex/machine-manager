@@ -78,6 +78,12 @@ def paused_problem(d):
     return getattr(d, "problem", None)
 
 
+def paused_broken_alert(problem):
+    """(text, command) of the PAUSED_FILE_BROKEN alert (the supervisor's key and the watchdog's WD:paused-file)."""
+    return ("%s; no new pause, and no pid is continued from it: processes it listed may still be stopped; inspect the "
+            "file, continue them by hand (kill -CONT PID), then remove it" % problem, "mm explain PAUSED_FILE_BROKEN")
+
+
 def read_paused():
     """{pid text: start time} of every process the pause stopped. Missing: {}. Anything else that is not an object of
     pid -> start-time text (a read error, a dangling link, invalid JSON, not an object, a key that is not a pid, a
@@ -237,9 +243,12 @@ def note_clean_exit():
 
 
 def enter_safe(reason, now, mid=None):
-    """Turn safe mode on (once; a second reason does not replace the first). Returns the record."""
+    """Turn safe mode on (once; a second reason does not replace the first). Returns the record. A safe.json that
+    cannot be used already counts as safe mode on: it is kept as it is (never written over), and the trip is logged."""
     cur = mmcore.safe_state()
     if cur:
+        if cur.get("broken"):
+            log("SAFE MODE trip (%s): %s is kept as it is; safe mode stays on" % (reason, cur["broken"]), now)
         return cur
     rec = mmcore.stamp({"safe": True, "since": now, "reason": reason[:300], "slot_write": None}, mid=mid)
     mmcore.write_atomic(mmcore.path("safe.json"), json.dumps(rec, sort_keys=True))

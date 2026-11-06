@@ -119,6 +119,44 @@ def children(root, patterns, dirs_only=False, skip=()):
     return out
 
 
+def own_name_problem(name):
+    """Why an own_files name (slot_dir, a `files` name) is refused before any file is looked at, or None: it must be a
+    non-empty text, relative, and stay inside the data folder after normalization ("state/decisions.log.1" is fine;
+    "/abs", "../x" and "a/../../x" are not). `mm check` shows the same problems (E_PROFILE)."""
+    if not isinstance(name, str) or not name:
+        return "an empty name"
+    if os.path.isabs(name):
+        return "an absolute name"
+    norm = os.path.normpath(name)
+    if norm in (os.curdir, os.pardir) or norm.startswith(os.pardir + os.sep):
+        return "a name that leaves the data folder"
+    return None
+
+
+def own_name_refusal(data, name):
+    """Why an own_files name must not be used in the data folder `data` (a real path), or None: own_name_problem,
+    a link at any component below data (lstat), or a real parent outside data. Returns (path, why): the normalized
+    path inside data when the name is usable."""
+    bad = own_name_problem(name)
+    if bad:
+        return (name if isinstance(name, str) and os.path.isabs(name) else os.path.join(data, str(name or ""))), bad
+    p = os.path.join(data, os.path.normpath(name))
+    cur = data
+    for part in os.path.normpath(name).split(os.sep):
+        cur = os.path.join(cur, part)
+        try:
+            if stat.S_ISLNK(os.lstat(cur).st_mode):
+                return p, "a link inside the data folder: %s" % cur
+        except (FileNotFoundError, NotADirectoryError):
+            break  # nothing behind it: nothing to delete
+        except OSError as e:
+            return p, "cannot check %s (%s)" % (cur, e.__class__.__name__)
+    parent = os.path.realpath(os.path.dirname(p))
+    if parent != data and not parent.startswith(data + os.sep):
+        return p, "real parent %s is outside the data folder" % parent
+    return p, None
+
+
 class Run:
     """One pass of the rules. `procs` returns the process list (tests inject one); `live_spec` names the live tools."""
 
@@ -282,13 +320,28 @@ class Run:
         """The tool's own evidence slots and rotated logs (in the data folder), older than a setting's days."""
         days = self.s[r.get("age_days_setting", "deletes.evidence_keep_days")]
         data = os.path.realpath(self.c.data)
-        slot_dir = os.path.join(data, r.get("slot_dir", "evidence"))
-        cands = children(slot_dir, [r.get("slot_pattern", "[0-9][0-9]")], dirs_only=True)
-        cands += [os.path.join(data, n) for n in r.get("files", []) if os.path.lexists(os.path.join(data, n))]
-        allowed = {os.path.join(data, n) for n in r.get("files", [])}
+        # every name must be relative and stay inside the real data folder, with no link below it (own_name_refusal):
+        # a refused slot_dir gives no slot candidates, a refused file name is skipped; each is one KEEP line
+        slot_dir, bad = own_name_refusal(data, r.get("slot_dir", "evidence"))
+        if bad:
+            self.log("KEEP", r["id"], slot_dir, guard="refused: slot_dir is %s" % bad)
+            slot_dir, cands = None, []
+        else:
+            cands = children(slot_dir, [r.get("slot_pattern", "[0-9][0-9]")], dirs_only=True)
+        allowed = set()
+        for n in r.get("files", []):
+            p, bad = own_name_refusal(data, n)
+            if bad:
+                self.log("KEEP", r["id"], p, guard="refused: files name is %s" % bad)
+                continue
+            allowed.add(p)
+            if os.path.lexists(p):
+                cands.append(p)
         for p in cands:
             real = os.path.realpath(p)
-            if os.path.islink(p) or not (real.startswith(slot_dir + os.sep) or real in allowed):
+            own = real == p and real.startswith(data + os.sep) and (
+                (slot_dir is not None and real.startswith(slot_dir + os.sep)) or real in allowed)
+            if os.path.islink(p) or not own:
                 self.log("KEEP", r["id"], p, guard="not an own rotated file or evidence slot")
                 continue
             ok, nbytes, why = self.untouched(p, days * 1440)
@@ -298,6 +351,9 @@ class Run:
             if not self.enabled:
                 self.would += nbytes
                 self.log("WOULD-DELETE", r["id"], p, nbytes, "pass: own file, age>%gd" % days)
+                continue
+            if os.path.realpath(p) != p or os.path.islink(p):  # the re-check right before the delete: a link swapped in
+                self.log("KEEP", r["id"], p, guard="re-check: not an own rotated file or evidence slot")
                 continue
             try:
                 shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
