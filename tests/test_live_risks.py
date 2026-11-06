@@ -135,6 +135,15 @@ class SupBase(TempData):
     def alerts_naming(self, word):
         return [a for a in self.active() if word in (a.get("text") or "") or word in (a.get("key") or "")]
 
+    def tick_clear(self, sampler=CALM):
+        """Ticks over repeat.clear_after_minutes (an alert clears after that long absent): one supervisor, its own
+        clock, three ticks: now, +1 s, + the clear time."""
+        clock = {"t": time.time()}
+        sup = self.sup(sampler, clock=lambda: clock["t"])
+        for step in (1, self.s()["repeat.clear_after_minutes"] * 60 + 5, 0):
+            sup.tick()
+            clock["t"] += step
+
     def decisions(self):
         try:
             return open(os.path.join(self.data, "state", "decisions.log")).read()
@@ -323,7 +332,7 @@ class F1AlertAndStatus(SupBase):
                 self.tick()
                 self.assertTrue(self.alerts_naming(name), "an active alert names %s: %s" % (name, self.active()))
                 os.remove(target)
-                self.tick()
+                self.tick_clear()
                 self.assertEqual(self.alerts_naming(name), [], "cleared when %s is removed" % name)
 
     def test_alert_clears_when_the_file_is_good_again(self):
@@ -332,7 +341,7 @@ class F1AlertAndStatus(SupBase):
         self.tick()
         self.assertTrue(self.alerts_naming("off.json"), self.active())
         write_raw(target, json.dumps({"off": False}))
-        self.tick()
+        self.tick_clear()
         self.assertEqual(self.alerts_naming("off.json"), [], "a good off.json clears the alert")
 
     def test_mm_status_shows_the_reason(self):
@@ -385,8 +394,8 @@ class F1AlertAndStatus(SupBase):
 
 # ===================================================================================== Fix 2: own_files names
 
-class F2OwnFilesNames(TempData):
-    """own_files deletes only inside the data folder. Each test plants an old file OUTSIDE data and checks it stays."""
+class F2Base(TempData):
+    """Helpers: an `outside` folder next to the data folder, a delete Run on own_files rules, the parsed lines."""
 
     def setUp(self):
         super().setUp()
@@ -425,6 +434,10 @@ class F2OwnFilesNames(TempData):
         recs = self.recs(run)
         self.assertTrue(recs, "a refused name gives a KEEP line: %s" % run.lines)
         self.assertTrue(all(r["verb"] == "KEEP" for r in recs), run.lines)
+
+
+class F2OwnFilesNames(F2Base):
+    """own_files deletes only inside the data folder. Each test plants an old file OUTSIDE data and checks it stays."""
 
     def test_control_good_names_delete(self):
         self.old_file(os.path.join(self.data, "metrics.csv.1"))
@@ -684,7 +697,7 @@ class F3PausedFile(F3PausedBase):
         self.assertTrue(self.alerts_naming("paused.json"), "an active alert names paused.json: %s" % self.active())
         self.assertEqual(raw(self.paused()), before)
         os.remove(self.paused())
-        self.sup().tick()
+        self.tick_clear()
         self.assertEqual(self.alerts_naming("paused.json"), [], "cleared when the file is removed")
 
     def test_mm_status_shows_it(self):
@@ -701,23 +714,423 @@ class F3PausedFile(F3PausedBase):
             with self.subTest(shape=shape):
                 before = self.broken(shape)
                 r = self.mm("recover-paused")
-                self.assertNotEqual(r.returncode, 0, "a broken paused.json is not 'nothing paused': %s" % r.stdout)
+                self.assertEqual(r.returncode, 1, "a broken paused.json is not 'nothing paused': %s" % r.stdout)
+                self.assertEqual(r.stdout.strip(), 'resumed=""')
                 self.assertEqual(raw(self.paused()), before)
         self.assertEqual(spy.calls, [])
 
     def test_watchdog_treats_a_broken_file_as_maybe_paused(self):
-        """A stopped supervisor (state/stopped.json): the watchdog's resume path runs; it cannot know the pids, so it
-        signals nothing, keeps the file, and says so (a problem or an alert that names paused.json)."""
+        """A stopped supervisor (state/stopped.json): a broken file counts as "maybe paused", so the watchdog's resume
+        path runs; it cannot know the pids, so it signals nothing, keeps the file and logs the refusal."""
         spy = SignalSpy(self)
         write_raw(os.path.join(self.data, "state", "stopped.json"), json.dumps({"time": time.time()}))
         before = self.broken("invalid_json")
-        now = time.time()
-        probs = mmwatch.check(now, self.s(), self.profile(), restart=False)
+        mmwatch.check(time.time(), self.s(), self.profile(), restart=False)
         self.assertEqual(raw(self.paused()), before)
         self.assertEqual(spy.calls, [])
-        named = [p for p in probs if "paused.json" in p] + self.alerts_naming("paused.json")
-        self.assertTrue(named, "the watchdog says the paused record is broken: problems=%s alerts=%s"
-                        % (probs, self.active()))
+        self.assertIn("resumed paused pids []", open(os.path.join(self.data, "state", "watchdog.log")).read())
+        log = open(os.path.join(self.data, "state", "recovery.log")).read()
+        self.assertIn("RESUME from state/paused.json refused: state/paused.json: cannot be read (JSONDecodeError); no "
+                      "pid signalled from it, the file is kept (watchdog: supervisor stopped)", log)
+
+
+# ===================================================================================== the coder's API (405277033a07)
+
+class F1Pinned(SupBase):
+    """off_state/safe_state records, control_problem/control_broken, CONTROL_FILE_BROKEN, SAFE_MODE text, mm status."""
+    CASES = (("off.json", "off", lambda: mmcore.off_state()), ("safe.json", "safe", lambda: mmcore.safe_state()))
+    TEXTS = (("list", "%s: not a JSON object"), ("empty_object", "%s: no %s flag"),
+             ("flag_one", "%s: %s is not true or false"), ("flag_yes", "%s: %s is not true or false"),
+             ("flag_null", "%s: %s is not true or false"), ("flag_false_text", "%s: %s is not true or false"),
+             ("null", "%s: not a JSON object"), ("invalid_json", "%s: cannot be read (JSONDecodeError)"),
+             ("empty_file", "%s: cannot be read (JSONDecodeError)"))
+
+    def test_broken_record_shape(self):
+        for name, flag, fn in self.CASES:
+            for shape, _ in BROKEN_CONTROL:
+                with self.subTest(file=name, shape=shape):
+                    write_raw(os.path.join(self.data, name), text_of(shape, flag))
+                    rec = fn()
+                    self.assertIs(rec[flag], True)
+                    self.assertTrue(rec["broken"].startswith(name + ": "), rec)
+                    self.assertEqual(rec["reason"], rec["broken"] + "; automatic actions stay off")
+                    want = {flag, "broken", "reason"} | ({"slot_write"} if flag == "safe" else set())
+                    self.assertEqual(set(rec), want)
+                    if flag == "safe":
+                        self.assertEqual(rec["slot_write"], "none (safe.json broken)")
+                    self.assertEqual(mmcore.control_problem(name, flag), (None, rec["broken"]))
+                    self.assertEqual(mmcore.control_broken(), [rec["broken"]])
+                    os.remove(os.path.join(self.data, name))
+
+    def test_problem_texts(self):
+        for name, flag, fn in self.CASES:
+            for shape, text in self.TEXTS:
+                with self.subTest(file=name, shape=shape):
+                    write_raw(os.path.join(self.data, name), text_of(shape, flag))
+                    self.assertEqual(fn()["broken"], text % ((name, flag) if text.count("%s") == 2 else name))
+
+    def test_dangling_link_sets_the_guard(self):
+        for name, flag, fn in self.CASES:
+            with self.subTest(file=name):
+                os.symlink(os.path.join(self.root, "nowhere.json"), os.path.join(self.data, name))
+                self.assertEqual(fn()["broken"], "%s: a dangling link" % name)
+
+    @unittest.skipIf(ROOT, "root reads a mode-000 file")
+    def test_unreadable_text(self):
+        for name, flag, fn in self.CASES:
+            with self.subTest(file=name):
+                unreadable(os.path.join(self.data, name))
+                self.assertEqual(fn()["broken"], "%s: cannot be read (PermissionError)" % name)
+
+    def test_good_records_have_no_broken(self):
+        for name, flag, fn in self.CASES:
+            with self.subTest(file=name):
+                rec = {flag: True, "since": "x", "reason": "test"}
+                write_raw(os.path.join(self.data, name), json.dumps(rec))
+                self.assertEqual(fn(), rec)
+                self.assertEqual(mmcore.control_problem(name, flag), (rec, None))
+                write_raw(os.path.join(self.data, name), json.dumps({flag: False}))
+                self.assertEqual(mmcore.control_problem(name, flag), (None, None))
+        self.assertEqual(mmcore.control_broken(), [])
+        for name, _, _ in self.CASES:
+            os.remove(os.path.join(self.data, name))
+        self.assertEqual(mmcore.control_broken(), [])
+
+    def test_control_broken_lists_both(self):
+        write_raw(os.path.join(self.data, "off.json"), "[]")
+        write_raw(os.path.join(self.data, "safe.json"), "{}")
+        self.assertEqual(mmcore.control_broken(), ["off.json: not a JSON object", "safe.json: no safe flag"])
+
+    def alert(self, key):
+        st = mmcore.read_json(os.path.join(self.data, "alerts-state.json"), {}) or {}
+        return (st.get("active") or {}).get(key)
+
+    def test_control_file_broken_alerts_raise_and_clear(self):
+        self.act()
+        for name, flag in (("off.json", "off"), ("safe.json", "safe")):
+            key = "CONTROL_FILE_BROKEN:" + name
+            for ending in ("good", "removed"):
+                with self.subTest(file=name, ending=ending):
+                    target = os.path.join(self.data, name)
+                    write_raw(target, "[]")
+                    self.sup().tick()
+                    a = self.alert(key)
+                    self.assertIsNotNone(a, self.active())
+                    self.assertEqual((a["name"], a["level"], a["command"]), ("CONTROL_FILE_BROKEN", "ACTION", "mm on"))
+                    self.assertEqual(a["text"], "%s: not a JSON object; automatic actions stay off until the file is "
+                                     "good again or removed (mm on removes it)" % name)
+                    if ending == "good":
+                        write_raw(target, json.dumps({flag: False}))
+                    else:
+                        os.remove(target)
+                    self.tick_clear()
+                    self.assertIsNone(self.alert(key), "%s cleared when the file is %s" % (key, ending))
+                    if os.path.lexists(target):
+                        os.remove(target)
+
+    def test_safe_mode_alert_names_the_broken_file(self):
+        write_raw(os.path.join(self.data, "safe.json"), '{"safe": 1}')
+        self.sup().tick()
+        a = self.alert("SAFE_MODE")
+        self.assertEqual((a["level"], a["command"]), ("ACTION", "mm on"))
+        self.assertEqual(a["text"], "safe mode: safe.json: safe is not true or false; automatic actions stay off")
+
+    def test_good_off_json_raises_no_broken_alert(self):
+        write_raw(os.path.join(self.data, "off.json"), json.dumps({"off": True, "since": "x", "reason": "t"}))
+        self.sup().tick()
+        self.assertIsNotNone(self.alert("OFF"))
+        self.assertEqual([a for a in self.active() if a["name"] == "CONTROL_FILE_BROKEN"], [])
+
+    def test_mm_status_broken_line_and_json(self):
+        self.act()
+        write_raw(os.path.join(self.data, "off.json"), "[]")
+        self.sup().tick()
+        r = self.mm("status")
+        self.assertIn('broken="off.json: not a JSON object"', r.stdout.splitlines(), r.stdout)
+        self.assertTrue(r.stdout.splitlines()[0].startswith("state=") and " mode=off " in r.stdout.splitlines()[0])
+        obj = json.loads(self.mm("status", "--json").stdout)
+        self.assertEqual((obj["broken"], obj["off"], obj["mode"]), (["off.json: not a JSON object"], True, "off"))
+        write_raw(os.path.join(self.data, "safe.json"), "{}")
+        write_raw(self.paused_file(), "[]")
+        self.sup().tick()
+        r = self.mm("status")
+        self.assertIn('broken="off.json: not a JSON object; safe.json: no safe flag; state/paused.json: not a JSON '
+                      'object"', r.stdout.splitlines(), r.stdout)
+        self.assertLessEqual(len(r.stdout.splitlines()), 5)
+        obj = json.loads(self.mm("status", "--json").stdout)
+        self.assertEqual(obj["broken"], ["off.json: not a JSON object", "safe.json: no safe flag",
+                                         "state/paused.json: not a JSON object"])
+
+    def test_mm_status_good_files_no_broken(self):
+        self.sup().tick()
+        r = self.mm("status")
+        self.assertFalse([l for l in r.stdout.splitlines() if l.startswith("broken=")], r.stdout)
+        self.assertEqual(json.loads(self.mm("status", "--json").stdout)["broken"], [])
+
+    def paused_file(self):
+        return os.path.join(self.data, "state", "paused.json")
+
+    def calm_act(self, slots):
+        test_slots = os.path.join(self.root, "test-slots")
+        mmcore.write_slots(test_slots, slots)
+        self.act(**{"mode.slot_writes": "test", "mode.slots_file": test_slots})
+        clock = {"t": time.time()}
+        self.ticks(self.sup(CALM, clock=lambda: clock["t"]), 3, clock)
+        return open(test_slots).read()
+
+    def test_control_good_safe_mode_steps_down_once(self):
+        """The fixture: a good safe.json (slot_write null) steps 8 slots down to safe_mode.slots (5)."""
+        mmrecover.enter_safe("test", time.time())
+        self.assertEqual(self.calm_act(8), "5\n")
+        self.assertEqual(mmcore.safe_state()["slot_write"], "SET 8 -> 5")
+
+    def test_broken_safe_json_does_not_step_slots_down(self):
+        for shape in SOME_BROKEN:
+            with self.subTest(shape=shape):
+                target = os.path.join(self.data, "safe.json")
+                write_raw(target, text_of(shape, "safe"))
+                before = raw(target)
+                self.assertEqual(self.calm_act(8), "8\n", "no safe-mode step down for a broken safe.json")
+                self.assertEqual(raw(target), before)
+                self.assertEqual(self.status()["mode"], "safe")
+
+    def test_broken_off_json_decisions_say_would(self):
+        write_raw(os.path.join(self.data, "off.json"), "{}")
+        test_slots = os.path.join(self.root, "test-slots")
+        mmcore.write_slots(test_slots, 6)
+        self.act(**{"mode.slot_writes": "test", "mode.slots_file": test_slots})
+        clock = {"t": time.time()}
+        self.ticks(self.sup(RED, clock=lambda: clock["t"]), 2, clock)
+        self.assertIn("WOULD slots", self.decisions())
+        self.assertNotIn("SET slots", self.decisions())
+        self.assertEqual(self.status()["mode"], "off")
+
+    def test_enter_safe_keeps_a_broken_safe_json(self):
+        """The safe-trip path with a broken safe.json: safe mode is already on (the broken record); nothing is
+        written over it."""
+        target = os.path.join(self.data, "safe.json")
+        write_raw(target, '{"safe": "yes"}')
+        before = raw(target)
+        rec = mmrecover.enter_safe("self-check: test", time.time())
+        self.assertEqual(rec["broken"], "safe.json: safe is not true or false")
+        self.assertEqual(raw(target), before)
+        mmrecover.mark_safe_slot_write("SET 8 -> 5")
+        self.assertEqual(raw(target), before, "mark_safe_slot_write never writes over a broken safe.json")
+
+
+from test_recovery import Base as _RecoveryBase  # noqa: E402  (its fake launchctl writes a fresh heartbeat)
+
+
+class F1RestartClearSafe(_RecoveryBase):
+    """`mm restart --clear-safe` ends a broken safe.json (a fake launchctl; one restart per test)."""
+
+    def restart_clears(self, shape):
+        write_raw(os.path.join(self.data, "safe.json"), text_of(shape, "safe"))
+        rc, out, _ = self.run_mm("restart", "--clear-safe", FAKE_HEARTBEAT_PID="4343")
+        self.assertEqual((rc, out), (0, ["restart=ok pid=4343 safe=cleared"]))
+        self.assertFalse(os.path.lexists(os.path.join(self.data, "safe.json")))
+        self.assertIsNone(mmcore.safe_state())
+
+    @mmtest.darwin_only
+    def test_restart_clear_safe_ends_a_list_safe_json(self):
+        self.restart_clears("list")
+
+    @mmtest.darwin_only
+    def test_restart_clear_safe_ends_an_invalid_safe_json(self):
+        self.restart_clears("invalid_json")
+
+
+class F3Pinned(F3PausedBase):
+    """PausedBroken, paused_problem, add_paused's result, the log lines, PAUSED_FILE_BROKEN, mm status."""
+    ENTRY = "state/paused.json: an entry is not pid -> start time"
+
+    def test_broken_shapes_are_paused_broken(self):
+        texts = {"list": "state/paused.json: not a JSON object", "null": "state/paused.json: not a JSON object",
+                 "string": "state/paused.json: not a JSON object", "number": "state/paused.json: not a JSON object",
+                 "invalid_json": "state/paused.json: cannot be read (JSONDecodeError)",
+                 "empty_file": "state/paused.json: cannot be read (JSONDecodeError)"}
+        for shape, _ in BROKEN_PAUSED:
+            with self.subTest(shape=shape):
+                self.broken(shape)
+                d = mmrecover.read_paused()
+                self.assertIsInstance(d, mmrecover.PausedBroken)
+                self.assertTrue(d, "maybe paused: true")
+                self.assertEqual(dict(d), {}, "it names no pid")
+                self.assertEqual(mmrecover.paused_problem(d), texts[shape])
+
+    def test_wrong_entries_are_paused_broken(self):
+        for entry in ({"abc": "x"}, {"0": "x"}, {"-1": "x"}, {"0123": "x"}, {"12345678901": "x"}, {" 12": "x"},
+                      {"123": 5}, {"123": ""}, {"123": None}, {"123": ["x"]}, {"123": "x", "abc": "y"}):
+            with self.subTest(entry=entry):
+                write_raw(self.paused(), json.dumps(entry))
+                d = mmrecover.read_paused()
+                self.assertIsInstance(d, mmrecover.PausedBroken)
+                self.assertEqual(mmrecover.paused_problem(d), self.ENTRY)
+
+    def test_dangling_link(self):
+        os.symlink(os.path.join(self.root, "nowhere.json"), self.paused())
+        self.assertEqual(mmrecover.paused_problem(mmrecover.read_paused()), "state/paused.json: a dangling link")
+
+    @unittest.skipIf(ROOT, "root reads a mode-000 file")
+    def test_unreadable_text(self):
+        unreadable(self.paused())
+        self.assertEqual(mmrecover.paused_problem(mmrecover.read_paused()),
+                         "state/paused.json: cannot be read (PermissionError)")
+
+    def test_good_record_is_a_plain_dict(self):
+        for good in ({}, {"123": "Mon Nov  6 20:00:00 2026"}, {"9999999999": "boot:1"}):
+            with self.subTest(good=good):
+                write_raw(self.paused(), json.dumps(good))
+                d = mmrecover.read_paused()
+                self.assertNotIsInstance(d, mmrecover.PausedBroken)
+                self.assertEqual(d, good)
+                self.assertIsNone(mmrecover.paused_problem(d))
+        os.remove(self.paused())
+        self.assertNotIsInstance(mmrecover.read_paused(), mmrecover.PausedBroken)
+        self.assertFalse(mmrecover.read_paused(), "missing: nothing paused")
+
+    def test_add_paused_returns_the_problem_or_none(self):
+        before = self.broken("list")
+        self.assertEqual(mmrecover.add_paused({"999999": "x"}), "state/paused.json: not a JSON object")
+        self.assertEqual(raw(self.paused()), before)
+        self.assertIn("PAUSE refused: state/paused.json: not a JSON object; the file is kept, no pid stopped",
+                      self.recovery_log())
+        os.remove(self.paused())
+        self.assertIsNone(mmrecover.add_paused({"999999": "x"}))
+        self.assertEqual(mmrecover.read_paused(), {"999999": "x"})
+
+    def recovery_log(self):
+        try:
+            return open(os.path.join(self.data, "state", "recovery.log")).read()
+        except OSError:
+            return ""
+
+    def test_resume_logs_the_refusal(self):
+        self.broken("invalid_json")
+        self.assertEqual(mmrecover.resume_paused("test"), [])
+        self.assertIn("RESUME from state/paused.json refused: state/paused.json: cannot be read (JSONDecodeError); no "
+                      "pid signalled from it, the file is kept (test)", self.recovery_log())
+
+    @mmtest.needs_proc
+    def test_resume_continues_legacy_pids_only_and_keeps_the_file(self):
+        """A legacy record (controller.json) still names its pids; the spy sees the SIGCONT and sends nothing."""
+        p = subprocess.Popen(["/bin/sleep", "60"])
+        self.addCleanup(lambda: (p.kill(), p.wait(5)))
+        st = None
+        for _ in range(50):
+            st = mmrecover.start_time(p.pid)
+            if st:
+                break
+            time.sleep(0.1)
+        self.assertTrue(st)
+        spy = SignalSpy(self)
+        before = self.broken("list")
+        self.assertEqual(mmrecover.resume_paused("test", legacy={str(p.pid): st}), [p.pid])
+        self.assertEqual(spy.calls, [(p.pid, signal.SIGCONT)])
+        self.assertEqual(raw(self.paused()), before)
+
+    def test_supervisor_start_runs_the_resume_path_and_logs(self):
+        """mmsuper's start check: a broken file is "maybe paused", so the resume runs (and refuses)."""
+        self.broken("list")
+        self.sup()
+        self.assertIn("RESUME from state/paused.json refused: state/paused.json: not a JSON object; no pid signalled "
+                      "from it, the file is kept (start)", self.recovery_log())
+        self.assertIn("RESUME pids [] (start)", self.decisions())
+
+    def test_pause_refused_logged_once_per_problem(self):
+        self.act(**{"pause_newest_call.enabled": True})
+        self.broken("list")
+        clock = {"t": time.time()}
+        sup = self.sup(CRITICAL, clock=lambda: clock["t"])
+        self.ticks(sup, 3, clock)
+        line = "PAUSE-REFUSED state/paused.json: not a JSON object; no pause and no resume while it cannot be used"
+        self.assertEqual(self.decisions().count(line), 1, self.decisions())
+        self.broken("invalid_json")
+        self.ticks(sup, 2, clock)
+        self.assertEqual(self.decisions().count("PAUSE-REFUSED state/paused.json: cannot be read (JSONDecodeError)"), 1)
+
+    @mmtest.needs_proc
+    def test_pauser_refuses_when_the_record_breaks_at_the_last_step(self):
+        """Pauser.pause itself: when add_paused finds a broken file, `failed` says so and no pid is stopped."""
+        tree = self.launcher_call()
+        spy = SignalSpy(self)
+        busy = [{"slot": ".slot.1", "pid": tree[0], "since": time.time(), "label": "x"}]
+        import mmadapters
+        q = mmadapters.queue(self.profile())
+        real = mmrecover.read_paused
+        calls = {"n": 0}
+
+        def late():  # good at pause()'s first look (self.st), broken when add_paused reads it
+            calls["n"] += 1
+            return {} if calls["n"] == 1 else mmrecover.PausedBroken("state/paused.json: not a JSON object")
+        mmrecover.read_paused = late
+        self.addCleanup(setattr, mmrecover, "read_paused", real)
+        out = mmsuper.Pauser().pause(busy, q, 30)
+        self.assertEqual(out["paused"], [])
+        self.assertEqual(out["failed"], "state/paused.json: not a JSON object; no pause while it cannot be used")
+        self.assertEqual(spy.calls, [])
+        self.assertFalse(os.path.lexists(self.paused()), "nothing written")
+
+    def test_paused_file_broken_alert_raises_and_clears(self):
+        self.act()
+        self.broken("list")
+        self.sup().tick()
+        st = mmcore.read_json(os.path.join(self.data, "alerts-state.json"), {})
+        a = st["active"].get("PAUSED_FILE_BROKEN")
+        self.assertIsNotNone(a, self.active())
+        self.assertEqual((a["name"], a["level"], a["command"]),
+                         ("PAUSED_FILE_BROKEN", "ACTION", "mm explain PAUSED_FILE_BROKEN"))
+        self.assertTrue(a["text"].startswith("state/paused.json: not a JSON object; no new pause, and no pid is "
+                                             "continued from it"), a["text"])
+        self.assertIn("kill -CONT", a["text"])
+        r = self.mm("explain", "PAUSED_FILE_BROKEN")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("state/paused.json: not a JSON object", r.stdout)
+        write_raw(self.paused(), "{}")  # good again
+        self.tick_clear()
+        st = mmcore.read_json(os.path.join(self.data, "alerts-state.json"), {})
+        self.assertNotIn("PAUSED_FILE_BROKEN", st["active"], "cleared when the file is good again")
+
+    def test_mm_status_broken_line(self):
+        self.broken("list")
+        self.sup().tick()
+        r = self.mm("status")
+        self.assertIn('broken="state/paused.json: not a JSON object"', r.stdout.splitlines(), r.stdout)
+        self.assertEqual(json.loads(self.mm("status", "--json").stdout)["broken"],
+                         ["state/paused.json: not a JSON object"])
+
+
+class F2Pinned(F2Base):
+    """Refusals are KEEP lines with guard "refused: ..."; a refused slot_dir gives exactly one line."""
+
+    def refusals(self, run):
+        return [x for x in self.recs(run) if x["verb"] == "KEEP" and x["guard"].startswith("refused: ")]
+
+    def test_absolute_slot_dir_one_refusal_line(self):
+        make(os.path.join(self.outside, "01"))
+        make(os.path.join(self.outside, "02"))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": self.outside, "files": []}])
+        recs = self.recs(r)
+        self.assertEqual(len(recs), 1, r.lines)
+        self.assertEqual(len(self.refusals(r)), 1, r.lines)
+
+    def test_dotdot_slot_dir_one_refusal_line(self):
+        make(os.path.join(self.outside, "01"))
+        make(os.path.join(self.outside, "02"))
+        r = self.run_rules([{"id": "S1", "type": "own_files", "slot_dir": "../outside", "files": []}])
+        self.assertEqual(len(self.recs(r)), 1, r.lines)
+        self.assertEqual(len(self.refusals(r)), 1, r.lines)
+
+    def test_refused_file_names_have_refused_guards(self):
+        victim = self.old_file(os.path.join(self.outside, "victim.log"))
+        os.makedirs(os.path.join(self.data, "a"))
+        self.old_file(os.path.join(self.outside, "old.log"))
+        os.symlink(self.outside, os.path.join(self.data, "linkdir"))
+        for name in (victim, "../outside/victim.log", "a/../../outside/victim.log", "", "linkdir/old.log"):
+            with self.subTest(name=name):
+                r = self.run_rules([{"id": "S1", "type": "own_files", "files": [name]}])
+                self.assertEqual(len(self.refusals(r)), 1, r.lines)
+                self.assertTrue(os.path.exists(victim))
 
 
 if __name__ == "__main__":
