@@ -226,7 +226,12 @@ setting (`[self]`, `[safe_mode]`, `[heartbeat]`); every decision is a pure funct
    `self.max_rss_mb`, `self.slow_ticks` ticks over `self.max_tick_s`, or `self.bad_reading_ticks` failed ticks. It logs
    one line, holds a `SELF_RESTART` alert and exits with code 75; launchd starts it again. A fault a restart cannot fix
    gives safe mode: wrong readings for `self.bad_reading_ticks` ticks, a data folder that is not writable or has less
-   than `self.min_free_mb` free, or more than `self.max_slot_changes_per_hour` slot changes in an hour.
+   than `self.min_free_mb` free, or more than `self.max_slot_changes_per_hour` slot changes in an hour. Only the
+   changes after the last `mm on` or `mm restart --clear-safe` count, so the changes that tripped safe mode do not
+   trip it again at once (the clear record `state/self-check-clear.json`: `cleared_at`, `why`, `was_safe`; written at
+   each of the two, also when safe mode was off). A clear record that cannot be read, or holds no valid `cleared_at`,
+   is not used: every change of the hour counts, and one `SELF-CHECK clear record unreadable` line goes to
+   `decisions.log` and `state/recovery.log`, at most once per 10 min. A `cleared_at` later than now is not used.
 2. **Crash-loop guard** (`crash_loop`). A start after a run that did not end by itself (a crash, a kill, a self
    restart) is unclean. At `self.crash_loop_starts` unclean starts in `self.crash_loop_minutes`, safe mode.
 3. **Safe mode** (`safe.json`). Automatic actions are off: no slot raise, no delete, no trim, no pause, the launch gate
@@ -449,7 +454,13 @@ and the gate stays open. `mm drill` keeps its own stricter 30 s, and refuses whi
 
 GREEN needs load1 strictly below `slots.green_load1_per_core` times the core count (default 0.8, range 0.1-4), as well
 as the load5 band. A slot raise needs `slots.raise_green_minutes` of GREEN while enough calls wait and all slots stay
-busy. GREEN also needs free disk of at least `slots.green_disk_gb` (default 0 = follow `disk.recover_gb`; else at
+busy. Two rules stop the count from flapping at the AMBER free-memory border: a raise also needs free memory of at
+least `slots.amber_free_pct` plus `slots.raise_free_margin_pct` (default 5, range 0-50; 0 = no such check, also when
+free memory is unknown; with a margin, unknown free memory gives no raise), and `slots.raise_hold_after_down_minutes`
+(default 15, range 0-240; 0 = off) since the last step down. Every hold must pass, so the longest one wins. A raise
+that only these two rules refuse writes one `HOLD slots N: raise held: ...` line to `decisions.log` (the free margin,
+unknown free memory, or the time since the step down), at most once per 10 min while the same kind of hold lasts.
+Steps down, RED, a pin and `mm event` events are not changed by them. GREEN also needs free disk of at least `slots.green_disk_gb` (default 0 = follow `disk.recover_gb`; else at
 least `slots.red_disk_gb`). `queue.slot_cpu_cores` is the CPU cap per held slot: each call's process tree is counted
 once, with one alert per call after two readings over its cap.
 
@@ -482,7 +493,7 @@ counts from the next tick, the tick's own length from the next wait; no restart 
 | The hook | fixed | each event | On each Claude Code event it is entered for (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `PreToolUse`); 2 s limit. |
 | The kernel `log stream` restart | fixed | 60 s | At most once per 60 s (macOS). Kernel events count 30 min for the alert, 2 min for RED. |
 | The supervisor's restart of a stale watchdog | fixed | 10 min | At most once per 10 min (installed runs only). |
-| `WOULD-PAUSE` and unreadable-slots decision lines; `WOULD-TRIM` | fixed | 10 min; 1 h | At most once per span. |
+| `WOULD-PAUSE`, unreadable-slots, `HOLD` (per kind) and unreadable clear-record decision lines; `WOULD-TRIM` | fixed | 10 min; 1 h | At most once per span. |
 | The growth windows | fixed | 60 s; 30 min; 6 h | Swap and compressor growth, the memory sign and the pause's readings: 60 s. The swap base: 30 min (samples kept 1900 s). The disk trend: 6 h, from readings at least 30 min apart. |
 | The queue sampler's system CPU | fixed | 150 s | Used while its last line is under 150 s old. |
 | launchd | fixed | 10 s; 20 s | `ThrottleInterval` (the supervisor's restart) and `ExitTimeOut` (from SIGTERM to the kill). |

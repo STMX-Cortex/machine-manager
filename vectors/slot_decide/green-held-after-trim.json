@@ -1,6 +1,7 @@
 {
  "case": "green-held-after-trim",
  "expected": {
+  "held": null,
   "slots": null,
   "state": {
    "demand_since": 1799996400.0,
@@ -17,6 +18,7 @@
    "events": [
     "trim"
    ],
+   "free_pct": 80.0,
    "mac_state": "GREEN",
    "now": 1800000000.0,
    "reasons": [],
