@@ -1,6 +1,8 @@
 {
  "case": "amber-step-down",
  "expected": {
+  "held": null,
+  "problem": null,
   "slots": 4,
   "state": {
    "demand_since": 1800000000.0,
@@ -14,6 +16,7 @@
  "input": {
   "inp": {
    "busy": 5,
+   "free_pct": 80.0,
    "mac_state": "AMBER",
    "now": 1800000000.0,
    "reasons": [

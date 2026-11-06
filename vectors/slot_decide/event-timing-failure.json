@@ -1,6 +1,8 @@
 {
  "case": "event-timing-failure",
  "expected": {
+  "held": null,
+  "problem": null,
   "slots": 4,
   "state": {
    "demand_since": 1800000000.0,
@@ -17,6 +19,7 @@
    "events": [
     "timing-failure"
    ],
+   "free_pct": 80.0,
    "mac_state": "STEADY",
    "now": 1800000000.0,
    "reasons": [],

@@ -9,6 +9,7 @@ Modes: observe (settings mode.observe) and the off switch (`mm off`) turn every 
 --dry-run reads live data and writes only into its data folder.
 """
 import collections
+import errno
 import json
 import hashlib
 import os
@@ -469,6 +470,67 @@ def pause_readings_present(complete, window):
                                 if window[-1]["t"] - sample["t"] <= 60 + 1)
 
 
+def read_nofollow(p):
+    """(bytes, why) of a regular file, opened without following a link and without blocking (a FIFO). why: None,
+    "missing" (ENOENT), "a link" (also a dangling one), "not a regular file", or the error's class name."""
+    try:
+        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as e:
+        if e.errno == errno.ENOENT:
+            return None, "missing"
+        if e.errno == errno.ELOOP:
+            return None, "a link"
+        return None, e.__class__.__name__
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None, "not a regular file"
+        parts = []
+        while True:
+            b = os.read(fd, 1 << 20)
+            if not b:
+                return b"".join(parts), None
+            parts.append(b)
+    except OSError as e:
+        return None, e.__class__.__name__
+    finally:
+        os.close(fd)
+
+
+KEEP_COPIES = 9  # NAME, NAME.2 .. NAME.9
+
+
+def keep_copy(folder, name, data):
+    """Write data to a NEW file in folder (opened without following a link): name, else name.2 .. name.9, each with
+    O_CREAT|O_EXCL|O_NOFOLLOW and mode 0600, so an existing copy (or a link in its place) is never replaced or
+    followed. Returns (the name written, None) or (None, why)."""
+    try:
+        dfd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as e:
+        return None, "state folder: %s" % e.__class__.__name__
+    try:
+        for i in range(1, KEEP_COPIES + 1):
+            n = name if i == 1 else "%s.%d" % (name, i)
+            try:
+                fd = os.open(n, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
+            except FileExistsError:
+                continue
+            except OSError as e:
+                return None, e.__class__.__name__
+            try:
+                view = memoryview(data)
+                while view:
+                    view = view[os.write(fd, view):]
+                os.fsync(fd)
+            except OSError as e:
+                return None, "%s while writing %s (kept)" % (e.__class__.__name__, n)
+            finally:
+                os.close(fd)
+            return n, None
+        return None, "%s to %s.%d exist already (all kept)" % (name, name, KEEP_COPIES)
+    finally:
+        os.close(dfd)
+
+
 class Supervisor:
     def __init__(self, profile, dry_run=False, kernel=True, allow_live_slots=False, clock=time.time, sampler=None,
                  sizes=True, slow_jobs=True, delete_extra=None, check_readings=True, boot=None):
@@ -487,7 +549,7 @@ class Supervisor:
         self.settings = mmcore.Settings(real_slots=self.queue.slots_path() if self.queue else None)
         self.kernel = KernelStream() if kernel and mmread.plat.KERNEL_LOG else None  # no stream: no kernel events
         self.live_spec = profile.get("live_tools") or {}
-        self.state = mmcore.read_json(mmcore.path("state", "controller.json"), {}) or {}
+        self.state = self._load_state()
         offs = self.state.setdefault("offsets", {})
 
         def start(file, saved):  # first start: the end of a file that exists, 0 for a file not made yet
@@ -545,7 +607,64 @@ class Supervisor:
         self.state.setdefault("held", {})[key] = {"name": name, "level": level, "text": text, "until": until,
                                                   "command": command}
 
+    def _load_state(self):
+        """state/controller.json. Only a real absence (no entry at all, os.path.lexists false) is a first start: {}.
+        Anything else that is not a JSON object (a read error, a link, also a dangling one, not a regular file, bad
+        JSON) is not "no record": its bytes (for a link: a line naming its target) are copied to a new
+        controller.json.unreadable (_keep_copy: never replaced, never deleted), SLOT_STATE is raised, and a fresh
+        record starts whose slot controller holds raises for one full hold from then (raise_hold_since); a step down
+        is never delayed. While the copy fails, state/controller.json is not replaced (save_state retries the copy each
+        tick) and no raise is made. A JSON object whose "controller" is not an object is repaired by
+        mmdecide.slot_state_clean (_control)."""
+        self.ctl_bad = None
+        f = mmcore.path("state", "controller.json")
+        if not os.path.lexists(f):
+            return {}
+        data, why = read_nofollow(f)
+        if why == "missing":  # gone since the lexists: no record
+            return {}
+        if why is None:
+            try:
+                st = json.loads(data.decode("utf-8"))
+                if isinstance(st, dict):
+                    return st
+                why = "not a JSON object"
+            except (ValueError, RecursionError) as e:  # UnicodeDecodeError is a ValueError
+                why = e.__class__.__name__
+        if why == "a link":
+            try:
+                data = ("symbolic link to %s\n" % os.readlink(f)).encode("utf-8", "replace")
+            except OSError as e:
+                data = ("symbolic link (%s)\n" % e.__class__.__name__).encode()
+        elif data is None or why == "not a regular file":
+            data = ("%s\n" % why).encode()
+        now = self.clock()
+        self.ctl_bad = {"why": why, "data": data}
+        self.state = {"controller": {"raise_hold_since": now}}
+        self._keep_bad(now)
+        return self.state
+
+    def _keep_bad(self, now):
+        """One try to keep the unreadable controller.json (_load_state) as a copy, with its SLOT_STATE text."""
+        bad = self.ctl_bad
+        name, err = keep_copy(mmcore.path("state"), "controller.json.unreadable", bad["data"])
+        if name:
+            self.ctl_bad = None
+            ctl = self.state.get("controller")
+            if isinstance(ctl, dict):
+                ctl["raise_hold_since"] = now  # one full hold from the time the fresh record may be written
+            text = ("state/controller.json unreadable (%s), kept as state/%s; a fresh record starts, no raise for one "
+                    "full hold (slots.raise_hold_after_down_minutes)" % (bad["why"], name))
+        else:
+            text = ("state/controller.json unreadable (%s), its copy failed (%s); the file is kept and not replaced, no "
+                    "raise until the copy works (tried each tick)" % (bad["why"], err))
+        self._slot_state_alert(now, text)
+
     def save_state(self):
+        if self.ctl_bad:  # the unreadable original is not yet kept: try again; never replace it before
+            self._keep_bad(self.clock())
+            if self.ctl_bad:
+                return
         mmcore.write_atomic(mmcore.path("state", "controller.json"), json.dumps(self.state, sort_keys=True))
 
     def _boot_check(self, boot):
@@ -587,10 +706,16 @@ class Supervisor:
                 rss = p["rss_mb"]
         writable, free = mmrecover.data_facts()
         safe = mmcore.safe_state()
+        cleared, problem = mmrecover.read_clear()
+        if problem and now - self.state.get("clear_unreadable_at", 0) >= 600:
+            self.state["clear_unreadable_at"] = now
+            line = "SELF-CHECK clear record unreadable (%s); every slot change of the hour counts" % problem
+            mmrecover.log(line, now)
+            self.log_decision("%s %s" % (mmcore.now_local(now), line))
         r = mmdecide.self_check(self.self_state, {
             "now": now, "rss_mb": rss, "tick_s": tick_s, "tick_errors": tick_errors,
             "reading_problems": self.reading_problems, "data_writable": writable, "data_free_mb": free,
-            "slot_changes": self.state.get("slot_changes", []), "safe": bool(safe)}, s)
+            "slot_changes": self.state.get("slot_changes", []), "safe": bool(safe), "cleared_at": cleared}, s)
         self.self_state = r["state"]
         why = "; ".join(r["reasons"])
         if r["action"] == "restart":
@@ -1083,17 +1208,37 @@ class Supervisor:
             cur = self.state.get("virtual_slots") or (q or {}).get("slots") or s["slots.floor"]
         tickets = (q or {}).get("tickets", [])
         override = mmcore.read_json(mmcore.path("override.json"), None)
-        r = mmdecide.slot_decide(self.state.get("controller") or {}, {
+        # a present "controller" that is not an object (also null, [], false, 0, "") is invalid state, not "none yet"
+        ctl = self.state.get("controller", {})
+        ctl = [] if ctl is None else ctl
+        r = mmdecide.slot_decide(ctl, {
             "now": now, "mac_state": mac_state, "reasons": list(reasons), "slots": cur,
             "busy": len((q or {}).get("busy", [])), "waiting": len(tickets),
-            "wx_waiting": any(t["mode"] in ("W", "X") for t in tickets), "override": override, "events": events}, s)
-        self.state["controller"] = r["state"]
+            "wx_waiting": any(t["mode"] in ("W", "X") for t in tickets), "override": override, "events": events,
+            "free_pct": self.free_pct}, s)
+        # last_change and last_down follow the tick's FINAL count (safe mode below may change slot_decide's target):
+        # the decided state without slot_decide's own marks, marked again after safe mode
+        before, _ = mmdecide.slot_state_clean(ctl, now)
+        decided = dict(r["state"])
+        for k in ("last_change", "last_down"):
+            if k in before:
+                decided[k] = before[k]
+            else:
+                decided.pop(k, None)
+        self._log_hold(now, cur, r.get("held"))
+        if r.get("problem"):
+            self._slot_state_alert(now, "%s; no raise for one full hold (slots.raise_hold_after_down_minutes)"
+                                   % r["problem"])
         if safe and safe.get("slot_write") is None:
             to = min(cur, s["safe_mode.slots"])
             r = {"slots": to, "why": "safe mode: at most %d slots" % s["safe_mode.slots"]} if to < cur else {"slots": None}
             mmrecover.mark_safe_slot_write("%s %d -> %d" % ("SET" if target_file else "WOULD", cur, to))
         elif safe and r["slots"] is not None and r["slots"] > cur:
             r = {"slots": None}  # safe mode: no raise
+        elif self.ctl_bad and r["slots"] is not None and r["slots"] > cur:
+            self._log_hold(now, cur, "raise held: state/controller.json unreadable and not yet kept")
+            r = {"slots": None}  # a conservative state while the unreadable file is not kept: steps down only
+        self.state["controller"] = mmdecide.slot_mark(decided, cur, r["slots"], now)
         if r["slots"] is None:
             self.state["virtual_slots"] = cur
             return
@@ -1110,6 +1255,27 @@ class Supervisor:
                 line += " (write failed: %s)" % e
         self.state["virtual_slots"] = r["slots"]
         self.log_decision(line)
+
+    def _slot_state_alert(self, now, text):
+        """SLOT_STATE (ATTENTION, held HELD_SELF_S): the slot controller's state was invalid or unreadable and was
+        repaired (or, while its copy fails, is kept); one recovery-log line per new text."""
+        same = ((self.state.get("held") or {}).get("SLOT_STATE") or {}).get("text") == text
+        self.hold("SLOT_STATE", "SLOT_STATE", "ATTENTION", text, now + HELD_SELF_S, command="mm explain SLOT_STATE")
+        if not same:  # a copy that keeps failing raises it on every tick: one log line per new text
+            mmrecover.log("SLOT_STATE %s" % text, now)
+
+    def _log_hold(self, now, cur, held):
+        """A GREEN raise the hysteresis refused (mmdecide.raise_hold): one HOLD decision line, at most once per 10 min
+        while the same kind of hold lasts; a new kind logs at once."""
+        if not held:
+            self.state.pop("raise_held", None)
+            return
+        kind = re.sub(r"[0-9.]+", "", held)  # the same text but for its numbers: the same kind of hold
+        last = self.state.get("raise_held") or {}
+        if last.get("kind") == kind and now - last.get("at", 0) < 600:
+            return
+        self.state["raise_held"] = {"kind": kind, "at": now}
+        self.log_decision("%s HOLD slots %d: %s" % (mmcore.now_local(now), cur, held))
 
     def _gate_and_pause(self, now, s, mac_state, reasons, actions_on, safe=None, readings_ok=False):
         """`readings_ok`: every memory reading is present throughout classify's growth window; without it neither

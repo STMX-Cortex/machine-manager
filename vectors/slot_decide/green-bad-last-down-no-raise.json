@@ -1,0 +1,36 @@
+{
+ "case": "green-bad-last-down-no-raise",
+ "expected": {
+  "held": "raise held: controller state invalid (last_down)",
+  "problem": "slot controller state invalid: last_down",
+  "slots": null,
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0,
+   "raise_hold_since": 1800000000.0
+  },
+  "why": null
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 5,
+   "free_pct": 80.0,
+   "mac_state": "GREEN",
+   "now": 1800000000.0,
+   "reasons": [],
+   "slots": 5,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0,
+   "last_down": "broken"
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

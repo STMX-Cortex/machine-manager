@@ -331,6 +331,7 @@ SCHEMA = {
     "slots.raise_green_minutes": ("num", 1, 240), "slots.raise_requires_waiting": ("int", 0, 100),
     "slots.hold_after_red_minutes": ("num", 0, 600), "slots.hold_after_trim_minutes": ("num", 0, 600),
     "slots.amber_step_interval_s": ("num", 10, 3600),
+    "slots.raise_free_margin_pct": ("num", 0, 50), "slots.raise_hold_after_down_minutes": ("num", 0, 240),
     "slots.green_free_pct": ("num", 0, 100), "slots.green_load5": ("num", 0, 200), "slots.green_sys_pct": ("num", 0, 100),
     "slots.green_load1_per_core": ("num", 0.1, 4),
     "slots.amber_free_pct": ("num", 0, 100), "slots.amber_swap_growth_mb_30m": ("num", 1, 100000),
@@ -830,13 +831,16 @@ class SlotController:
     def __init__(self, s, state=None):
         self.s = s
         self.st = state if isinstance(state, dict) else {}
+        self.held = None
 
-    def decide(self, now, mac_state, reasons, slots, busy, waiting, wx_waiting, override=None, events=()):
+    def decide(self, now, mac_state, reasons, slots, busy, waiting, wx_waiting, override=None, events=(), free_pct=None):
+        """Returns (slots, why); self.held keeps the last refused raise's text (or None)."""
         r = mmdecide.slot_decide(self.st, {"now": now, "mac_state": mac_state, "reasons": list(reasons), "slots": slots,
                                            "busy": busy, "waiting": waiting, "wx_waiting": wx_waiting,
-                                           "override": override, "events": list(events)}, self.s)
+                                           "override": override, "events": list(events), "free_pct": free_pct}, self.s)
         self.st.clear()
         self.st.update(r["state"])
+        self.held = r["held"]
         return r["slots"], r["why"]
 
 

@@ -27,6 +27,10 @@ raise_requires_waiting = 1  # calls
 hold_after_red_minutes = 30  # min
 hold_after_trim_minutes = 30  # min
 amber_step_interval_s = 120  # s
+# Hysteresis of a raise (no flapping at the AMBER free-memory border): a GREEN raise also needs free memory at least
+# amber_free_pct + raise_free_margin_pct, and raise_hold_after_down_minutes since the last step down.
+raise_free_margin_pct = 5  # % above amber_free_pct; 0 = no free-memory check; default 5; range 0-50; authority: the owner
+raise_hold_after_down_minutes = 15  # min after a step down; 0 = off; default 15; range 0-240; authority: the owner
 green_free_pct = 55  # %
 green_load5 = 8  # load
 green_load1_per_core = 0.8  # x cores; range 0.1-4

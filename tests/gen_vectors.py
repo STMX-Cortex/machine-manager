@@ -127,7 +127,8 @@ case("classify", "steady-green-disk-zero-follows-recover", {"window": series(3),
 
 # ---- slot_decide
 st0 = {"last_change": NOW - 3600, "green_since": NOW - 3600}
-base_inp = {"now": NOW, "mac_state": "GREEN", "reasons": [], "slots": 5, "busy": 5, "waiting": 2, "wx_waiting": False}
+base_inp = {"now": NOW, "mac_state": "GREEN", "reasons": [], "slots": 5, "busy": 5, "waiting": 2, "wx_waiting": False,
+            "free_pct": 80.0}
 case("slot_decide", "green-raise-one-step", {"state": st0, "inp": base_inp})
 case("slot_decide", "green-no-demand", {"state": st0, "inp": dict(base_inp, waiting=0)})
 case("slot_decide", "green-too-short", {"state": {"last_change": NOW - 3600, "green_since": NOW - 300}, "inp": base_inp})
@@ -146,6 +147,42 @@ case("slot_decide", "pin-expired", {"state": st0, "inp": dict(base_inp, mac_stat
                                                               override={"slots": 7, "until": NOW - 1, "reason": "old"})})
 case("slot_decide", "red-beats-pin", {"state": st0, "inp": dict(base_inp, mac_state="RED", override={"slots": 7, "until": NOW + 600,
                                                                                                     "reason": "x"})})
+
+# the hysteresis of a raise (slots.raise_free_margin_pct 5 above amber 50; slots.raise_hold_after_down_minutes 15),
+# from a state whose demand has lasted as long as its GREEN (as in vectors/slot_decide/green-raise-one-step.json)
+st_up = dict(st0, demand_since=NOW - 3600)
+case("slot_decide", "green-held-free-under-margin", {"state": st_up, "inp": dict(base_inp, free_pct=52.0)},
+     expected={"slots": None, "why": None, "held": "raise held: free 52% < 55% (amber 50% + margin 5%)",
+               "problem": None, "state": st_up})
+case("slot_decide", "green-raise-at-margin", {"state": st_up, "inp": dict(base_inp, free_pct=55.0)})
+case("slot_decide", "green-held-free-unknown", {"state": st_up, "inp": dict(base_inp, free_pct=None)})
+case("slot_decide", "green-margin-0-no-free-check", {"state": st_up, "inp": dict(base_inp, free_pct=None)},
+     {"slots.raise_free_margin_pct": 0})
+case("slot_decide", "green-held-after-down", {"state": dict(st_up, last_down=NOW - 600), "inp": base_inp})
+case("slot_decide", "green-raise-after-down-hold", {"state": dict(st_up, last_down=NOW - 900), "inp": base_inp})
+# an invalid stored time: repaired, no raise, a problem text; a step down never waits for it
+case("slot_decide", "green-bad-last-down-no-raise", {"state": dict(st_up, last_down="broken"), "inp": base_inp})
+case("slot_decide", "green-future-last-red-no-raise", {"state": dict(st_up, last_red=NOW + 3600), "inp": base_inp})
+case("slot_decide", "green-huge-last-change-no-raise", {"state": dict(st_up, last_change=10 ** 400), "inp": base_inp})
+case("slot_decide", "green-held-after-repair", {"state": dict(st_up, raise_hold_since=NOW - 600), "inp": base_inp})
+case("slot_decide", "green-raise-after-repair-hold", {"state": dict(st_up, raise_hold_since=NOW - 900), "inp": base_inp})
+case("slot_decide", "amber-step-with-bad-last-down", {"state": dict(st0, last_down="broken"),
+                                                      "inp": dict(base_inp, mac_state="AMBER", reasons=["free 49% < 50%"])})
+case("slot_decide", "amber-step-with-future-last-down", {"state": dict(st0, last_down=NOW + 3600),
+                                                         "inp": dict(base_inp, mac_state="AMBER", reasons=["free 49% < 50%"])})
+case("slot_decide", "state-not-a-dict", {"state": ["x"], "inp": base_inp})
+case("slot_decide", "state-false", {"state": False, "inp": dict(base_inp, mac_state="AMBER", reasons=["free 49% < 50%"])})
+# null is valid only in green_since and demand_since (slot_decide writes it there)
+case("slot_decide", "amber-step-with-null-last-down", {"state": dict(st0, last_down=None),
+                                                       "inp": dict(base_inp, mac_state="AMBER", reasons=["free 49% < 50%"])})
+case("slot_decide", "timing-failure-with-null-last-down", {"state": dict(st0, last_down=None),
+                                                           "inp": dict(base_inp, mac_state="STEADY", events=["timing-failure"])})
+case("slot_decide", "green-null-last-change-no-raise", {"state": dict(st_up, last_change=None), "inp": base_inp})
+case("slot_decide", "green-null-last-red-no-raise", {"state": dict(st_up, last_red=None), "inp": base_inp})
+case("slot_decide", "green-null-last-trim-no-raise", {"state": dict(st_up, last_trim=None), "inp": base_inp})
+case("slot_decide", "green-null-spans-are-valid", {"state": dict(st_up, green_since=None, demand_since=None), "inp": base_inp})
+case("slot_decide", "green-down-hold-0-off", {"state": dict(st_up, last_down=NOW - 60), "inp": base_inp},
+     {"slots.raise_hold_after_down_minutes": 0})
 
 # ---- alert_raise / alert_absent
 cond = {"key": "DISK_LOW", "name": "DISK_LOW", "level": "ACTION", "text": "disk 38 GB", "value": 38.0, "band": 10,
@@ -418,6 +455,12 @@ case("self_check", "data-disk-low-safe", {"state": {}, "inp": dict(OK_IN, data_f
 case("self_check", "slot-changes-12-ok", {"state": {}, "inp": dict(OK_IN, slot_changes=[NOW - 60 * k for k in range(12)])})
 case("self_check", "slot-changes-13-safe", {"state": {}, "inp": dict(OK_IN, slot_changes=[NOW - 60 * k for k in range(13)])})
 case("self_check", "old-slot-changes-ignored", {"state": {}, "inp": dict(OK_IN, slot_changes=[NOW - 3700 - k for k in range(20)])})
+case("self_check", "slot-changes-before-clear-ignored", {"state": {}, "inp": dict(
+    OK_IN, slot_changes=[NOW - 60 * k for k in range(20)], cleared_at=NOW - 30)})
+case("self_check", "slot-changes-after-clear-count", {"state": {}, "inp": dict(
+    OK_IN, slot_changes=[NOW - 60 * k for k in range(13)] + [NOW - 3000 - k for k in range(5)], cleared_at=NOW - 2900)})
+case("self_check", "clear-in-the-future-not-used", {"state": {}, "inp": dict(
+    OK_IN, slot_changes=[NOW - 60 * k for k in range(13)], cleared_at=NOW + 600)})
 case("self_check", "safe-beats-restart", {"state": {}, "inp": dict(OK_IN, rss_mb=250.0, data_writable=False)})
 case("self_check", "in-safe-mode-only-alert", {"state": {"slow": 5}, "inp": dict(OK_IN, rss_mb=250.0, tick_s=40.0, safe=True)})
 case("self_check", "in-safe-mode-fine", {"state": {}, "inp": dict(OK_IN, safe=True)})
