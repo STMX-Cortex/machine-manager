@@ -67,6 +67,8 @@
   "queue.wait_minutes",
   "queue.waits_over_20_per_hour",
   "queue.wide_free_pct",
+  "ready_work.idle_minutes",
+  "ready_work.stale_minutes",
   "repeat.action_minutes",
   "repeat.attention_hours",
   "repeat.clear_after_minutes",
@@ -441,6 +443,16 @@
    "type": "number",
    "minimum": 0,
    "maximum": 100
+  },
+  "ready_work.idle_minutes": {
+   "type": "number",
+   "minimum": 5,
+   "maximum": 120
+  },
+  "ready_work.stale_minutes": {
+   "type": "number",
+   "minimum": 15,
+   "maximum": 720
   },
   "repeat.action_minutes": {
    "type": "number",

@@ -113,10 +113,32 @@ PROFILE_DEFAULTS = {
     "deletes": {"forbidden_parts": [".ssh"], "protected_roots": [], "rules": [], "cleanup": []},
     "recovery": {"expected_jobs": []},
     "text_line_max": mmtext.TEXT_LINE_MAX_DEFAULT,  # C-22: the longest line any pattern sees (mmtext.cut)
+    "ready_work_dir": "",  # one JSON file per owner of ready work (mmready); "" = IDLE_WITH_WORK off
+    "ready_work_owners": [],  # owners whose <name>.json must be there (a missing one is READY_WORK_STALE); [] = none
 }
 # text_line_max's range: a line long enough for any record machine-manager parses; short enough that a pattern's cost
 # per line stays small.
 TEXT_LINE_MAX_RANGE = (256, 1 << 20)
+
+
+# ready_work_owners (mmready): each name is a file stem mmready.NAME accepts, so <name>.json is read
+READY_OWNER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+READY_OWNERS_MAX = 64
+
+
+def ready_owners_problem(v):
+    """Why a profile's ready_work_owners is not valid, or None: a list of at most READY_OWNERS_MAX unique names, each
+    matching READY_OWNER_NAME."""
+    if not isinstance(v, list):
+        return "must be a list of owner names"
+    if len(v) > READY_OWNERS_MAX:
+        return "has over %d names" % READY_OWNERS_MAX
+    for n in v:
+        if not isinstance(n, str) or not READY_OWNER_NAME.fullmatch(n):
+            return "names must match [A-Za-z0-9][A-Za-z0-9._-]* (at most 64 characters): %s" % mmtext.quoted(str(n)[:80])
+    if len(set(v)) != len(v):
+        return "has a name twice"
+    return None
 
 
 def _deep(base, over):
@@ -142,6 +164,13 @@ def load_profile(file=None):
     if isinstance(n, bool) or not isinstance(n, int) or not TEXT_LINE_MAX_RANGE[0] <= n <= TEXT_LINE_MAX_RANGE[1]:
         raise MMError("E_PROFILE", "text_line_max must be a whole number from %d to %d: %s"
                       % (TEXT_LINE_MAX_RANGE + (f,)), "correct text_line_max in the profile; mm check")
+    if not isinstance(out["ready_work_dir"], str):
+        raise MMError("E_PROFILE", "ready_work_dir must be a string path: %s" % f,
+                      'correct ready_work_dir in the profile (or "" for off); mm check')
+    why = ready_owners_problem(out["ready_work_owners"])
+    if why:
+        raise MMError("E_PROFILE", "ready_work_owners %s: %s" % (why, f),
+                      "correct ready_work_owners in the profile (or [] for none); mm check")
     mmtext.set_text_line_max(n)
     out["_file"] = f
     return out
@@ -338,6 +367,8 @@ SCHEMA = {
     "queue.long_call_minutes": ("num", 1, 1440), "queue.head_block_minutes": ("num", 1, 1440),
     "queue.slot_cpu_cores": ("num", 0.5, 64), "queue.placement_max_mac_wait_minutes": ("num", 0, 1440),
     "queue.wide_free_pct": ("num", 0, 100), "queue.idle_room_minutes": ("num", 1, 1440),
+    # Defaults 15 and 90 min; ranges 5-120 and 15-720 min; authority: the owner. IDLE_WITH_WORK, READY_WORK_STALE.
+    "ready_work.idle_minutes": ("num", 5, 120), "ready_work.stale_minutes": ("num", 15, 720),
     "github.reserve_minutes": ("int", 0, 1000000),
     "other.fseventsd_mb": ("num", 1, 1000000), "other.cache_5m_share_pct": ("num", 0, 100),
     "other.cache_5m_min_tokens_m": ("num", 0, 100000), "other.recipient_tool_wait_minutes": ("num", 1, 1440),

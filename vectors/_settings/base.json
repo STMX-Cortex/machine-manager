@@ -63,6 +63,8 @@
  "queue.wait_minutes": 20,
  "queue.waits_over_20_per_hour": 3,
  "queue.wide_free_pct": 50,
+ "ready_work.idle_minutes": 15,
+ "ready_work.stale_minutes": 90,
  "repeat.action_minutes": 30,
  "repeat.attention_hours": 3,
  "repeat.clear_after_minutes": 5,
