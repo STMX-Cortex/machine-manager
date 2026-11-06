@@ -261,7 +261,7 @@ mm restart [--clear-safe]        # stop, start, wait for a fresh heartbeat: rest
 when it is a JSON object whose `off` (or `safe`) is `true` or `false`; a missing file is no guard. Anything else (it
 cannot be read, a dangling link, invalid JSON, not an object, the flag missing or not a JSON bool, such as `1`,
 `"yes"` or `[]`) keeps automatic actions off. The ACTION alert `CONTROL_FILE_BROKEN:off.json` (or `:safe.json`)
-names the file and the problem, and `mm status` shows it (`broken=`; `--json`: `broken`). The alert clears when the
+names the file and the problem, and `mm status` shows it (`broken=`; `--json`: `broken`, only then). The alert clears when the
 file is good again or removed. `mm on` removes both files without reading them; `mm restart --clear-safe` removes
 `safe.json` the same way. The supervisor never writes over a broken file.
 

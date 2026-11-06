@@ -151,7 +151,9 @@ def cmd_status(args, as_json):
     # fail closed: a control file or the pause record that cannot be used is shown with its problem
     broken = mmcore.control_broken() + [p for p in [mmrecover.paused_problem(mmrecover.read_paused())] if p]
     obj = dict(st, status_age_s=round(age), stale=stale, active=counts,
-               top=[mmcore.display_id(a) for a in top[:3]], off=bool(mmcore.off_state()), broken=broken)
+               top=[mmcore.display_id(a) for a in top[:3]], off=bool(mmcore.off_state()))
+    if broken:  # only when a file cannot be used: the usual output stays as before
+        obj["broken"] = broken
     lines = [
         kv({"state": st.get("state") if not stale else "UNKNOWN", "mode": st.get("mode"), "slots": st.get("slots"),
             "would": st.get("slots_would"), "busy": st.get("busy"), "waiting": st.get("waiting"), "machine": st.get("machine_id")}),
