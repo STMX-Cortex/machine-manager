@@ -120,42 +120,66 @@ def children(root, patterns, dirs_only=False, skip=()):
 
 
 def own_name_problem(name):
-    """Why an own_files name (slot_dir, a `files` name) is refused before any file is looked at, or None: it must be a
-    non-empty text, relative, and stay inside the data folder after normalization ("state/decisions.log.1" is fine;
-    "/abs", "../x" and "a/../../x" are not). `mm check` shows the same problems (E_PROFILE)."""
+    """Why an own_files name (slot_dir, a `files` name) is refused before any file is looked at, or None, as words
+    that follow "files name" ("is an absolute name", "has a .. part"). A name must be a non-empty text with no NUL,
+    relative, and made of plain parts: no `..` part (even one that stays inside), no `.` or empty part
+    ("state/decisions.log.1" is fine). The parts are used as written, never normalized. `mm check` shows the same
+    problems (E_PROFILE)."""
     if not isinstance(name, str):
-        return "not a text name"
+        return "is not a text name"
     if not name:
-        return "an empty name"
-    if os.path.isabs(name):
-        return "an absolute name"
-    norm = os.path.normpath(name)
-    if norm in (os.curdir, os.pardir) or norm.startswith(os.pardir + os.sep):
-        return "a name that leaves the data folder"
+        return "is an empty name"
+    if "\0" in name:
+        return "has a NUL character"
+    if name.startswith("/"):
+        return "is an absolute name"
+    parts = name.split("/")
+    if ".." in parts:
+        return "has a .. part"
+    if any(x in ("", ".") for x in parts):
+        return "has a . or empty part"
     return None
 
 
-def remove_below(data, rel):
-    """Delete the entry `rel` (a normalized relative name) of the real folder `data` through folder descriptors: from
-    an fd of data, each folder part is opened with O_NOFOLLOW | O_DIRECTORY (a part swapped for a link after the
-    checks is never followed), the last name is checked with lstat at its folder's fd, then unlinked there (a folder:
-    shutil.rmtree with dir_fd, which never follows a link). Returns None when deleted, or why it was refused (a link,
-    a part that cannot be opened); other OSErrors pass to the caller."""
-    parts = rel.split(os.sep)
-    if not parts or any(x in ("", os.curdir, os.pardir) for x in parts):
-        return "not a name inside the data folder"
-    fd = os.open(data, os.O_RDONLY | os.O_DIRECTORY)
+def open_dir_at(dfd, parts, show=""):
+    """Open the folder parts[0]/parts[1]/... below the folder fd `dfd`, each part checked with lstat at its parent's fd
+    and opened with O_NOFOLLOW | O_DIRECTORY (never by path). Returns (fd, None): a NEW fd the caller closes (a dup of
+    dfd for no parts); (None, why) for a part that is a link ("is a link inside the data folder: <show>/<part path>");
+    (None, None) when a part is missing or not a folder (nothing there). Other OSErrors pass to the caller."""
+    fd = os.dup(dfd)
+    done = []
     try:
-        for part in parts[:-1]:
+        for part in parts:
             try:
-                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            except OSError as e:  # ELOOP / ENOTDIR: a link or not a folder; any other error: not entered
-                return "the folder part %s cannot be opened without following a link (%s)" % (part, e.__class__.__name__)
+                st = os.stat(part, dir_fd=fd, follow_symlinks=False)
+            except (FileNotFoundError, NotADirectoryError):
+                return None, None
+            done.append(part)
+            if stat.S_ISLNK(st.st_mode):
+                return None, "is a link inside the data folder: %s" % os.path.join(show, *done)
+            if not stat.S_ISDIR(st.st_mode):
+                return None, None
+            nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             os.close(fd)
             fd = nfd
+        out, fd = fd, None
+        return out, None
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def remove_at(dfd, parts, show=""):
+    """Delete parts[-1] below the data folder fd `dfd` through folder fds (open_dir_at; the parts are walked again,
+    so a part swapped for a link after the checks is refused): lstat at its folder's fd, then unlink there (a folder:
+    shutil.rmtree with dir_fd, which never follows a link). Returns None when deleted, or why it was refused."""
+    fd, why = open_dir_at(dfd, parts[:-1], show)
+    if fd is None:
+        return why or "a folder part is gone (re-check)"
+    try:
         st = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
         if stat.S_ISLNK(st.st_mode):
-            return "a link (swapped in after the checks)"
+            return "is a link inside the data folder: %s (swapped in after the checks)" % os.path.join(show, *parts)
         if stat.S_ISDIR(st.st_mode):
             shutil.rmtree(parts[-1], dir_fd=fd)
         else:
@@ -163,6 +187,61 @@ def remove_below(data, rel):
         return None
     finally:
         os.close(fd)
+
+
+def untouched_at(dfd, parts, now, minutes, forbidden_parts, show=""):
+    """Run.untouched for parts below the data folder fd `dfd`, read through folder fds only (never by path):
+    (True, bytes, None) when nothing under it changed within `minutes`; a link, a forbidden folder inside or an
+    unreadable entry counts as touched."""
+    limit = now - minutes * 60
+    pfd, why = open_dir_at(dfd, parts[:-1], show)
+    if pfd is None:
+        return False, 0, why or "gone"
+    try:
+        st = os.stat(parts[-1], dir_fd=pfd, follow_symlinks=False)
+        if stat.S_ISLNK(st.st_mode):
+            return False, 0, "a link"
+        if st.st_mtime > limit:
+            return False, 0, "changed %.0f min ago" % ((now - st.st_mtime) / 60)
+        if not stat.S_ISDIR(st.st_mode):
+            return True, st.st_size, None
+
+        def walk(fd):  # depth-first: open folder fds = the depth only
+            total = 0
+            with os.scandir(fd) as it:
+                entries = list(it)
+            for e in entries:
+                if e.name in forbidden_parts:
+                    raise _Touched("holds a %s folder (protected)" % e.name)
+                est = e.stat(follow_symlinks=False)
+                if est.st_mtime > limit:
+                    raise _Touched("an entry changed %.0f min ago" % ((now - est.st_mtime) / 60))
+                total += est.st_blocks * 512
+                if stat.S_ISDIR(est.st_mode):
+                    cfd = os.open(e.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                    try:
+                        total += walk(cfd)
+                    finally:
+                        os.close(cfd)
+            return total
+
+        top = os.open(parts[-1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=pfd)
+        try:
+            return True, walk(top), None
+        except _Touched as t:
+            return False, 0, str(t)
+        except (OSError, RecursionError):
+            return False, 0, "unreadable entry"
+        finally:
+            os.close(top)
+    except OSError:
+        return False, 0, "unreadable"
+    finally:
+        os.close(pfd)
+
+
+class _Touched(Exception):
+    pass
 
 
 def own_files_shape(r):
@@ -176,32 +255,6 @@ def own_files_shape(r):
     if "files" in r and not isinstance(r["files"], list):
         out["files"] = "files is not a list of names"
     return out
-
-
-def own_name_refusal(data, name):
-    """Why an own_files name must not be used in the data folder `data` (a real path), or None: own_name_problem,
-    a link at any component below data (lstat), or a real parent outside data. Returns (path, why): the normalized
-    path inside data when the name is usable."""
-    bad = own_name_problem(name)
-    if bad:
-        if not isinstance(name, str):
-            return data, bad
-        return (name if os.path.isabs(name) else os.path.join(data, name)), bad
-    p = os.path.join(data, os.path.normpath(name))
-    cur = data
-    for part in os.path.normpath(name).split(os.sep):
-        cur = os.path.join(cur, part)
-        try:
-            if stat.S_ISLNK(os.lstat(cur).st_mode):
-                return p, "a link inside the data folder: %s" % cur
-        except (FileNotFoundError, NotADirectoryError):
-            break  # nothing behind it: nothing to delete
-        except OSError as e:
-            return p, "cannot check %s (%s)" % (cur, e.__class__.__name__)
-    parent = os.path.realpath(os.path.dirname(p))
-    if parent != data and not parent.startswith(data + os.sep):
-        return p, "real parent %s is outside the data folder" % parent
-    return p, None
 
 
 class Run:
@@ -364,61 +417,112 @@ class Run:
 
     # ---- rule types
     def own_files(self, r):
-        """The tool's own evidence slots and rotated logs (in the data folder), older than a setting's days."""
+        """The tool's own evidence slots and rotated logs (in the data folder), older than a setting's days.
+        The real data folder is opened ONCE (O_NOFOLLOW; its fd must be the folder its real path names, else the whole
+        rule is refused), and every check and delete is made through folder fds from it, never by path. Names must
+        be plain relative parts (own_name_problem); a link part refuses its name; a value of the wrong type
+        (own_files_shape) refuses all its names (`files` as one text is never read letter by letter). Each refusal is
+        one KEEP line; a refused slot_dir gives no slot candidates; a name that cannot be checked (an OSError or
+        ValueError) is one KEEP line and the other names still run."""
         days = self.s[r.get("age_days_setting", "deletes.evidence_keep_days")]
         data = os.path.realpath(self.c.data)
-        # every name must be relative and stay inside the real data folder, with no link below it (own_name_refusal):
-        # a refused slot_dir gives no slot candidates, a refused file name is skipped; each is one KEEP line. A value
-        # of the wrong type (own_files_shape) refuses all its names: `files` as one text is never read letter by letter
         shape = own_files_shape(r)
         for key in sorted(shape):
             self.log("KEEP", r["id"], data, guard="refused: %s" % shape[key])
-        if "slot_dir" in shape or "slot_pattern" in shape:
-            slot_dir, cands = None, []
-        else:
-            slot_dir, bad = own_name_refusal(data, r.get("slot_dir", "evidence"))
-            if bad:
-                self.log("KEEP", r["id"], slot_dir, guard="refused: slot_dir is %s" % bad)
-                slot_dir, cands = None, []
-            else:
-                cands = children(slot_dir, [r.get("slot_pattern", "[0-9][0-9]")], dirs_only=True)
-        allowed = set()
-        for n in ([] if "files" in shape else r.get("files", [])):
-            p, bad = own_name_refusal(data, n)
-            if bad:
-                self.log("KEEP", r["id"], p, guard="refused: files name is %s" % bad)
-                continue
-            allowed.add(p)
-            if os.path.lexists(p):
-                cands.append(p)
-        for p in cands:
-            real = os.path.realpath(p)
-            own = real == p and real.startswith(data + os.sep) and (
-                (slot_dir is not None and real.startswith(slot_dir + os.sep)) or real in allowed)
-            if os.path.islink(p) or not own:
-                self.log("KEEP", r["id"], p, guard="not an own rotated file or evidence slot")
-                continue
-            ok, nbytes, why = self.untouched(p, days * 1440)
-            if not ok:
-                self.log("KEEP", r["id"], p, guard=why)
-                continue
-            if not self.enabled:
-                self.would += nbytes
-                self.log("WOULD-DELETE", r["id"], p, nbytes, "pass: own file, age>%gd" % days)
-                continue
-            if os.path.realpath(p) != p or os.path.islink(p):  # the re-check right before the delete: a link swapped in
-                self.log("KEEP", r["id"], p, guard="re-check: not an own rotated file or evidence slot")
-                continue
+        try:
+            dfd = os.open(data, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        except OSError as e:
+            self.log("KEEP", r["id"], data, guard="refused: the data folder cannot be opened without following a link "
+                     "(%s)" % e.__class__.__name__)
+            return
+        try:
             try:
-                bad = remove_below(data, os.path.relpath(p, data))
-            except OSError as e:
+                a, b = os.fstat(dfd), os.lstat(data)
+                same = not stat.S_ISLNK(b.st_mode) and (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino)
+            except OSError:
+                same = False
+            if not same:
+                self.log("KEEP", r["id"], data, guard="refused: the data folder changed while it was opened")
+                return
+            self._own_files_at(r, days, data, dfd, shape)
+        finally:
+            os.close(dfd)
+
+    def _own_files_at(self, r, days, data, dfd, shape):
+        cands = []  # [parts below data]
+        if "slot_dir" not in shape and "slot_pattern" not in shape:
+            name = r.get("slot_dir", "evidence")
+            bad = own_name_problem(name)
+            sfd = None
+            if not bad:
+                try:
+                    sfd, bad = open_dir_at(dfd, name.split("/"), data)
+                except (OSError, ValueError) as e:
+                    bad = "cannot be checked (%s)" % e.__class__.__name__
+            if bad:
+                self.log("KEEP", r["id"], self._own_path(data, name), guard="refused: slot_dir %s" % bad)
+            elif sfd is not None:
+                try:
+                    pat = r.get("slot_pattern", "[0-9][0-9]")
+                    for n in sorted(os.listdir(sfd)):
+                        if fnmatch.fnmatchcase(n, pat) and stat.S_ISDIR(
+                                os.stat(n, dir_fd=sfd, follow_symlinks=False).st_mode):
+                            cands.append(name.split("/") + [n])
+                except OSError as e:
+                    self.log("KEEP", r["id"], self._own_path(data, name), guard="refused: slot_dir cannot be listed "
+                             "(%s)" % e.__class__.__name__)
+                finally:
+                    os.close(sfd)
+        for n in ([] if "files" in shape else r.get("files", [])):
+            bad = own_name_problem(n)
+            if not bad:
+                try:
+                    parts = n.split("/")
+                    pfd, bad = open_dir_at(dfd, parts[:-1], data)
+                    if pfd is not None:
+                        try:
+                            st = os.stat(parts[-1], dir_fd=pfd, follow_symlinks=False)
+                            if stat.S_ISLNK(st.st_mode):
+                                bad = "is a link inside the data folder: %s" % os.path.join(data, *parts)
+                            else:
+                                cands.append(parts)
+                        except (FileNotFoundError, NotADirectoryError):
+                            pass  # nothing there: nothing to delete
+                        finally:
+                            os.close(pfd)
+                except (OSError, ValueError) as e:
+                    bad = "cannot be checked (%s)" % e.__class__.__name__
+            if bad:
+                self.log("KEEP", r["id"], self._own_path(data, n), guard="refused: files name %s" % bad)
+        guard = "pass: own file, age>%gd" % days
+        for parts in cands:
+            p = os.path.join(data, *parts)
+            try:
+                ok, nbytes, why = untouched_at(dfd, parts, self.now, days * 1440, self.c.forbidden_parts, data)
+                if not ok:
+                    self.log("KEEP", r["id"], p, guard=why)
+                    continue
+                if not self.enabled:
+                    self.would += nbytes
+                    self.log("WOULD-DELETE", r["id"], p, nbytes, guard)
+                    continue
+                bad = remove_at(dfd, parts, data)
+            except (OSError, ValueError) as e:
                 self.log("KEEP", r["id"], p, guard="delete failed: %s" % str(e)[:80])
                 continue
             if bad:
                 self.log("KEEP", r["id"], p, guard="refused: %s" % bad)
                 continue
             self.freed += nbytes
-            self.log("DELETE", r["id"], p, nbytes, "pass: own file, age>%gd" % days)
+            self.log("DELETE", r["id"], p, nbytes, guard)
+
+    @staticmethod
+    def _own_path(data, name):
+        """The path a refused own_files name shows in its KEEP line (the data folder for a name that is not a text)."""
+        if not isinstance(name, str):
+            return data
+        name = name.replace("\0", "?")
+        return name if name.startswith("/") else os.path.join(data, name)
 
     def folders(self, r):
         """Top-level entries matching patterns directly inside the roots, untouched age_minutes, not held."""
