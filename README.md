@@ -257,6 +257,17 @@ mm start
 mm restart [--clear-safe]        # stop, start, wait for a fresh heartbeat: restart=ok pid=N, or one E_RESTART line
 ```
 
+**Fail closed.** A control file that cannot be used never counts as absent. `off.json` or `safe.json` is used only
+when it is a JSON object whose `off` (or `safe`) is `true` or `false`; a missing file is no guard. Anything else (it
+cannot be read, a dangling link, invalid JSON, not an object, the flag missing or not a JSON bool, such as `1`,
+`"yes"` or `[]`) keeps automatic actions off. The ACTION alert `CONTROL_FILE_BROKEN:off.json` (or `:safe.json`)
+names the file and the problem, and `mm status` shows it (`broken=`; `--json`: `broken`, only then). The alert clears when the
+file is good again or removed. `mm on` removes both files without reading them; `mm restart --clear-safe` removes
+`safe.json` the same way, and both check the guard again: when it is still set (a folder there; it is never deleted
+recursively), they print one `E_CLEAR` line and exit 2. The supervisor never writes over a broken file, and a broken
+file means no slot write at all, as for `mm off`. The launch gate is an automatic action
+too: a broken file opens it, as a real `mm off` or safe mode does, and `CONTROL_FILE_BROKEN` tells the owner.
+
 ## Self-recovery
 
 The tool restarts itself, guards against a restart loop, and never leaves a process stopped. Every limit is a
@@ -279,7 +290,9 @@ setting (`[self]`, `[safe_mode]`, `[heartbeat]`); every decision is a pure funct
 3. **Safe mode** (`safe.json`). Automatic actions are off: no slot raise, no delete, no trim, no pause, the launch gate
    open. The slot count is lowered once to at most `safe_mode.slots` (a WOULD line in observe mode); it may still go
    down after that. Readings, alerts and hooks go on. An ACTION alert `SAFE_MODE` names the reason. In safe mode the
-   self-check never exits (it raises `SELF_CHECK`). Only `mm on` or `mm restart --clear-safe` ends it.
+   self-check never exits (it raises `SELF_CHECK`). Only `mm on` or `mm restart --clear-safe` ends it. A `safe.json`
+   that cannot be used is safe mode on ("Fail closed", above), with no slot write at all; a new safe-mode trip keeps
+   that file as it is and writes a `SAFE MODE trip` line to `state/recovery.log`.
 4. **Paused processes** (`resume_targets`). The pause writes each pid and its start time to `state/paused.json`
    before its SIGSTOP. Every start, safe mode, turning `pause_newest_call.enabled` off, `mm stop`, `mm rollback` and
    the watchdog (when the supervisor is stale over `self.resume_paused_after_s`) send SIGCONT to each recorded pid
@@ -292,7 +305,13 @@ setting (`[self]`, `[safe_mode]`, `[heartbeat]`); every decision is a pure funct
    the cap time, including after a cap change, drop the cap count. A failed start-time read keeps the process record
    for retry and sends no signal to that pid. It writes a `RESUME` line with the reason, and each capped pause raises
    its own `PAUSE_MAX` naming the call (or saying the call was gone). If a call continued but its updated record could
-   not be written, the alert says both.
+   not be written, the alert says both. A `state/paused.json` that cannot be used (it cannot be read, invalid JSON,
+   not an object, a key that is not a pid in 1..2**31-1 or a value that is not a start-time text) names no pid, so
+   nothing is continued from it and it is never written over. It counts as "maybe paused": no new pause starts (one
+   `PAUSE-REFUSED` line in `decisions.log`), `mm recover-paused` exits 1 with `broken=`, and the ACTION alert
+   `PAUSED_FILE_BROKEN` names the problem (from the watchdog while the supervisor is stale or stopped:
+   `PAUSED_FILE_BROKEN:paused-file`). The processes it listed may still be stopped: inspect the file, continue them
+   by hand (`kill -CONT PID`), then remove it.
 5. **The watchdog is watched.** Each watchdog run writes `state/watchdog.stamp`; at `self.watchdog_stale_s` the
    supervisor raises `WATCHDOG_STALE` and restarts the watchdog (installed runs only, once per 10 min).
 6. **Mac reboot** (`reboot_check`). At start, a changed `kern.boottime` gives `MAC_REBOOTED`: the uptime, how long the
@@ -330,6 +349,21 @@ expressions over process command lines, checked after a Mac reboot), `text_line_
 folder of ready-work files, "Ready work"), `ready_work_owners` (default `[]`: owners whose file must be there), `notify` (phone notifications, off unless
 `enabled = true`; [NOTIFY.md](NOTIFY.md)). Placeholders: `{data}`, `{user_tmp}`,
 `{claude_tmp}`, `~`. The schema is `schemas/profile.schema.json`.
+
+An `own_files` rule (`slot_dir`, default `evidence`; `files`) names folders and files in the data folder. Each name
+is used as written, never normalized, and must be made of plain relative parts (`state/decisions.log.1` is fine). An
+absolute or empty name, a name with a NUL character, a `..` part (also one that stays inside), a `.` or empty part,
+or a link at any part below the data folder is refused: one KEEP line in `deletes.log`, never a delete. The rule's
+other names still run, also when one name cannot be checked (a KEEP line for it), and a refused `slot_dir` gives no
+slot candidates. A value of the wrong type refuses all its names with one KEEP line: `files` that is not a list (one
+text is never read letter by letter), or `slot_dir` or `slot_pattern` that is not a text (then no slot candidates).
+The real data folder is opened once per rule without following a link (a link there, or a folder that changed while
+it was opened, refuses the whole rule), and every check and delete goes through folder descriptors from it, each
+part opened without following a link, so a part swapped for a link after the checks is refused. The data folder and
+every folder above it must belong to the owner: those are not checked. A folder candidate that holds a link
+anywhere inside is refused (`holds a link`), and a slot that is a link gives a KEEP line. These checks stop wrong
+names and links set up beforehand; they cannot stop another process of the same user that moves or replaces files in
+the data folder during a delete pass. `mm check` shows the name and type problems as `E_PROFILE`.
 
 Clean-up list rule types (`deletes.cleanup`) are `git_worktrees`, `git_branches`, `stale_children` and `paths`.
 A `git_worktrees` rule may set `keep = ["journal-*"]`: case-sensitive `fnmatch` patterns on each tree folder's
@@ -686,6 +720,9 @@ queue is idle; `IDLE_WITH_WORK` free slots while ready work waits; `READY_WORK_S
 `SOURCE_STALE` a reading source is old; `READINGS_MISMATCH` fast readings disagree with the macOS commands;
 `OFF` the off switch is on; `SETTINGS_BAD` the settings file is invalid; `SUPERVISOR_ERROR` ticks fail;
 `SELF_STALE` the supervisor is not writing; `SELF_RESTART` the tool restarted itself; `SAFE_MODE` safe mode is on;
+`CONTROL_FILE_BROKEN` `off.json` or `safe.json` cannot be used, so actions stay off; `PAUSED_FILE_BROKEN`
+`state/paused.json` cannot be used: no pause, no resume from it (from the watchdog, while the supervisor is stale or
+stopped: `PAUSED_FILE_BROKEN:paused-file`);
 `SELF_CHECK` a self-check fault in safe mode; `SLOT_STATE` the slot controller's saved state was invalid or unreadable and was repaired; `WATCHDOG_STALE` the watchdog does not run; `MAC_REBOOTED` the Mac
 restarted; `STOPPED` stopped by hand; `GH_FAIL`, `GH_STUCK`, `GH_DONE`, `GH_PACE`
 the CI pool; `GUARD_NEAR`, `GUARD_STOP` the CI budget.

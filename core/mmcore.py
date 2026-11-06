@@ -213,7 +213,9 @@ def append_line(path, line, max_bytes=LOG_MAX_BYTES):
             os.replace(path, path + ".1")
     except OSError:
         pass
-    with open(path, "a") as f:
+    # backslashreplace: a name that is not valid UTF-8 (a Linux file name byte such as 0xff, kept as a surrogate)
+    # is written escaped, never an error that stops the writer after its action
+    with open(path, "a", errors="backslashreplace") as f:
         f.write(mmtext.clean(line.rstrip("\n")) + "\n")  # C-17's replacement: one record per line for all (C-23)
 
 
@@ -567,18 +569,70 @@ def settings_json_schema():
 
 # --------------------------------------------------------------------------------------------- the off switch
 
+def control_problem(name, flag):
+    """Why the control file `name` (off.json, safe.json) cannot be used, or None. The fail-closed rule: missing (no
+    entry at all) is no guard; a JSON object whose `flag` is a JSON bool is used as it is; anything else (a read
+    error, a dangling link, invalid JSON, not an object, the flag missing or not true/false) is a problem, and the
+    guard counts as SET. Returns (record or None, problem or None)."""
+    f = path(name)
+    try:
+        with open(f) as fh:
+            d = json.load(fh)
+    except FileNotFoundError:
+        return None, ("%s: a dangling link" % name if os.path.lexists(f) else None)
+    except (OSError, ValueError, RecursionError) as e:  # ValueError: invalid JSON or UTF-8; RecursionError: deep nesting
+        return None, "%s: cannot be read (%s)" % (name, e.__class__.__name__)
+    if not isinstance(d, dict):
+        return None, "%s: not a JSON object" % name
+    if flag not in d:
+        return None, "%s: no %s flag" % (name, flag)
+    if not isinstance(d[flag], bool):
+        return None, "%s: %s is not true or false" % (name, flag)
+    return (d if d[flag] else None), None
+
+
+class ControlBroken(dict):
+    """off_state/safe_state's record for a control file that cannot be used: a SET guard. `problem` (an attribute,
+    never a field of the user's file) names the file and the problem; the "broken" and "reason" keys are for display.
+    Only record_problem() decides that a record is broken: a user-written "broken" field means nothing."""
+
+    def __init__(self, flag, problem):
+        super().__init__({flag: True, "broken": problem, "reason": "%s; automatic actions stay off" % problem})
+        self.problem = problem
+
+
+def record_problem(rec):
+    """The reader's problem text of an off_state/safe_state record (ControlBroken), or None."""
+    return rec.problem if isinstance(rec, ControlBroken) else None
+
+
+def _flag_state(name, flag):
+    rec, problem = control_problem(name, flag)
+    return rec if problem is None else ControlBroken(flag, problem)
+
+
 def off_state():
     """`mm off` writes off.json in the data folder: every automatic action is off (slot writes, deletes, trim, gate,
-    pause); readings and alerts go on. Returns the record or None."""
-    d = read_json(path("off.json"), None)
-    return d if isinstance(d, dict) and d.get("off") else None
+    pause); readings and alerts go on. Returns the record or None. An off.json that cannot be used (control_problem)
+    is the switch ON: {"off": True, "broken": "off.json: <problem>", "reason": ...}; `mm on` removes it unread."""
+    return _flag_state("off.json", "off")
 
 
 def safe_state():
     """Safe mode (safe.json in the data folder, written by the supervisor): automatic actions off, readings and alerts
-    on. Only `mm on` or `mm restart --clear-safe` ends it. Returns the record or None."""
-    d = read_json(path("safe.json"), None)
-    return d if isinstance(d, dict) and d.get("safe") else None
+    on. Only `mm on` or `mm restart --clear-safe` ends it. Returns the record or None. A safe.json that cannot be used
+    (control_problem) is safe mode ON: {"safe": True, "broken": "safe.json: <problem>", "reason": ..., "slot_write":
+    "none (safe.json broken)"} (ControlBroken): no slot write at all is made for it (as for off.json), and the
+    supervisor never writes over it."""
+    rec = _flag_state("safe.json", "safe")
+    if record_problem(rec):
+        rec["slot_write"] = "none (safe.json broken)"
+    return rec
+
+
+def control_broken():
+    """The problems of the control files (off.json, safe.json): [problem text], empty when both can be used."""
+    return [p for p in (control_problem("off.json", "off")[1], control_problem("safe.json", "safe")[1]) if p]
 
 
 # --------------------------------------------------------------------------------------------- masking

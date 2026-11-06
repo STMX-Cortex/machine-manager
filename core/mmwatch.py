@@ -5,7 +5,9 @@ It checks the supervisor's status.json age, the memory guard's heartbeat and the
 supervisor gives an ACTION alert SELF_STALE and a restart through the platform's user service manager.
 MM_LAUNCHCTL/MM_SYSTEMCTL replace the service commands in tests. After `mm stop` (state/stopped.json) it restarts nothing and stays quiet.
 It writes no slots file and stops no process. When the supervisor is stale over self.resume_paused_after_s (or
-stopped), it continues every process the pause stopped (mmrecover.resume_paused). Each run writes state/watchdog.stamp.
+stopped), it continues every process the pause stopped (mmrecover.resume_paused); a state/paused.json that cannot be
+used names no pid: then it continues nothing and raises WD:paused-file (PAUSED_FILE_BROKEN). Each run writes
+state/watchdog.stamp.
 When restart=False it reports problems and recovers recorded pauses without restarting the supervisor.
 """
 import os
@@ -35,9 +37,20 @@ def check(now, s, profile, restart=True):
         age = None
     limit = s["other.heartbeat_max_age_s"]
     # a supervisor that died or hangs while it held a pause: continue every paused process (pid and start time checked)
-    if (age is None or age > s["self.resume_paused_after_s"] or stopped) and mmrecover.read_paused():
-        got = mmrecover.resume_paused("watchdog: supervisor %s" % ("stopped" if stopped else "stale"), now)
-        mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s resumed paused pids %s" % (mmcore.now_local(now), got))
+    paused = mmrecover.read_paused()
+    if (age is None or age > s["self.resume_paused_after_s"] or stopped) and paused:
+        problem = mmrecover.paused_problem(paused)
+        if problem:  # fail closed: no pid can be known from it, so nothing is continued and the file is kept
+            mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s paused record unusable (%s): nothing resumed, "
+                               "processes may still be stopped" % (mmcore.now_local(now), problem))
+            # only here (the supervisor is stale or stopped): no second alert while the supervisor raises its own;
+            # finish() below clears it when the file is good or gone, or the supervisor is healthy again
+            text, command = mmrecover.paused_broken_alert(problem)
+            store.raise_("WD:paused-file", "PAUSED_FILE_BROKEN", "ACTION", text, command=command)
+            problems.append(problem)
+        else:
+            got = mmrecover.resume_paused("watchdog: supervisor %s" % ("stopped" if stopped else "stale"), now)
+            mmcore.append_line(mmcore.path("state", "watchdog.log"), "%s resumed paused pids %s" % (mmcore.now_local(now), got))
     ref = mmrecover.start_ref(now)
     in_grace = ref is not None and now - ref < s["self.start_grace_s"]
     if not stopped and (age is None or age > limit) and in_grace:

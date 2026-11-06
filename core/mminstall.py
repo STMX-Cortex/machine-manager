@@ -334,6 +334,7 @@ def check(profile_file=None, online=False):
         mmnotify.config(prof)  # [notify]: no network, nothing sent (mm notify test sends)
     except mmcore.MMError as e:
         out.append(str(e))
+    out += own_files_problems(prof)
     out += command_problems(prof, online)
     q = prof.get("queue") or {}
     if q.get("dir") and not os.path.isdir(mmcore.expand(q["dir"])):
@@ -347,6 +348,29 @@ def check(profile_file=None, online=False):
     bad, _, _ = mmread.check_readings()
     for b in bad:
         out.append("E_READINGS %s; fix: the tool uses the command readings; report the macOS version" % b)
+    return out
+
+
+def own_files_problems(profile):
+    """E_PROFILE lines for own_files rules whose slot_dir, slot_pattern or `files` has the wrong type
+    (mmdelete.own_files_shape), or whose names are not relative names inside the data folder
+    (mmdelete.own_name_problem); the delete pass refuses them on its own as well."""
+    import mmdelete
+    out = []
+    for r in (profile.get("deletes") or {}).get("rules", []):
+        if not isinstance(r, dict) or r.get("type") != "own_files":
+            continue
+        shape = mmdelete.own_files_shape(r)
+        for key in sorted(shape):
+            out.append("E_PROFILE deletes rule %s: %s; fix: correct its type (README.md, Profile)"
+                       % (mmcore.clean(str(r.get("id"))), shape[key]))
+        names = ([("slot_dir", r["slot_dir"])] if "slot_dir" in r and "slot_dir" not in shape else []) + \
+            [("files", n) for n in ([] if "files" in shape else r.get("files") or [])]
+        for key, n in names:
+            bad = mmdelete.own_name_problem(n)
+            if bad:
+                out.append("E_PROFILE deletes rule %s: %s %s %s; fix: use a name relative to the data folder, "
+                           "inside it" % (mmcore.clean(str(r.get("id"))), key, json.dumps(n, default=repr), bad))
     return out
 
 
@@ -585,6 +609,10 @@ def rollback(profile):
     resumed = mmrecover.resume_paused("rollback")
     if resumed:
         lines.append("resumed=%s" % ",".join(str(p) for p in resumed))
+    problem = mmrecover.paused_problem(mmrecover.read_paused())
+    if problem:  # no pid can be known from it: nothing continued from it; the owner checks by hand
+        lines.append("paused_broken=%s nothing continued from it; inspect it, kill -CONT the pids, remove it"
+                     % json.dumps(mmcore.clean(problem)))
     hf = mmcore.expand((profile.get("delivery") or {}).get("settings_file") or "")
     rec = os.path.join(mmcore.base_dir(), "install.json")
     if hf and os.path.exists(hf):

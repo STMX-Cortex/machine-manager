@@ -76,6 +76,8 @@ GROUPS = {
     "resources": ["test_resources"],  # mm resources: rows, files only, facts, cpu_pct, runners, the idle rule, schemas
     "platform": ["test_platform"],    # the platform layer, the Linux path (MM_PLATFORM=linux), fail closed without ps or lsof
     "schedule": ["test_schedule"],    # [schedule]: intervals, the loop's wait, the watchdog plist, W_SCHEDULE, mm settings show
+    "live_risks": ["test_live_risks"],  # live risks 1-3: broken off.json/safe.json fail closed, own_files names, paused.json
+    "live_risks_review": ["test_live_risks_review"],  # live risks review round 1: parent swap, no slot write, pid range, user fields, mm on folder, no status.json
     "live": ["test_live"],            # T13: the fast readings agree with the macOS commands, here and now
 }
 SLOW = ("live", "drill")

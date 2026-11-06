@@ -57,9 +57,53 @@ def start_time(pid):
     return (out.strip() or None) if rc == 0 else None
 
 
+class PausedBroken(dict):
+    """read_paused's error state: state/paused.json exists but cannot be used. It holds no pid (none can be known
+    from it) yet is TRUE, so every "is anything paused?" check answers "maybe": no new pause starts, the watchdog and
+    `mm recover-paused` do not report "nothing paused". `problem` says why. The file is never written over."""
+
+    def __init__(self, problem):
+        super().__init__()
+        self.problem = problem
+
+    def __bool__(self):
+        return True
+
+
+PID_KEY = re.compile(r"[1-9][0-9]{0,9}\Z")
+PID_MAX = 2 ** 31 - 1  # a larger pid cannot exist (os.kill raises OverflowError): the record is PausedBroken
+
+
+def paused_problem(d):
+    """The problem text of a read_paused() result, or None for a usable record."""
+    return getattr(d, "problem", None)
+
+
+def paused_broken_alert(problem):
+    """(text, command) of the PAUSED_FILE_BROKEN alert (the supervisor's key and the watchdog's WD:paused-file)."""
+    return ("%s; no new pause, and no pid is continued from it: processes it listed may still be stopped; inspect the "
+            "file, continue them by hand (kill -CONT PID), then remove it" % problem, "mm explain PAUSED_FILE_BROKEN")
+
+
 def read_paused():
-    d = mmcore.read_json(paused_file(), {})
-    return {str(k): v for k, v in d.items()} if isinstance(d, dict) else {}
+    """{pid text: start time} of every process the pause stopped. Missing: {}. Anything else that is not an object of
+    pid -> start-time text (a read error, a dangling link, invalid JSON, not an object, a key that is not a pid in
+    1..2**31-1, a value that is not a non-empty text) is PausedBroken (fail closed: "maybe paused", never "nothing
+    paused")."""
+    f = paused_file()
+    try:
+        with open(f) as fh:
+            d = json.load(fh)
+    except FileNotFoundError:
+        return PausedBroken("state/paused.json: a dangling link") if os.path.lexists(f) else {}
+    except (OSError, ValueError, RecursionError) as e:
+        return PausedBroken("state/paused.json: cannot be read (%s)" % e.__class__.__name__)
+    if not isinstance(d, dict):
+        return PausedBroken("state/paused.json: not a JSON object")
+    for k, v in d.items():
+        if not PID_KEY.match(k) or int(k) > PID_MAX or not isinstance(v, str) or not v:
+            return PausedBroken("state/paused.json: an entry is not pid -> start time")
+    return {str(k): v for k, v in d.items()}
 
 
 def signal_process(pid, expected, sig):
@@ -75,16 +119,26 @@ def signal_process(pid, expected, sig):
 
 
 def add_paused(entries):
-    """Record {pid: start time} before the pids are stopped, so a crash after the SIGSTOP never loses them."""
+    """Record {pid: start time} before the pids are stopped, so a crash after the SIGSTOP never loses them.
+    Returns None when recorded; the problem text when state/paused.json cannot be used (PausedBroken): then nothing
+    is written (the broken file is kept as it is) and the caller must not stop any pid."""
     with _lock():
         d = read_paused()
+        problem = paused_problem(d)
+        if problem:
+            log("PAUSE refused: %s; the file is kept, no pid stopped" % problem)
+            return problem
         d.update({str(k): v for k, v in entries.items()})
         mmcore.write_atomic(paused_file(), json.dumps(d, sort_keys=True))
+        return None
 
 
 def drop_paused(pids):
     with _lock():
         d = read_paused()
+        if paused_problem(d):  # never write over a broken record
+            log("PAUSE record not updated: %s; the file is kept" % paused_problem(d))
+            return
         for p in pids:
             d.pop(str(p), None)
         mmcore.write_atomic(paused_file(), json.dumps(d, sort_keys=True))
@@ -93,11 +147,17 @@ def drop_paused(pids):
 def resume_paused(why, now=None, legacy=None):
     """SIGCONT each recorded pid whose start time still matches; retain uncertain or failed entries for retry.
     `legacy`: an older record kept in controller.json ({pid: start}). Returns the pids actually continued, even when
-    writing the updated record fails after a signal."""
+    writing the updated record fails after a signal. A state/paused.json that cannot be used (PausedBroken) names no
+    pid: nothing is signalled from it and it is never written over (only `legacy` pids are continued)."""
     done = []
     try:
         with _lock():
             d = read_paused()
+            problem = paused_problem(d)
+            if problem:
+                log("RESUME from state/paused.json refused: %s; no pid signalled from it, the file is kept (%s)"
+                    % (problem, why), now)
+                d = {}
             d.update({str(k): v for k, v in (legacy or {}).items()})
             if not d:
                 return []
@@ -123,7 +183,11 @@ def resume_paused(why, now=None, legacy=None):
                 except (OSError, TimeoutError) as e:
                     keep[p] = expected
                     log("RESUME pid %s failed; record kept (%s): %r" % (pid, why, e), now)
-            mmcore.write_atomic(paused_file(), json.dumps(keep, sort_keys=True))
+            if problem:
+                if keep:
+                    log("RESUME legacy pids %s not continued and not recorded: %s (%s)" % (sorted(keep), problem, why), now)
+            else:
+                mmcore.write_atomic(paused_file(), json.dumps(keep, sort_keys=True))
     except (OSError, TimeoutError) as e:
         log("RESUME failed (%s): %r" % (why, e), now)
         return done
@@ -181,9 +245,12 @@ def note_clean_exit():
 
 
 def enter_safe(reason, now, mid=None):
-    """Turn safe mode on (once; a second reason does not replace the first). Returns the record."""
+    """Turn safe mode on (once; a second reason does not replace the first). Returns the record. A safe.json that
+    cannot be used already counts as safe mode on: it is kept as it is (never written over), and the trip is logged."""
     cur = mmcore.safe_state()
     if cur:
+        if mmcore.record_problem(cur):
+            log("SAFE MODE trip (%s): %s is kept as it is; safe mode stays on" % (reason, mmcore.record_problem(cur)), now)
         return cur
     rec = mmcore.stamp({"safe": True, "since": now, "reason": reason[:300], "slot_write": None}, mid=mid)
     mmcore.write_atomic(mmcore.path("safe.json"), json.dumps(rec, sort_keys=True))
@@ -194,7 +261,7 @@ def enter_safe(reason, now, mid=None):
 def mark_safe_slot_write(text):
     f = mmcore.path("safe.json")
     rec = mmcore.read_json(f, None)
-    if isinstance(rec, dict) and rec.get("safe"):
+    if isinstance(rec, dict) and rec.get("safe") is True:  # a broken safe.json is never written over
         rec["slot_write"] = text
         mmcore.write_atomic(f, json.dumps(rec, sort_keys=True))
 
@@ -207,7 +274,9 @@ def clear_safe(why, now=None):
     the clear record (CLEAR_FILE: cleared_at, why, was_safe), also when safe mode was not on: the self-check then
     counts only the slot changes after it, so the changes that tripped safe mode do not trip it again at once.
     The clear record is written FIRST: when that fails, nothing is cleared (safe mode and the unclean starts stay) and
-    MMError E_CLEAR is raised. Returns the record that was on, or None."""
+    MMError E_CLEAR is raised. safe.json is removed without reading it (never recursively); when the guard is still
+    set after that (a folder there, a new file), E_CLEAR is raised too and the unclean starts stay. Returns the record
+    that was on, or None."""
     cur = mmcore.safe_state()
     now = time.time() if now is None else now
     try:
@@ -222,11 +291,22 @@ def clear_safe(why, now=None):
         raise mmcore.MMError("E_CLEAR", "the clear record state/self-check-clear.json was not written (%s); safe mode "
                              "and the unclean starts are kept" % e.__class__.__name__,
                              "make the data folder's state/ writable, then run it again")
-    for f in (mmcore.path("safe.json"), mmcore.path("state", "starts.json")):
-        try:
-            os.remove(f)
-        except OSError:
-            pass
+    failed = None
+    try:
+        os.remove(mmcore.path("safe.json"))  # never a recursive delete: a folder there stays, and the check says so
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        failed = e.__class__.__name__
+    if mmcore.safe_state() is not None:  # the guard is checked again: E_CLEAR while it is still set
+        log("SAFE MODE not cleared: safe.json was not removed (%s); the unclean starts are kept"
+            % (failed or "it is back"), now)
+        raise mmcore.MMError("E_CLEAR", "safe.json was not removed (%s); safe mode and the unclean starts stay"
+                             % (failed or "it is back"), "remove it by hand (mm on never deletes a folder), then run it again")
+    try:
+        os.remove(mmcore.path("state", "starts.json"))
+    except OSError:
+        pass
     if cur:
         log("SAFE MODE off: %s" % why)
     return cur
