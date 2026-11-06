@@ -6,8 +6,10 @@ NOW = 1_800_000_000.0
 
 
 def settings(**over):
-    # design.md item 1: the only new setting, including on the unfixed reference.
-    return base_settings(**dict({"slots.green_load1_per_core": 0.8}, **over))
+    # design.md item 1: the only new setting, including on the unfixed reference. These trials call the controller
+    # without free_pct: slots.raise_free_margin_pct 0 keeps the raise as it was before the hysteresis
+    # (tests/test_slot_hysteresis.py tests the margin).
+    return base_settings(**dict({"slots.green_load1_per_core": 0.8, "slots.raise_free_margin_pct": 0}, **over))
 
 
 def sample(t=NOW, **over):

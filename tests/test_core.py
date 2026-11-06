@@ -274,7 +274,8 @@ class T6Alerts(TempData):
 
 class T7Controller(unittest.TestCase):
     def ctl(self):
-        return mmcore.SlotController(S, {})
+        # called without free_pct: margin 0 keeps the raise rules as they were (test_slot_hysteresis.py tests it)
+        return mmcore.SlotController(dict(S, **{"slots.raise_free_margin_pct": 0}), {})
 
     def test_raise_needs_15_min_green_demand_and_one_step(self):
         c = self.ctl()

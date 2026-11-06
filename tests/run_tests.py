@@ -43,6 +43,7 @@ GROUPS = {
         os.path.basename(path)[:-3]
         for path in sorted(glob.glob(os.path.join(HERE, "test_slot_trial*review*.py")))
     ],
+    "slot_hysteresis": [path.stem for path in sorted(Path(HERE).glob("test_slot_hysteresis*.py"))],  # raise margin, hold after down, mm on window
     "guard_settings": ["test_guard_settings"],  # names.disk_command, slots.red_comp_mb, slots.green_disk_gb
     "pause_readings": ["test_pause_readings"],  # complete growth windows, cap resets and recovery failures
     "pause_max": ["test_pause_max"],  # pause_newest_call.max_minutes: a pause ends after it, never at a critical RED

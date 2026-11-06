@@ -1,0 +1,35 @@
+{
+ "case": "green-held-after-down",
+ "expected": {
+  "held": "raise held: 10 min since the last step down < 15 min",
+  "slots": null,
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0,
+   "last_down": 1799999400.0
+  },
+  "why": null
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 5,
+   "free_pct": 80.0,
+   "mac_state": "GREEN",
+   "now": 1800000000.0,
+   "reasons": [],
+   "slots": 5,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0,
+   "last_down": 1799999400.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}

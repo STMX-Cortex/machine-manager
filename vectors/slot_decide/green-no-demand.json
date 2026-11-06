@@ -1,6 +1,7 @@
 {
  "case": "green-no-demand",
  "expected": {
+  "held": null,
   "slots": null,
   "state": {
    "demand_since": null,
@@ -13,6 +14,7 @@
  "input": {
   "inp": {
    "busy": 5,
+   "free_pct": 80.0,
    "mac_state": "GREEN",
    "now": 1800000000.0,
    "reasons": [],
