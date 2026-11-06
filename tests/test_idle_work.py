@@ -1185,5 +1185,115 @@ class OwnersProfile(TempData):
         self.assertEqual(mmschema.validate(doc, mmschema.load("profile")), [])
 
 
+# ------------------------------------------------------------------------------------------------ re-check of 8e8f84d
+
+class FolderLinkForms(Base):
+    """Decision: ready_work_dir reached through a link is not a folder, also as "<link>/" and "<link>/."."""
+
+    def setUp(self):
+        super().setUp()
+        self.target = os.path.join(self.root, "real")
+        os.makedirs(self.target)
+        with open(os.path.join(self.target, "alpha.json"), "w") as f:
+            f.write(json.dumps({"owner": "alpha", "updated": iso(self.t), "ready_units": 99, "next": "n"}))
+        os.symlink(self.target, os.path.join(self.root, "lnk"))
+
+    def test_link_with_slash_or_dot_is_not_a_folder(self):
+        for form in ("lnk", "lnk/", "lnk/."):
+            with self.subTest(form=form):
+                for f in ("alerts-state.json", "status.json"):
+                    if os.path.exists(os.path.join(self.data, f)):
+                        os.unlink(os.path.join(self.data, f))
+                self.set_profile(os.path.join(self.root, form))
+                self.sup = None
+                self.tick()
+                got = self.stale()
+                self.assertEqual(list(got), ["READY_STALE:_folder"], (form, got))
+                rw = self.status().get("ready_work") or {}
+                self.assertEqual(rw.get("owners"), [], form)
+                self.assertEqual(rw.get("ready"), 0, "the link's target is never read")
+
+    def test_a_real_folder_with_a_trailing_slash_works(self):
+        self.put("alpha", ready_units=4)
+        self.set_profile(self.ready + "/")
+        self.tick()
+        self.assertEqual(self.stale(), {})
+        self.assertEqual(self.status()["ready_work"]["ready"], 4)
+
+
+class WriteFailures(Base):
+    def test_timer_and_errors_log_writes_fail_and_the_tick_finishes(self):
+        self.put("alpha", ready_units=8)
+        real_write, real_append = mmcore.write_atomic, mmcore.append_line
+
+        def write(target, *a, **k):
+            if os.path.basename(target) == mmready.STATE_NAME:
+                raise OSError(28, "No space left on device")
+            return real_write(target, *a, **k)
+
+        def append(target, *a, **k):
+            if os.path.basename(target) == "errors.log":
+                raise OSError(28, "No space left on device")
+            return real_append(target, *a, **k)
+        with mock.patch.object(mmcore, "write_atomic", write), mock.patch.object(mmcore, "append_line", append):
+            self.tick()
+            self.advance(16 * MIN)
+        self.assertEqual(self.status()["heartbeat"]["tick"], 17, "every tick ran to its end")
+        self.assertIsNotNone(self.idle(), "the timer runs in memory")
+
+
+class ManyEntries(Base):
+    def test_listed_owners_found_past_4096_entries(self):
+        for i in range(4100):
+            with open(os.path.join(self.ready, "n%05d.txt" % i), "w"):
+                pass
+        self.put("zeta", ready_units=5)
+        self.owners_list(["zeta", "gone"])
+        self.tick()
+        rw = self.status()["ready_work"]
+        files = {o["file"]: o for o in rw["owners"]}
+        self.assertEqual((files["zeta.json"]["state"], files["zeta.json"]["units"]), ("ok", 5))
+        got = self.stale()
+        self.assertIn("READY_STALE:_more", got, "the listing stops at 4,096 entries")
+        self.assertIn("READY_STALE:gone", got)
+        self.assertNotIn("READY_STALE:zeta", got)
+
+    def owners_list(self, names):
+        self.set_profile(os.path.join(self.root, "ready"), "ready_work_owners = %s\n" % json.dumps(names))
+
+
+class MissingOwnerText(Base):
+    def test_exact_text_and_status_schema(self):
+        self.set_profile(os.path.join(self.root, "ready"), 'ready_work_owners = ["beta"]\n')
+        self.put("alpha", ready_units=2)
+        self.tick()
+        a = self.stale()["READY_STALE:beta"]
+        self.assertEqual(a["text"], "ready-work file beta.json of listed owner beta is missing; its units count as 0")
+        st = self.status()
+        owners = {o["file"]: o for o in st["ready_work"]["owners"]}
+        self.assertEqual((owners["beta.json"]["state"], owners["beta.json"]["units"]), ("missing", 0))
+        self.assertEqual(mmschema.validate(st, mmschema.load("status")), [])
+        bad = json.loads(json.dumps(st))
+        next(o for o in bad["ready_work"]["owners"] if o["file"] == "beta.json")["state"] = "gone"
+        self.assertTrue(mmschema.validate(bad, mmschema.load("status")), "the state enum is closed")
+
+
+def _checker_has(keyword, schema, value):
+    return bool(mmschema.validate(value, schema))
+
+
+SCHEMA_LIMITS = _checker_has("uniqueItems", {"type": "array", "uniqueItems": True}, ["a", "a"]) and \
+    _checker_has("maxItems", {"type": "array", "maxItems": 1}, ["a", "b"])
+
+
+class OwnersSchema(unittest.TestCase):
+    @unittest.skipUnless(SCHEMA_LIMITS, "the repo's schema checker has no uniqueItems/maxItems (mmschema)")
+    def test_profile_schema_rejects_duplicates_and_65_names(self):
+        prop = mmschema.load("profile")["properties"]["ready_work_owners"]
+        self.assertEqual(mmschema.validate(["alpha", "beta"], prop), [])
+        self.assertTrue(mmschema.validate(["alpha", "alpha"], prop))
+        self.assertTrue(mmschema.validate(["n%02d" % i for i in range(65)], prop))
+
+
 if __name__ == "__main__":
     unittest.main()
