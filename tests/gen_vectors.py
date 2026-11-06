@@ -171,6 +171,16 @@ case("slot_decide", "amber-step-with-bad-last-down", {"state": dict(st0, last_do
 case("slot_decide", "amber-step-with-future-last-down", {"state": dict(st0, last_down=NOW + 3600),
                                                          "inp": dict(base_inp, mac_state="AMBER", reasons=["free 49% < 50%"])})
 case("slot_decide", "state-not-a-dict", {"state": ["x"], "inp": base_inp})
+case("slot_decide", "state-false", {"state": False, "inp": dict(base_inp, mac_state="AMBER", reasons=["free 49% < 50%"])})
+# null is valid only in green_since and demand_since (slot_decide writes it there)
+case("slot_decide", "amber-step-with-null-last-down", {"state": dict(st0, last_down=None),
+                                                       "inp": dict(base_inp, mac_state="AMBER", reasons=["free 49% < 50%"])})
+case("slot_decide", "timing-failure-with-null-last-down", {"state": dict(st0, last_down=None),
+                                                           "inp": dict(base_inp, mac_state="STEADY", events=["timing-failure"])})
+case("slot_decide", "green-null-last-change-no-raise", {"state": dict(st_up, last_change=None), "inp": base_inp})
+case("slot_decide", "green-null-last-red-no-raise", {"state": dict(st_up, last_red=None), "inp": base_inp})
+case("slot_decide", "green-null-last-trim-no-raise", {"state": dict(st_up, last_trim=None), "inp": base_inp})
+case("slot_decide", "green-null-spans-are-valid", {"state": dict(st_up, green_since=None, demand_since=None), "inp": base_inp})
 case("slot_decide", "green-down-hold-0-off", {"state": dict(st_up, last_down=NOW - 60), "inp": base_inp},
      {"slots.raise_hold_after_down_minutes": 0})
 
