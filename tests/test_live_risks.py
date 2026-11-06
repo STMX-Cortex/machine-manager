@@ -1100,6 +1100,115 @@ class F3Pinned(F3PausedBase):
                          ["state/paused.json: not a JSON object"])
 
 
+
+class F3Watchdog(F3PausedBase):
+    """The watchdog's own PAUSED_FILE_BROKEN (key WD:paused-file; coordinator's decision 2026-11-06): raised only when
+    the watchdog runs its resume path (supervisor stale, unloaded or stopped), with the supervisor's text and command,
+    and the problem in the returned problems. It clears when the file is good or gone, or the supervisor is healthy."""
+    KEY = "WD:paused-file"
+    TEXT = ("%s; no new pause, and no pid is continued from it: processes it listed may still be stopped; inspect the "
+            "file, continue them by hand (kill -CONT PID), then remove it")
+
+    def stopped(self):
+        write_raw(os.path.join(self.data, "state", "stopped.json"), json.dumps({"time": time.time()}))
+
+    def healthy(self, now):
+        mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps({"time": now, "state": "GREEN"}))
+
+    def check(self, now):
+        return mmwatch.check(now, self.s(), self.profile(), restart=False)
+
+    def wd_alert(self):
+        st = mmcore.read_json(os.path.join(self.data, "alerts-state.json"), {}) or {}
+        return (st.get("active") or {}).get(self.KEY)
+
+    def clear_checks(self, now):
+        """Two checks over repeat.clear_after_minutes (a key clears after that long absent)."""
+        self.check(now + 1)
+        return self.check(now + self.s()["repeat.clear_after_minutes"] * 60 + 5)
+
+    def test_raises_with_a_stopped_supervisor_and_a_broken_file(self):
+        spy = SignalSpy(self)
+        self.stopped()
+        before = self.broken("invalid_json")
+        problem = "state/paused.json: cannot be read (JSONDecodeError)"
+        probs = self.check(time.time())
+        self.assertIn(problem, probs)
+        a = self.wd_alert()
+        self.assertIsNotNone(a, self.active())
+        self.assertEqual((a["name"], a["level"], a["command"]),
+                         ("PAUSED_FILE_BROKEN", "ACTION", "mm explain PAUSED_FILE_BROKEN"))
+        self.assertEqual(a["text"], self.TEXT % problem)
+        self.assertEqual(raw(self.paused()), before)
+        self.assertEqual(spy.calls, [])
+
+    def test_raises_with_a_stale_supervisor(self):
+        now = time.time()
+        mmcore.write_atomic(os.path.join(self.data, "status.json"), json.dumps({"time": now - 3600, "state": "GREEN"}))
+        self.broken("list")
+        probs = self.check(now)
+        self.assertIn("state/paused.json: not a JSON object", probs)
+        self.assertIsNotNone(self.wd_alert(), self.active())
+
+    def test_no_watchdog_key_with_a_healthy_supervisor(self):
+        now = time.time()
+        self.healthy(now)
+        self.broken("list")
+        probs = self.check(now)
+        self.assertIsNone(self.wd_alert(), "no double alert while the supervisor is healthy")
+        self.assertFalse([p for p in probs if "paused.json" in p], probs)
+
+    def test_no_watchdog_key_with_a_good_or_missing_file(self):
+        self.stopped()
+        self.check(time.time())
+        self.assertIsNone(self.wd_alert())
+        write_raw(self.paused(), "{}")
+        self.assertFalse([p for p in self.check(time.time()) if "paused.json" in p])
+        self.assertIsNone(self.wd_alert())
+
+    def test_clears_when_the_file_is_good_again(self):
+        self.stopped()
+        self.broken("list")
+        now = time.time()
+        self.check(now)
+        self.assertIsNotNone(self.wd_alert())
+        write_raw(self.paused(), "{}")
+        probs = self.clear_checks(now)
+        self.assertIsNone(self.wd_alert(), self.active())
+        self.assertFalse([p for p in probs if "paused.json" in p], probs)
+
+    def test_clears_when_the_file_is_gone(self):
+        self.stopped()
+        self.broken("list")
+        now = time.time()
+        self.check(now)
+        self.assertIsNotNone(self.wd_alert())
+        os.remove(self.paused())
+        self.clear_checks(now)
+        self.assertIsNone(self.wd_alert(), self.active())
+
+    def test_clears_when_the_supervisor_is_healthy_again(self):
+        self.stopped()
+        self.broken("list")
+        now = time.time()
+        self.check(now)
+        self.assertIsNotNone(self.wd_alert())
+        os.remove(os.path.join(self.data, "state", "stopped.json"))
+        clear_at = now + self.s()["repeat.clear_after_minutes"] * 60 + 5
+        self.healthy(now + 1)
+        self.check(now + 1)
+        self.healthy(clear_at)
+        self.check(clear_at)
+        self.assertIsNone(self.wd_alert(), "the supervisor's own PAUSED_FILE_BROKEN takes over: %s" % self.active())
+
+    def test_mm_watchdog_lists_the_problem(self):
+        self.stopped()
+        self.broken("list")
+        r = self.mm("watchdog", "--no-restart", env={"MM_NOW": str(time.time())})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn('problem="state/paused.json: not a JSON object"', r.stdout)
+
+
 class F2Pinned(F2Base):
     """Refusals are KEEP lines with guard "refused: ..."; a refused slot_dir gives exactly one line."""
 
