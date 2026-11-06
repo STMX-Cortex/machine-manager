@@ -1209,16 +1209,29 @@ class FolderLinkForms(Base):
                 self.tick()
                 got = self.stale()
                 self.assertEqual(list(got), ["READY_STALE:_folder"], (form, got))
+                self.assertIn("is a link (links are not followed)", got["READY_STALE:_folder"]["text"], form)
                 rw = self.status().get("ready_work") or {}
                 self.assertEqual(rw.get("owners"), [], form)
                 self.assertEqual(rw.get("ready"), 0, "the link's target is never read")
 
     def test_a_real_folder_with_a_trailing_slash_works(self):
         self.put("alpha", ready_units=4)
-        self.set_profile(self.ready + "/")
+        for form in ("/", "/./"):
+            with self.subTest(form=form):
+                self.set_profile(self.ready + form)
+                self.sup = None
+                self.tick()
+                self.assertEqual(self.stale(), {}, form)
+                self.assertEqual(self.status()["ready_work"]["ready"], 4, form)
+
+    def test_a_relative_path_is_not_a_folder(self):
+        os.makedirs(os.path.join(self.root, "rel"), exist_ok=True)
+        self.set_profile("rel")
         self.tick()
-        self.assertEqual(self.stale(), {})
-        self.assertEqual(self.status()["ready_work"]["ready"], 4)
+        got = self.stale()
+        self.assertEqual(list(got), ["READY_STALE:_folder"], got)
+        self.assertIn("is not an absolute path", got["READY_STALE:_folder"]["text"])
+        self.assertIsNone(self.idle())
 
 
 class WriteFailures(Base):
@@ -1255,6 +1268,8 @@ class ManyEntries(Base):
         self.assertEqual((files["zeta.json"]["state"], files["zeta.json"]["units"]), ("ok", 5))
         got = self.stale()
         self.assertIn("READY_STALE:_more", got, "the listing stops at 4,096 entries")
+        self.assertTrue(got["READY_STALE:_more"]["text"].startswith("the folder listing stopped after 4096 entries"),
+                        got["READY_STALE:_more"]["text"])
         self.assertIn("READY_STALE:gone", got)
         self.assertNotIn("READY_STALE:zeta", got)
 
