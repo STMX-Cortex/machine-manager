@@ -72,6 +72,7 @@ GROUPS = {
     "drill": ["test_drill"],          # the drill's stop rules on a fake reader
     "public": ["test_public"],        # no internal names in the public tree
     "recovery": ["test_recovery"],    # R1-R8: restart, self-check, safe mode, paused processes, reboot, ping
+    "idle_work": ["test_idle_work"],  # IDLE_WITH_WORK and READY_WORK_STALE: ready_work_dir files, the idle timer
     "resources": ["test_resources"],  # mm resources: rows, files only, facts, cpu_pct, runners, the idle rule, schemas
     "platform": ["test_platform"],    # the platform layer, the Linux path (MM_PLATFORM=linux), fail closed without ps or lsof
     "schedule": ["test_schedule"],    # [schedule]: intervals, the loop's wait, the watchdog plist, W_SCHEDULE, mm settings show
