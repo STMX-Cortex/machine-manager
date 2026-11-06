@@ -147,8 +147,11 @@ def cmd_status(args, as_json):
     stale = age > stale_after_s()
     r = st.get("readings") or {}
     counts = {lv: sum(1 for a in act.values() if a.get("level") == lv) for lv in ("ACTION", "ATTENTION", "INFO")}
+    import mmrecover
+    # fail closed: a control file or the pause record that cannot be used is shown with its problem
+    broken = mmcore.control_broken() + [p for p in [mmrecover.paused_problem(mmrecover.read_paused())] if p]
     obj = dict(st, status_age_s=round(age), stale=stale, active=counts,
-               top=[mmcore.display_id(a) for a in top[:3]], off=bool(mmcore.off_state()))
+               top=[mmcore.display_id(a) for a in top[:3]], off=bool(mmcore.off_state()), broken=broken)
     lines = [
         kv({"state": st.get("state") if not stale else "UNKNOWN", "mode": st.get("mode"), "slots": st.get("slots"),
             "would": st.get("slots_would"), "busy": st.get("busy"), "waiting": st.get("waiting"), "machine": st.get("machine_id")}),
@@ -157,7 +160,9 @@ def cmd_status(args, as_json):
         kv({"action": counts["ACTION"], "attention": counts["ATTENTION"], "info": counts["INFO"],
             "top": ",".join(obj["top"]) or "none"}),
     ]
-    if st.get("reasons") and st.get("state") in ("RED", "AMBER", "STEADY"):
+    if broken:
+        lines.append("broken=" + json.dumps(mmcore.clean("; ".join(broken))[:200]))
+    if st.get("reasons") and st.get("state") in ("RED", "AMBER", "STEADY") and not (broken and stale):
         lines.append("why=" + json.dumps(mmcore.clean("; ".join(st["reasons"])[:160])))
     if stale:
         lines.append("E_STALE status.json %.0f s old; fix: mm start; launch gate open" % age)

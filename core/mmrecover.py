@@ -57,9 +57,45 @@ def start_time(pid):
     return (out.strip() or None) if rc == 0 else None
 
 
+class PausedBroken(dict):
+    """read_paused's error state: state/paused.json exists but cannot be used. It holds no pid (none can be known
+    from it) yet is TRUE, so every "is anything paused?" check answers "maybe": no new pause starts, the watchdog and
+    `mm recover-paused` do not report "nothing paused". `problem` says why. The file is never written over."""
+
+    def __init__(self, problem):
+        super().__init__()
+        self.problem = problem
+
+    def __bool__(self):
+        return True
+
+
+PID_KEY = re.compile(r"[1-9][0-9]{0,9}\Z")
+
+
+def paused_problem(d):
+    """The problem text of a read_paused() result, or None for a usable record."""
+    return getattr(d, "problem", None)
+
+
 def read_paused():
-    d = mmcore.read_json(paused_file(), {})
-    return {str(k): v for k, v in d.items()} if isinstance(d, dict) else {}
+    """{pid text: start time} of every process the pause stopped. Missing: {}. Anything else that is not an object of
+    pid -> start-time text (a read error, a dangling link, invalid JSON, not an object, a key that is not a pid, a
+    value that is not a non-empty text) is PausedBroken (fail closed: "maybe paused", never "nothing paused")."""
+    f = paused_file()
+    try:
+        with open(f) as fh:
+            d = json.load(fh)
+    except FileNotFoundError:
+        return PausedBroken("state/paused.json: a dangling link") if os.path.lexists(f) else {}
+    except (OSError, ValueError, RecursionError) as e:
+        return PausedBroken("state/paused.json: cannot be read (%s)" % e.__class__.__name__)
+    if not isinstance(d, dict):
+        return PausedBroken("state/paused.json: not a JSON object")
+    for k, v in d.items():
+        if not PID_KEY.match(k) or not isinstance(v, str) or not v:
+            return PausedBroken("state/paused.json: an entry is not pid -> start time")
+    return {str(k): v for k, v in d.items()}
 
 
 def signal_process(pid, expected, sig):
@@ -75,16 +111,26 @@ def signal_process(pid, expected, sig):
 
 
 def add_paused(entries):
-    """Record {pid: start time} before the pids are stopped, so a crash after the SIGSTOP never loses them."""
+    """Record {pid: start time} before the pids are stopped, so a crash after the SIGSTOP never loses them.
+    Returns None when recorded; the problem text when state/paused.json cannot be used (PausedBroken): then nothing
+    is written (the broken file is kept as it is) and the caller must not stop any pid."""
     with _lock():
         d = read_paused()
+        problem = paused_problem(d)
+        if problem:
+            log("PAUSE refused: %s; the file is kept, no pid stopped" % problem)
+            return problem
         d.update({str(k): v for k, v in entries.items()})
         mmcore.write_atomic(paused_file(), json.dumps(d, sort_keys=True))
+        return None
 
 
 def drop_paused(pids):
     with _lock():
         d = read_paused()
+        if paused_problem(d):  # never write over a broken record
+            log("PAUSE record not updated: %s; the file is kept" % paused_problem(d))
+            return
         for p in pids:
             d.pop(str(p), None)
         mmcore.write_atomic(paused_file(), json.dumps(d, sort_keys=True))
@@ -93,11 +139,17 @@ def drop_paused(pids):
 def resume_paused(why, now=None, legacy=None):
     """SIGCONT each recorded pid whose start time still matches; retain uncertain or failed entries for retry.
     `legacy`: an older record kept in controller.json ({pid: start}). Returns the pids actually continued, even when
-    writing the updated record fails after a signal."""
+    writing the updated record fails after a signal. A state/paused.json that cannot be used (PausedBroken) names no
+    pid: nothing is signalled from it and it is never written over (only `legacy` pids are continued)."""
     done = []
     try:
         with _lock():
             d = read_paused()
+            problem = paused_problem(d)
+            if problem:
+                log("RESUME from state/paused.json refused: %s; no pid signalled from it, the file is kept (%s)"
+                    % (problem, why), now)
+                d = {}
             d.update({str(k): v for k, v in (legacy or {}).items()})
             if not d:
                 return []
@@ -123,7 +175,11 @@ def resume_paused(why, now=None, legacy=None):
                 except (OSError, TimeoutError) as e:
                     keep[p] = expected
                     log("RESUME pid %s failed; record kept (%s): %r" % (pid, why, e), now)
-            mmcore.write_atomic(paused_file(), json.dumps(keep, sort_keys=True))
+            if problem:
+                if keep:
+                    log("RESUME legacy pids %s not continued and not recorded: %s (%s)" % (sorted(keep), problem, why), now)
+            else:
+                mmcore.write_atomic(paused_file(), json.dumps(keep, sort_keys=True))
     except (OSError, TimeoutError) as e:
         log("RESUME failed (%s): %r" % (why, e), now)
         return done
@@ -194,7 +250,7 @@ def enter_safe(reason, now, mid=None):
 def mark_safe_slot_write(text):
     f = mmcore.path("safe.json")
     rec = mmcore.read_json(f, None)
-    if isinstance(rec, dict) and rec.get("safe"):
+    if isinstance(rec, dict) and rec.get("safe") is True:  # a broken safe.json is never written over
         rec["slot_write"] = text
         mmcore.write_atomic(f, json.dumps(rec, sort_keys=True))
 
