@@ -165,7 +165,9 @@ The machine should be in full use while work for it waits. The profile's `ready_
 owner of queued work keeps one file, `<owner>.json`: `{"owner": "alpha", "updated": "2026-01-01T10:00:00+00:00",
 "ready_units": 120, "next": "build the docs"}`. The supervisor reads the folder every tick; it never writes there.
 
-1. Off: `ready_work_dir` is absent or `""`, or nothing is at the path. No alert, no error. The path must be
+1. Off: `ready_work_dir` is absent or `""`, or it is an absolute path with nothing at it while `ready_work_owners` is
+   empty. No alert, no error. A relative path is always `READY_WORK_STALE:_folder` ("is not an absolute path"); with
+   listed owners a missing folder is too ("does not exist"), and then every listed owner is missing. The path must be
    absolute, and on a local disk: a read from a stalled network or FUSE file system blocks, and nothing can stop it.
 2. Only direct children named `[A-Za-z0-9][A-Za-z0-9._-]*.json` (at most 64 characters) count; other names are
    ignored. No link is followed. `ready_work_dir` itself (normalized, so a trailing `/` or `/.` changes nothing) must

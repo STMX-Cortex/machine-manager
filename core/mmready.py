@@ -172,7 +172,9 @@ def _open_folder(path):
 
 
 def scan(path, now, stale_minutes, expected=()):
-    """None when the feature is off (no path, or nothing at it). Else {folder, not_folder, folder_why, owners, more,
+    """None when the feature is off: no path, or a missing absolute folder while no owner is listed. A relative path
+    is always `not_folder` ("is not an absolute path"); with listed owners so is a missing folder ("does not
+    exist"); in both, every listed owner is "missing". Else {folder, not_folder, folder_why, owners, more,
     truncated}. The path is normalized and must be absolute; the folder is opened once and never through a link
     (_open_folder). Every `expected` owner (the profile's ready_work_owners) is opened directly by name through the
     folder's descriptor: no file is a record in state "missing". The listing (through the same descriptor) stops
@@ -183,11 +185,15 @@ def scan(path, now, stale_minutes, expected=()):
     if not path:
         return None
     norm = os.path.normpath(path)
-    if not os.path.lexists(norm):
-        return None
     out = {"folder": path, "not_folder": False, "folder_why": None, "owners": [], "more": 0, "truncated": False}
-    if not os.path.isabs(norm):
-        out.update(not_folder=True, folder_why="is not an absolute path")
+    missing = [_missing(n) for n in sorted(expected)]
+    if not os.path.isabs(norm):  # always a profile mistake, whether it exists or not
+        out.update(not_folder=True, folder_why="is not an absolute path", owners=missing)
+        return out
+    if not os.path.lexists(norm):
+        if not expected:
+            return None  # off: an absolute folder that is missing, with no listed owner
+        out.update(not_folder=True, folder_why="does not exist", owners=missing)  # listed owners are never "off"
         return out
     dfd, why = _open_folder(norm)
     if dfd is None:
