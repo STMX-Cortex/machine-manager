@@ -209,6 +209,14 @@ case("slot_decide", "pin-ended-above-ceiling", {"state": st_up, "inp": dict(up13
 case("slot_decide", "pin-above-ceiling-lowers-to-pin", {"state": st_up, "inp": dict(up13, override={"slots": 12,
      "until": NOW + 600, "reason": "trial"})}, expected={"slots": 12, "why": "pin: trial", "held": None, "problem": None,
      "state": CEILING_DOWN["state"]})
+# an override that is not a valid active pin (mmdecide.slot_pin) is no pin: the ceiling rule applies, with a problem
+PIN_BAD = dict(CEILING_DOWN, problem="slot pin invalid: slots missing")
+case("slot_decide", "pin-without-slots-above-ceiling", {"state": st_up, "inp": dict(up13, override={"until": NOW + 600,
+     "reason": "trial"})}, expected=PIN_BAD)
+case("slot_decide", "pin-until-not-a-number-above-ceiling", {"state": st_up, "inp": dict(up13, override={"slots": 13,
+     "until": "later", "reason": "trial"})}, expected=dict(PIN_BAD, problem="slot pin invalid: until not a number"))
+case("slot_decide", "pin-until-huge-above-ceiling", {"state": st_up, "inp": dict(up13, override={"slots": 13,
+     "until": 10 ** 400, "reason": "trial"})}, expected=dict(PIN_BAD, problem="slot pin invalid: until not finite"))
 
 # ---- alert_raise / alert_absent
 cond = {"key": "DISK_LOW", "name": "DISK_LOW", "level": "ACTION", "text": "disk 38 GB", "value": 38.0, "band": 10,
@@ -735,6 +743,10 @@ def write_settings():
 def main(function=None, names=None):
     # A scoped regeneration leaves separately maintained cases and shared settings intact; names (with a function)
     # writes only those cases, so a new case does not rewrite older vectors that have drifted from this script.
+    if names:  # every name is checked before anything is written
+        unknown = sorted(set(names) - {c[0] for c in CASES.get(function, [])})
+        if unknown:
+            sys.exit("E_CASE no case %s in %s; fix: name cases of --function %s" % (", ".join(unknown), function, function))
     if function is None and os.path.isdir(VEC):
         for d in os.listdir(VEC):
             if not d.startswith("_"):
@@ -758,8 +770,6 @@ def main(function=None, names=None):
                 json.dump(v, f, indent=1, sort_keys=True)
                 f.write("\n")
             n += 1
-    if names and n != len(set(names)):
-        sys.exit("E_CASE unknown case in %s; fix: name cases of --function %s" % (", ".join(names), function))
     print("vectors=%d functions=%d" % (n, 1 if function is not None else len(CASES)))
 
 

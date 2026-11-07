@@ -545,9 +545,15 @@ Steps down, RED, a pin and `mm event` events are not changed by them. Without an
 the tick above `slots.ceiling` (after the ceiling is lowered, or when a pin above it ends) goes to the ceiling at once,
 in one write, in any state but RED (RED goes to the floor, which is never above the ceiling); the reason is
 `above ceiling: N > ceiling M`. It is a step down, so the raise hold follows it. An active pin above the ceiling is
-kept until it ends. A count below `slots.floor` (after the floor is raised) is not raised to it; only a GREEN raise
-with demand, or a pin, raises it. The count's last step down and last change
-follow the tick's final count, also when safe mode lowers it. The controller's saved times (in
+kept until it ends. In safe mode the first tick writes only the safe-mode count, at most `safe_mode.slots`: when that
+is above the ceiling, a later tick steps down to the ceiling. A count below `slots.floor` (after the floor is raised)
+is not raised to it; only a GREEN raise with demand, or a pin, raises it. A pin (`override.json`, from `mm slots pin`)
+is active only while it is an object with a finite number `until` later than now and an integer `slots` (7.0 counts;
+a bool or a text does not), clamped to 1-16. Anything else (no `slots`, an `until` that is not a number or not
+finite) is no pin: the tick goes on without it, and `SLOT_STATE:pin` (ATTENTION, held 30 min) says
+`slot pin invalid: <reason>; override.json is not used, ...` (do: `mm slots unpin`). An ended pin is no pin, and no
+alert. The count's last step down and last change follow the tick's final count, also when safe mode lowers it.
+The controller's saved times (in
 `state/controller.json`) must be finite numbers at most 60 s in the future; null is valid only in the GREEN and
 demand spans (`green_since`, `demand_since`), which the controller itself sets to null. An invalid one, a `controller`
 that is not an object (also null, `[]`, `false`, `0`, `""`), is repaired on the tick it is read (an invalid last step
@@ -728,7 +734,7 @@ queue is idle; `IDLE_WITH_WORK` free slots while ready work waits; `READY_WORK_S
 `CONTROL_FILE_BROKEN` `off.json` or `safe.json` cannot be used, so actions stay off; `PAUSED_FILE_BROKEN`
 `state/paused.json` cannot be used: no pause, no resume from it (from the watchdog, while the supervisor is stale or
 stopped: `PAUSED_FILE_BROKEN:paused-file`);
-`SELF_CHECK` a self-check fault in safe mode; `SLOT_STATE` the slot controller's saved state was invalid or unreadable and was repaired; `WATCHDOG_STALE` the watchdog does not run; `MAC_REBOOTED` the Mac
+`SELF_CHECK` a self-check fault in safe mode; `SLOT_STATE` the slot controller's saved state was invalid or unreadable and was repaired (`SLOT_STATE:pin`: the pin file is invalid and not used); `WATCHDOG_STALE` the watchdog does not run; `MAC_REBOOTED` the Mac
 restarted; `STOPPED` stopped by hand; `GH_FAIL`, `GH_STUCK`, `GH_DONE`, `GH_PACE`
 the CI pool; `GUARD_NEAR`, `GUARD_STOP` the CI budget.
 
