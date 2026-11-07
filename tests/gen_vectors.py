@@ -184,6 +184,40 @@ case("slot_decide", "green-null-spans-are-valid", {"state": dict(st_up, green_si
 case("slot_decide", "green-down-hold-0-off", {"state": dict(st_up, last_down=NOW - 60), "inp": base_inp},
      {"slots.raise_hold_after_down_minutes": 0})
 
+# above slots.ceiling (10) without an active pin: to the ceiling at once, in any state but RED (RED: to the floor);
+# an active pin above the ceiling is kept. Written alone: gen_vectors.py --function slot_decide --case NAME ...
+up13 = dict(base_inp, slots=13, busy=13)
+CEILING_DOWN = {"slots": 10, "why": "above ceiling: 13 > ceiling 10", "held": None, "problem": None,
+                "state": dict(st_up, last_change=NOW, last_down=NOW, green_since=NOW - 3600, demand_since=NOW - 3600)}
+case("slot_decide", "green-above-ceiling", {"state": st_up, "inp": up13}, expected=CEILING_DOWN)
+case("slot_decide", "steady-above-ceiling", {"state": st_up, "inp": dict(up13, mac_state="STEADY")},
+     expected=dict(CEILING_DOWN, state=dict(CEILING_DOWN["state"], green_since=None)))
+case("slot_decide", "amber-above-ceiling", {"state": st_up, "inp": dict(up13, mac_state="AMBER", reasons=["free 49% < 50%"])},
+     expected=dict(CEILING_DOWN, state=dict(CEILING_DOWN["state"], green_since=None)))
+case("slot_decide", "amber-above-ceiling-in-step-interval", {"state": dict(st_up, last_down=NOW - 60),
+     "inp": dict(up13, mac_state="AMBER", reasons=["free 49% < 50%"])},
+     expected=dict(CEILING_DOWN, state=dict(CEILING_DOWN["state"], green_since=None)))
+case("slot_decide", "timing-failure-above-ceiling", {"state": st_up, "inp": dict(up13, mac_state="STEADY",
+     events=["timing-failure"])}, expected=dict(CEILING_DOWN, state=dict(CEILING_DOWN["state"], green_since=None)))
+case("slot_decide", "red-above-ceiling-to-floor", {"state": st_up, "inp": dict(up13, mac_state="RED",
+     reasons=["free 30% < 35%"])}, expected={"slots": 3, "why": "RED: free 30% < 35%", "held": None, "problem": None,
+     "state": dict(CEILING_DOWN["state"], green_since=None, last_red=NOW)})
+case("slot_decide", "pin-above-ceiling-kept", {"state": st_up, "inp": dict(up13, override={"slots": 13, "until": NOW + 600,
+     "reason": "trial"})}, expected={"slots": None, "why": None, "held": None, "problem": None, "state": st_up})
+case("slot_decide", "pin-ended-above-ceiling", {"state": st_up, "inp": dict(up13, override={"slots": 13, "until": NOW - 1,
+     "reason": "trial"})}, expected=CEILING_DOWN)
+case("slot_decide", "pin-above-ceiling-lowers-to-pin", {"state": st_up, "inp": dict(up13, override={"slots": 12,
+     "until": NOW + 600, "reason": "trial"})}, expected={"slots": 12, "why": "pin: trial", "held": None, "problem": None,
+     "state": CEILING_DOWN["state"]})
+# an override that is not a valid active pin (mmdecide.slot_pin) is no pin: the ceiling rule applies, with a problem
+PIN_BAD = dict(CEILING_DOWN, problem="slot pin invalid: slots missing")
+case("slot_decide", "pin-without-slots-above-ceiling", {"state": st_up, "inp": dict(up13, override={"until": NOW + 600,
+     "reason": "trial"})}, expected=PIN_BAD)
+case("slot_decide", "pin-until-not-a-number-above-ceiling", {"state": st_up, "inp": dict(up13, override={"slots": 13,
+     "until": "later", "reason": "trial"})}, expected=dict(PIN_BAD, problem="slot pin invalid: until not a number"))
+case("slot_decide", "pin-until-huge-above-ceiling", {"state": st_up, "inp": dict(up13, override={"slots": 13,
+     "until": 10 ** 400, "reason": "trial"})}, expected=dict(PIN_BAD, problem="slot pin invalid: until not finite"))
+
 # ---- alert_raise / alert_absent
 cond = {"key": "DISK_LOW", "name": "DISK_LOW", "level": "ACTION", "text": "disk 38 GB", "value": 38.0, "band": 10,
         "worse": "down", "command": None, "investigate": None}
@@ -706,8 +740,13 @@ def write_settings():
         json.dump(BASE, f, indent=1, sort_keys=True)
 
 
-def main(function=None):
-    # A scoped regeneration leaves separately maintained cases and shared settings intact.
+def main(function=None, names=None):
+    # A scoped regeneration leaves separately maintained cases and shared settings intact; names (with a function)
+    # writes only those cases, so a new case does not rewrite older vectors that have drifted from this script.
+    if names:  # every name is checked before anything is written
+        unknown = sorted(set(names) - {c[0] for c in CASES.get(function, [])})
+        if unknown:
+            sys.exit("E_CASE no case %s in %s; fix: name cases of --function %s" % (", ".join(unknown), function, function))
     if function is None and os.path.isdir(VEC):
         for d in os.listdir(VEC):
             if not d.startswith("_"):
@@ -720,6 +759,8 @@ def main(function=None):
             continue
         os.makedirs(os.path.join(VEC, fn), exist_ok=True)
         for name, inp, over in cases:
+            if names and name not in names:
+                continue
             s = dict(BASE, **over)
             inp = json.loads(json.dumps(inp))
             exp = EXPECTED[fn, name] if (fn, name) in EXPECTED else FUNCTIONS[fn](inp, s)
@@ -737,11 +778,15 @@ if __name__ == "__main__":
     parser.add_argument("--function", choices=sorted(CASES), help="update only this function, keeping other cases")
     parser.add_argument("--settings", action="store_true",
                         help="update only vectors/_settings/base.json from the settings table, keeping every case")
+    parser.add_argument("--case", action="append", metavar="NAME",
+                        help="with --function: write only this case (repeatable), keeping every other vector")
     a = parser.parse_args()
+    if a.case and not a.function:
+        parser.error("--case needs --function")
     if a.settings:
         if a.function:
             parser.error("--settings takes no --function")
         write_settings()
         print("settings=%d" % len(BASE))
     else:
-        main(a.function)
+        main(a.function, a.case)

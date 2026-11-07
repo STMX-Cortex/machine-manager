@@ -1,0 +1,39 @@
+{
+ "case": "pin-above-ceiling-kept",
+ "expected": {
+  "held": null,
+  "problem": null,
+  "slots": null,
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0
+  },
+  "why": null
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 13,
+   "free_pct": 80.0,
+   "mac_state": "GREEN",
+   "now": 1800000000.0,
+   "override": {
+    "reason": "trial",
+    "slots": 13,
+    "until": 1800000600.0
+   },
+   "reasons": [],
+   "slots": 13,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}
