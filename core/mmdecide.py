@@ -144,7 +144,8 @@ def classify(window, s, disk_gb=None, kernel_event=False):
 # ------------------------------------------------------------------------------------------- the slot controller
 
 def slot_decide(state, inp, s):
-    """One step of the slot controller. One step up at a time after a long GREEN with demand; down at once.
+    """One step of the slot controller. One step up at a time after a long GREEN with demand; down at once. Without
+    an active pin a count that would end the tick above slots.ceiling goes to the ceiling at once, in any state.
     state: the controller's own dict (returned updated, never changed in place).
     inp: now, mac_state, reasons, slots, busy, waiting, wx_waiting, override ({slots, until, reason} or null),
     events (list of 'timing-failure', 'guard-kill', 'trim'), free_pct (free memory %, None = unknown; raise_hold).
@@ -198,6 +199,9 @@ def slot_decide(state, inp, s):
                     (now - since) / 60, inp["waiting"], slots)
     if target is not None and pin is not None and target > pin:
         target = pin
+    if pin is None and (slots if target is None else target) > ceiling:
+        # above the ceiling without a pin (a lowered ceiling, an ended pin): down to the ceiling at once, in any state
+        target, why = ceiling, "above ceiling: %d > ceiling %d" % (slots, ceiling)
     problem = "slot controller state invalid: %s" % ", ".join(bad) if bad else None
     if target is None or target == slots:
         return {"slots": None, "why": None, "held": hold_why, "problem": problem, "state": st}
