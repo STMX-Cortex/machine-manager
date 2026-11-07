@@ -1240,7 +1240,7 @@ class Supervisor:
             "free_pct": self.free_pct}, s)
         # last_change and last_down follow the tick's FINAL count (safe mode below may change slot_decide's target):
         # the decided state without slot_decide's own marks, marked again after safe mode
-        before, _ = mmdecide.slot_state_clean(ctl, now)
+        before, bad = mmdecide.slot_state_clean(ctl, now)
         decided = dict(r["state"])
         for k in ("last_change", "last_down"):
             if k in before:
@@ -1248,9 +1248,14 @@ class Supervisor:
             else:
                 decided.pop(k, None)
         self._log_hold(now, cur, r.get("held"))
-        if r.get("problem"):
-            self._slot_state_alert(now, "%s; no raise for one full hold (slots.raise_hold_after_down_minutes)"
-                                   % r["problem"])
+        # r["problem"] joins both texts below; each has its own alert (a bad pin holds no raise)
+        if bad:
+            self._slot_state_alert(now, "slot controller state invalid: %s; no raise for one full hold "
+                                   "(slots.raise_hold_after_down_minutes)" % ", ".join(bad))
+        pin_bad = mmdecide.slot_pin(override, now)[1]
+        if pin_bad:
+            self._slot_state_alert(now, "slot pin invalid: %s; override.json is not used, no pin (mm slots pin or "
+                                   "mm slots unpin replaces it)" % pin_bad, key="SLOT_STATE:pin", command="mm slots unpin")
         if safe and safe.get("slot_write") is None:
             to = min(cur, s["safe_mode.slots"])
             r = {"slots": to, "why": "safe mode: at most %d slots" % s["safe_mode.slots"]} if to < cur else {"slots": None}
@@ -1278,11 +1283,12 @@ class Supervisor:
         self.state["virtual_slots"] = r["slots"]
         self.log_decision(line)
 
-    def _slot_state_alert(self, now, text):
+    def _slot_state_alert(self, now, text, key="SLOT_STATE", command="mm explain SLOT_STATE"):
         """SLOT_STATE (ATTENTION, held HELD_SELF_S): the slot controller's state was invalid or unreadable and was
-        repaired (or, while its copy fails, is kept); one recovery-log line per new text."""
-        same = ((self.state.get("held") or {}).get("SLOT_STATE") or {}).get("text") == text
-        self.hold("SLOT_STATE", "SLOT_STATE", "ATTENTION", text, now + HELD_SELF_S, command="mm explain SLOT_STATE")
+        repaired (or, while its copy fails, is kept); SLOT_STATE:pin: override.json is not a valid pin
+        (mmdecide.slot_pin), so no pin is used. One recovery-log line per new text."""
+        same = ((self.state.get("held") or {}).get(key) or {}).get("text") == text
+        self.hold(key, "SLOT_STATE", "ATTENTION", text, now + HELD_SELF_S, command=command)
         if not same:  # a copy that keeps failing raises it on every tick: one log line per new text
             mmrecover.log("SLOT_STATE %s" % text, now)
 

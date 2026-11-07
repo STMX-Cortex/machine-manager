@@ -150,7 +150,8 @@ def slot_decide(state, inp, s):
     inp: now, mac_state, reasons, slots, busy, waiting, wx_waiting, override ({slots, until, reason} or null),
     events (list of 'timing-failure', 'guard-kill', 'trim'), free_pct (free memory %, None = unknown; raise_hold).
     Returns {"slots": new or None, "why": text or None, "held": the text of a GREEN raise that raise_hold refused, or
-    None, "problem": "slot controller state invalid: <keys>" on the tick slot_state_clean repaired it, or None,
+    None, "problem": "slot controller state invalid: <keys>" on the tick slot_state_clean repaired it, and/or
+    "slot pin invalid: <reason>" (slot_pin: no pin is used), joined by "; ", or None,
     "state": the new state}."""
     now, mac_state, reasons, slots = inp["now"], inp["mac_state"], inp.get("reasons", []), inp["slots"]
     st, bad = slot_state_clean(state, now)
@@ -169,9 +170,7 @@ def slot_decide(state, inp, s):
         st["demand_since"] = None
     elif st.get("demand_since") is None or st["demand_since"] > now:
         st["demand_since"] = now
-    pin = None
-    if override and override.get("until", 0) > now:
-        pin = max(1, min(16, int(override["slots"])))
+    pin, pin_bad = slot_pin(override, now)
     target = why = hold_why = None
     amber_events = [e for e in events if e in ("timing-failure", "guard-kill")]
     if mac_state == "RED":
@@ -202,7 +201,8 @@ def slot_decide(state, inp, s):
     if pin is None and (slots if target is None else target) > ceiling:
         # above the ceiling without a pin (a lowered ceiling, an ended pin): down to the ceiling at once, in any state
         target, why = ceiling, "above ceiling: %d > ceiling %d" % (slots, ceiling)
-    problem = "slot controller state invalid: %s" % ", ".join(bad) if bad else None
+    problem = "; ".join((["slot controller state invalid: %s" % ", ".join(bad)] if bad else []) +
+                        (["slot pin invalid: %s" % pin_bad] if pin_bad else [])) or None
     if target is None or target == slots:
         return {"slots": None, "why": None, "held": hold_why, "problem": problem, "state": st}
     return {"slots": target, "why": why, "held": None, "problem": problem, "state": slot_mark(st, slots, target, now)}
@@ -253,6 +253,36 @@ def slot_state_clean(state, now):
     if bad:
         st["raise_hold_since"] = now
     return st, bad
+
+
+def slot_pin(override, now):
+    """The active pin of override.json (mm slots pin) and why it is invalid: (slots clamped to 1..16, None) while it
+    is active, (None, None) for no pin (null, no file) or an ended one, else (None, the reason): no pin, the tick goes
+    on. Active: an object with a finite number `until` (not a bool) later than now and an integer `slots` (not a bool;
+    a float with an integer value, such as 7.0, counts, as in JSON Schema). An invalid `until` is reported even when
+    `slots` is valid; `slots` is checked only while `until` is later than now."""
+    if override is None:
+        return None, None
+    if not isinstance(override, dict):
+        return None, "not an object"
+    until = override.get("until")
+    if until is None:
+        return None, "until missing"
+    if not isinstance(until, (int, float)) or isinstance(until, bool):
+        return None, "until not a number"
+    try:
+        if not math.isfinite(float(until)):
+            return None, "until not finite"
+    except OverflowError:
+        return None, "until not finite"
+    if until <= now:
+        return None, None
+    n = override.get("slots")
+    if n is None:
+        return None, "slots missing"
+    if isinstance(n, bool) or not (isinstance(n, int) or (isinstance(n, float) and n.is_integer())):
+        return None, "slots not an integer"
+    return max(1, min(16, int(n))), None
 
 
 def slot_mark(state, cur, final, now):
