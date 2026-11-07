@@ -30,7 +30,8 @@ HOLD = "slots.raise_hold_after_down_minutes"
 
 
 def why(slots, ceiling=10):
-    """The contract's why text of the step down to the ceiling."""
+    """The why text of the step down to the ceiling (coder's api commit 3c43924): the count at the start of the tick,
+    then the ceiling. It replaces the AMBER, GREEN and event why texts."""
     return "above ceiling: %d > ceiling %d" % (slots, ceiling)
 
 
@@ -117,8 +118,7 @@ class OtherStatesAboveCeiling(unittest.TestCase):
 
     def test_amber_13_goes_to_10_not_12(self):
         r = decide(mac_state="AMBER", reasons=["free 49% < 50%"])
-        self.assertEqual(r["slots"], 10)
-        self.assertNotEqual(r["slots"], 12)
+        self.assertEqual((r["slots"], r["why"]), (10, why(13)), "the ceiling's why, not the AMBER why")
 
     def test_amber_regardless_of_the_step_interval(self):
         cases = (("no step down ever", calm_state(), {}),
@@ -129,21 +129,25 @@ class OtherStatesAboveCeiling(unittest.TestCase):
         for name, st, s_over in cases:
             with self.subTest(name):
                 r = mmdecide.slot_decide(st, inp(mac_state="AMBER", reasons=["x"]), settings(**s_over))
-                self.assertEqual(r["slots"], 10)
+                self.assertEqual((r["slots"], r["why"]), (10, why(13)))
 
     def test_amber_one_above_the_ceiling(self):
-        self.assertEqual(decide(slots=11, mac_state="AMBER", reasons=["x"])["slots"], 10)
+        r = decide(slots=11, mac_state="AMBER", reasons=["x"])
+        self.assertEqual((r["slots"], r["why"]), (10, "AMBER: x"), "the step ends AT the ceiling: today's AMBER why")
 
     def test_timing_failure_and_guard_kill_events_at_13(self):
         for event in ("timing-failure", "guard-kill"):
             for mac_state in ("GREEN", "STEADY"):
                 with self.subTest(event=event, mac_state=mac_state):
-                    self.assertEqual(decide(mac_state=mac_state, events=[event])["slots"], 10)
+                    r = decide(mac_state=mac_state, events=[event])
+                    self.assertEqual((r["slots"], r["why"]), (10, why(13)))
 
-    def test_every_classify_state_but_red_ends_at_the_ceiling(self):
-        for mac_state in ("GREEN", "STEADY", "AMBER"):
+    def test_every_state_but_red_ends_at_the_ceiling(self):
+        """The classify states and any other text (UNKNOWN, as the coder checked): all but RED end at the ceiling."""
+        for mac_state in ("GREEN", "STEADY", "AMBER", "UNKNOWN"):
             with self.subTest(mac_state=mac_state):
-                self.assertEqual(decide(mac_state=mac_state)["slots"], 10)
+                r = decide(mac_state=mac_state)
+                self.assertEqual((r["slots"], r["why"]), (10, why(13)))
 
 
 class RedUnchanged(unittest.TestCase):
@@ -187,7 +191,7 @@ class Pin(unittest.TestCase):
     def test_amber_under_an_active_pin_is_todays_one_step(self):
         """With an active pin the new rule does not apply: AMBER steps one down, as today."""
         r = decide(mac_state="AMBER", reasons=["x"], override=pin(13))
-        self.assertEqual(r["slots"], 12)
+        self.assertEqual((r["slots"], r["why"]), (12, "AMBER: x"))
 
     def test_the_tick_after_the_pin_ends_goes_to_the_ceiling(self):
         end = NOW + 120
@@ -282,8 +286,14 @@ class NormalStepDown(unittest.TestCase):
         s = settings()
         st = decide(mac_state="AMBER", reasons=["x"], s=s)["state"]
         self.assertEqual(st["last_down"], NOW)
-        self.assertIsNone(mmdecide.slot_decide(st, inp(now=NOW + 10 * MIN, slots=9), s)["slots"])
-        self.assertEqual(mmdecide.slot_decide(st, inp(now=NOW + 15 * MIN, slots=9), s)["slots"], 10)
+        raised = None
+        for k in range(1, 21):  # GREEN from NOW + 1 min, the owner's 9 in the file, one tick a minute
+            r = mmdecide.slot_decide(st, inp(now=NOW + k * MIN, slots=9), s)
+            st = r["state"]
+            if r["slots"] is not None:
+                raised = (k, r["slots"])
+                break
+        self.assertEqual(raised, (15, 10), "the hold (15 min), not raise_green_minutes (5)")
 
     def test_one_change_then_quiet(self):
         """One tick after another at GREEN with demand: one change (13 -> 10), then none for an hour."""
@@ -561,7 +571,8 @@ class Supervisor(RecoveryBase):
         sup, f = self.build(clock, dry_run=True)
         self.assert_one_would_line(sup, clock, f)
 
-    # ---- safe mode (valid safe.json): slot writes stay on, but only down (today's rule)
+    # ---- safe mode (valid safe.json): slot writes stay on (coordinator, correction of contract item 4): the first
+    # tick writes min(cur, safe_mode.slots); after that every step down goes through and only raises are refused
 
     def test_safe_mode_lowers_to_safe_mode_slots_as_today(self):
         clock = {"t": NOW}
@@ -577,9 +588,11 @@ class Supervisor(RecoveryBase):
         sup, f = self.build(clock, **{"safe_mode.slots": 12})
         mmrecover.enter_safe("test", NOW)
         self.ticks(sup, clock, 1)
-        self.assertLessEqual(self.count(f), 12, self.decisions())
+        self.assertEqual(self.count(f), 12, self.decisions())
+        self.assertIn("SET slots 13 -> 12: safe mode: at most 12 slots", self.decisions())
         self.ticks(sup, clock, 2)
         self.assertEqual(self.count(f), 10, self.decisions())
+        self.assertIn("SET slots 12 -> 10: " + why(12), self.decisions())
 
 
 del RecoveryBase
