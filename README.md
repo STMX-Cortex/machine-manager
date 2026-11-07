@@ -541,7 +541,12 @@ free memory is unknown; with a margin, unknown free memory gives no raise), and 
 (default 15, range 0-240; 0 = off) since the last step down. Every hold must pass, so the longest one wins. A raise
 that only these two rules refuse writes one `HOLD slots N: raise held: ...` line to `decisions.log` (the free margin,
 unknown free memory, or the time since the step down), at most once per 10 min while the same kind of hold lasts.
-Steps down, RED, a pin and `mm event` events are not changed by them. The count's last step down and last change
+Steps down, RED, a pin and `mm event` events are not changed by them. Without an active pin, a count that would end
+the tick above `slots.ceiling` (after the ceiling is lowered, or when a pin above it ends) goes to the ceiling at once,
+in one write, in any state but RED (RED goes to the floor, which is never above the ceiling); the reason is
+`above ceiling: N > ceiling M`. It is a step down, so the raise hold follows it. An active pin above the ceiling is
+kept until it ends. A count below `slots.floor` (after the floor is raised) is not raised to it; only a GREEN raise
+with demand, or a pin, raises it. The count's last step down and last change
 follow the tick's final count, also when safe mode lowers it. The controller's saved times (in
 `state/controller.json`) must be finite numbers at most 60 s in the future; null is valid only in the GREEN and
 demand spans (`green_since`, `demand_since`), which the controller itself sets to null. An invalid one, a `controller`
