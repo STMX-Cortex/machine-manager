@@ -418,6 +418,22 @@ class Vectors(unittest.TestCase):
         self.assertTrue(ended, "a vector with an ended pin above the ceiling that steps down to it")
 
 
+    def test_new_cases_red_and_a_lower_pin_keep_todays_rules(self):
+        """RED above the ceiling goes to the floor with the RED why; an active pin under the count sets the pin."""
+        red = [(case, v, s) for case, v, s in self.above() if v["input"]["inp"]["mac_state"] == "RED"]
+        lower = [(case, v, s) for case, v, s in self.above() if pin_active(v) and v["input"]["inp"]["mac_state"] != "RED"
+                 and v["input"]["inp"]["override"]["slots"] < v["input"]["inp"]["slots"]]
+        self.assertTrue(red, "a RED vector above the ceiling")
+        self.assertTrue(lower, "a vector with an active pin under a count above the ceiling")
+        for case, v, s in red:
+            with self.subTest(case):
+                self.assertEqual(v["expected"]["slots"], s["slots.floor"])
+                self.assertTrue(v["expected"]["why"].startswith("RED: "), v["expected"]["why"])
+        for case, v, s in lower:
+            with self.subTest(case):
+                self.assertEqual(v["expected"]["slots"], v["input"]["inp"]["override"]["slots"])
+                self.assertTrue(v["expected"]["why"].startswith("pin: "), v["expected"]["why"])
+
 # ------------------------------------------------------------------------------------------- 4. the supervisor
 
 class Supervisor(RecoveryBase):

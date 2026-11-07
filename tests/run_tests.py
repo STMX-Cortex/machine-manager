@@ -43,7 +43,7 @@ GROUPS = {
         for path in sorted(glob.glob(os.path.join(HERE, "test_slot_trial*review*.py")))
     ],
     "slot_hysteresis": [path.stem for path in sorted(Path(HERE).glob("test_slot_hysteresis*.py"))],  # raise margin, hold after down, mm on window
-    "slot_ceiling": ["test_slot_ceiling"],  # a count above slots.ceiling steps down to it at once; pins, no-write modes, vectors
+    "slot_ceiling": [path.stem for path in sorted(Path(HERE).glob("test_slot_ceiling*.py"))],  # a count above slots.ceiling steps down to it at once; pins, no-write modes, vectors
     "guard_settings": ["test_guard_settings"],  # names.disk_command, slots.red_comp_mb, slots.green_disk_gb
     "pause_readings": ["test_pause_readings"],  # complete growth windows, cap resets and recovery failures
     "pause_max": ["test_pause_max"],  # pause_newest_call.max_minutes: a pause ends after it, never at a critical RED
