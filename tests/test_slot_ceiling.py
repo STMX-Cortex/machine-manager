@@ -373,8 +373,8 @@ def slot_vectors():
 
 
 def pin_active(v):
-    o = v["input"]["inp"].get("override")
-    return bool(o) and o.get("until", 0) > v["input"]["inp"]["now"]
+    """An active, valid pin (mmdecide.slot_pin, done2 a37c630): a malformed record is no pin."""
+    return mmdecide.slot_pin(v["input"]["inp"].get("override"), v["input"]["inp"]["now"])[0] is not None
 
 
 class Vectors(unittest.TestCase):
