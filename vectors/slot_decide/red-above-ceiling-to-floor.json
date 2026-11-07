@@ -1,0 +1,38 @@
+{
+ "case": "red-above-ceiling-to-floor",
+ "expected": {
+  "held": null,
+  "problem": null,
+  "slots": 3,
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": null,
+   "last_change": 1800000000.0,
+   "last_down": 1800000000.0,
+   "last_red": 1800000000.0
+  },
+  "why": "RED: free 30% < 35%"
+ },
+ "function": "slot_decide",
+ "input": {
+  "inp": {
+   "busy": 13,
+   "free_pct": 80.0,
+   "mac_state": "RED",
+   "now": 1800000000.0,
+   "reasons": [
+    "free 30% < 35%"
+   ],
+   "slots": 13,
+   "waiting": 2,
+   "wx_waiting": false
+  },
+  "state": {
+   "demand_since": 1799996400.0,
+   "green_since": 1799996400.0,
+   "last_change": 1799996400.0
+  }
+ },
+ "settings": "base",
+ "settings_over": {}
+}
